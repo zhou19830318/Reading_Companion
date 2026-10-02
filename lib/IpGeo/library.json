@@ -1,0 +1,7 @@
+{
+  "name": "IpGeo",
+  "version": "1.0.0",
+  "description": "Maps I18n language codes to ip-api.com language subdomains for device-side IP geolocation",
+  "frameworks": "*",
+  "platforms": "*"
+}

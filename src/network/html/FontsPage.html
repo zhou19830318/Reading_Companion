@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CrossPoint Reader - Fonts</title>
+    <style>
+      .family {
+        border-bottom: 1px solid var(--border-color);
+        padding: 12px 0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+      }
+      .family:last-child { border-bottom: none; }
+      .family-info { flex: 1; min-width: 0; }
+      .family-info h3 { margin-bottom: 4px; }
+      .family-meta { color: var(--label-color); font-size: 0.9em; }
+      .upload-form {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .upload-form input[type="file"] { flex: 1; min-width: 200px; }
+      #status { margin-top: 10px; padding: 10px 12px; border-radius: var(--radius-sm); display: none; }
+      .status-ok { display: block !important; }
+      .status-err { display: block !important; }
+      .empty { color: var(--label-color); text-align: center; padding: 20px; }
+      .hint { color: var(--dim); font-size: 12.5px; line-height: 1.6; margin: 10px 0 0; }
+    
+/* AIWATCH-CORE:START -- edit scripts/sync_web_core.py, not this block */
+:root{
+  --bg:#0a0e14;--card:#13181f;--border:#262d38;--text:#e6edf3;--dim:#8b949e;
+  --green:#3fb950;--red:#f85149;--orange:#d29922;--blue:#58a6ff;--purple:#bc8cff;
+  --card-2:#171d26;--card-hi:#1c2330;--accent-glow:rgba(88,166,255,.18);
+  --ring:rgba(255,255,255,.06);--shadow:0 1px 0 rgba(255,255,255,.04),0 8px 24px rgba(0,0,0,.35);
+  --radius:14px;--radius-sm:10px;
+  --font-color:var(--text);--title-color:var(--text);--card-bg:var(--card);
+  --label-color:var(--dim);--border-color:var(--border);
+  --accent-color:var(--green);--accent-hover-color:#34a84a;--toggle-bg:var(--border);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  background:
+    radial-gradient(1100px 600px at 100% -10%,rgba(88,166,255,.07),transparent 60%),
+    radial-gradient(900px 500px at -10% 0%,rgba(188,140,255,.06),transparent 55%),
+    var(--bg);
+  background-attachment:fixed;color:var(--text);min-height:100vh;
+  -webkit-font-smoothing:antialiased;line-height:1.5;margin:0;padding:0;
+}
+/* Header — non-sticky, exactly like AIWatch, so the tab row never overlaps */
+.header{
+  position:relative;background:linear-gradient(180deg,rgba(28,35,48,.85),rgba(19,24,31,.9));
+  backdrop-filter:blur(8px);border-bottom:1px solid var(--border);
+  padding:14px 22px;display:flex;align-items:center;gap:12px;
+}
+.header h1{font-size:18px;font-weight:700;letter-spacing:.3px;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;flex:0 1 auto;max-width:60%;color:var(--text);border:0;padding:0;margin:0}
+.header h1 span{color:var(--green);font-weight:500;font-size:12px;margin-left:10px;opacity:.9}
+.header .hdr-status{font-size:13px;color:var(--dim);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;flex:1 1 auto;text-align:right}
+.header .btn{flex:0 0 auto}
+/* Tabs — one per page, links instead of AIWatch's SPA panel switcher */
+.tabs{display:flex;gap:2px;background:var(--card);border-bottom:1px solid var(--border);
+  overflow-x:auto;padding:0 8px;scrollbar-width:thin}
+.tabs::-webkit-scrollbar{height:5px}
+.tabs::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+.tab{padding:11px 16px;cursor:pointer;color:var(--dim);border-bottom:2px solid transparent;
+  font-size:13.5px;font-weight:500;white-space:nowrap;text-decoration:none;
+  transition:color .18s,background .18s,border-color .18s;border-radius:8px 8px 0 0}
+.tab:hover{color:var(--text);background:rgba(255,255,255,.025)}
+.tab.active{color:var(--text);border-bottom-color:var(--blue);
+  background:linear-gradient(180deg,transparent,rgba(88,166,255,.07))}
+.content{max-width:860px;margin:0 auto;padding:18px 16px 48px}
+.card{
+  background:linear-gradient(180deg,var(--card-hi),var(--card));border:1px solid var(--border);
+  border-radius:var(--radius);padding:18px;margin:0 0 14px;box-shadow:var(--shadow);
+}
+.card h2,.card h3{font-size:15px;font-weight:650;margin:0 0 14px;color:var(--text);
+  display:flex;align-items:center;gap:9px}
+/* Stat grid (AIWatch dashboard) */
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}
+.stat{text-align:center;padding:10px 6px;border-radius:var(--radius-sm);
+  background:rgba(255,255,255,.025);border:1px solid var(--ring)}
+.stat .val{font-size:20px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;line-height:1.2}
+.stat .lbl{font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.6px;
+  margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Forms — label above the control, full width */
+.form-group{margin-bottom:14px}
+.form-group label{display:block;font-size:12.5px;color:var(--dim);margin-bottom:6px;letter-spacing:.2px}
+.form-group input,.form-group select,.form-group textarea{
+  width:100%;padding:9px 12px;background:var(--bg);border:1px solid var(--border);
+  border-radius:var(--radius-sm);color:var(--text);font-size:14px;outline:none;
+  transition:border-color .15s,box-shadow .15s}
+.form-group input:focus,.form-group select:focus{border-color:var(--blue);
+  box-shadow:0 0 0 3px var(--accent-glow)}
+.form-group input::placeholder{color:#5c6672}
+/* Range sliders — AIWatch index.html:78-80 (6px track, glowing 16px blue thumb) */
+.form-group input[type=range]{-webkit-appearance:none;appearance:none;padding:0;height:6px;
+  border-radius:6px;background:var(--border);border:none}
+.form-group input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;
+  border-radius:50%;background:var(--blue);cursor:pointer;border:2px solid #0a0e14;
+  box-shadow:0 0 8px rgba(88,166,255,.6)}
+.form-group input[type=range]::-moz-range-thumb{width:16px;height:16px;border-radius:50%;
+  background:var(--blue);cursor:pointer;border:2px solid #0a0e14}
+.range-row{display:flex;align-items:center;gap:10px}
+.range-row input[type=range]{flex:1}
+.range-val{display:inline-block;width:40px;text-align:right;color:var(--blue);font-weight:700}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:500px){.form-row{grid-template-columns:1fr}.header h1{max-width:48%}}
+/* Buttons */
+.btn{padding:8px 16px;border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;
+  font-size:13px;font-weight:550;background:var(--card-2);color:var(--text);
+  transition:transform .12s,box-shadow .15s,background .15s,border-color .15s}
+.btn:hover{background:var(--card-hi);border-color:#39414d}
+.btn:active{transform:translateY(1px)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn-primary{background:linear-gradient(180deg,#46c75e,#34a84a);color:#04140a;border-color:transparent;
+  box-shadow:0 4px 14px rgba(63,185,80,.28)}
+.btn-primary:hover{background:linear-gradient(180deg,#52d368,#3bb454);
+  box-shadow:0 6px 18px rgba(63,185,80,.38);border-color:transparent}
+.btn-danger{background:linear-gradient(180deg,#fa5d54,#e4423a);color:#fff;border-color:transparent;
+  box-shadow:0 4px 14px rgba(248,81,73,.26)}
+.btn-danger:hover{background:linear-gradient(180deg,#fc6c63,#e84b43);
+  box-shadow:0 6px 18px rgba(248,81,73,.36);border-color:transparent}
+.btn-secondary{background:var(--card-2);color:var(--text);border:1px solid var(--border)}
+.btn-secondary:hover{background:var(--card-hi);border-color:#39414d}
+.btn-row{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+/* This project's own button class names, restyled onto the AIWatch system */
+.save-btn,.btn-small,.btn-add,.btn-save-server,.action-btn{padding:8px 16px;
+  border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-size:13px;
+  font-weight:550;background:var(--card-2);color:var(--text);
+  transition:transform .12s,box-shadow .15s,background .15s,border-color .15s}
+.save-btn:hover,.btn-small:hover,.btn-add:hover,.btn-save-server:hover,.action-btn:hover{
+  background:var(--card-hi);border-color:#39414d}
+.save-btn:active,.btn-small:active,.btn-add:active,.btn-save-server:active,.action-btn:active{
+  transform:translateY(1px)}
+.save-btn:disabled,.btn-small:disabled,.btn-add:disabled,.btn-save-server:disabled,
+.action-btn:disabled{opacity:.5;cursor:not-allowed}
+.save-btn,.btn-save-server,.btn-add,.upload-action-btn{
+  background:linear-gradient(180deg,#46c75e,#34a84a);color:#04140a;border-color:transparent;
+  box-shadow:0 4px 14px rgba(63,185,80,.28)}
+.save-btn:hover,.btn-save-server:hover,.btn-add:hover,.upload-action-btn:hover{
+  background:linear-gradient(180deg,#52d368,#3bb454);box-shadow:0 6px 18px rgba(63,185,80,.38);
+  border-color:transparent}
+.btn-delete,.delete-action-btn{background:linear-gradient(180deg,#fa5d54,#e4423a);color:#fff;
+  border-color:transparent;box-shadow:0 4px 14px rgba(248,81,73,.26)}
+.btn-delete:hover,.delete-action-btn:hover{background:linear-gradient(180deg,#fc6c63,#e84b43);
+  box-shadow:0 6px 18px rgba(248,81,73,.36);border-color:transparent}
+.save-btn{padding:12px 32px;font-size:14px;font-weight:650}
+/* Toggles — AIWatch 44x24 pill on both class spellings */
+.toggle,.toggle-switch{position:relative;width:44px;height:24px;display:inline-block;flex-shrink:0;
+  vertical-align:middle}
+.toggle input,.toggle-switch input{opacity:0;width:0;height:0}
+.toggle .slider,.toggle-slider{position:absolute;inset:0;background:var(--border);border-radius:24px;
+  cursor:pointer;transition:background .25s}
+.toggle .slider:before,.toggle-slider:before{content:"";position:absolute;height:18px;width:18px;
+  left:3px;bottom:3px;background:#fff;border-radius:50%;transition:transform .25s;
+  box-shadow:0 1px 3px rgba(0,0,0,.4)}
+.toggle input:checked+.slider,.toggle-switch input:checked+.toggle-slider{
+  background:linear-gradient(180deg,#46c75e,#34a84a)}
+.toggle input:checked+.slider:before,.toggle-switch input:checked+.toggle-slider:before{
+  transform:translateX(20px)}
+/* Toast (AIWatch bottom-right) */
+.toast{position:fixed;bottom:22px;right:22px;padding:11px 18px;border-radius:10px;font-size:13.5px;
+  font-weight:500;z-index:999;opacity:0;transform:translateY(6px);
+  transition:opacity .3s,transform .3s;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,.45);
+  max-width:min(420px,calc(100vw - 44px))}
+.toast.show{opacity:1;transform:none}
+.toast.ok{background:linear-gradient(180deg,#46c75e,#34a84a);color:#04140a}
+.toast.err{background:linear-gradient(180deg,#fa5d54,#e4423a);color:#fff}
+/* Spinner (shared base so every page gets the same 48px ring) */
+.loader{width:48px;height:48px;border:5px solid var(--border);border-bottom-color:var(--blue);
+  border-radius:50%;display:inline-block;box-sizing:border-box;animation:rotation 1s linear infinite}
+@keyframes rotation{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+/* Inline feedback banners (pages that are not on the toast API yet) */
+.status-ok,.message.success{background:rgba(63,185,80,.12);color:var(--green);
+  border:1px solid rgba(63,185,80,.35)}
+.status-err,.message.error{background:rgba(248,81,73,.12);color:var(--red);
+  border:1px solid rgba(248,81,73,.35)}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:6px}
+::-webkit-scrollbar-thumb:hover{background:#39414d}
+@keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+/* AIWATCH-CORE:END */
+</style>
+  </head>
+  <body>
+    <div class="header">
+      <h1 data-en="📚 CrossPoint Reader" data-cn="📚 CrossPoint 阅读器"
+          data-en-title="CrossPoint Reader - Fonts" data-cn-title="CrossPoint 阅读器 - 字体">📚 CrossPoint Reader</h1>
+      <span class="hdr-status"></span>
+    </div>
+
+    <div class="tabs">
+      <a class="tab" href="/" data-en="Home" data-cn="首页">Home</a>
+      <a class="tab" href="/files" data-en="File Manager" data-cn="文件管理">File Manager</a>
+      <a class="tab" href="/settings" data-en="Settings" data-cn="设置">Settings</a>
+      <a class="tab active" href="/fonts" data-en="Fonts" data-cn="字体">Fonts</a>
+    </div>
+
+    <div class="content">
+      <div class="card">
+        <h3>🔤 <span data-en="Installed Fonts" data-cn="已安装字体">Installed Fonts</span></h3>
+        <div id="families"><p class="empty" data-en="Loading..." data-cn="加载中...">Loading...</p></div>
+      </div>
+
+      <div class="card">
+        <h3>📤 <span data-en="Upload Font" data-cn="上传字体">Upload Font</span></h3>
+        <form class="upload-form" id="uploadForm">
+          <input type="file" id="fontFiles" webkitdirectory directory multiple required />
+          <button type="submit" class="btn btn-primary" data-en="Upload" data-cn="上传">Upload</button>
+        </form>
+        <p id="pickedInfo" class="family-meta" style="margin: 8px 0 0;"></p>
+        <div id="status"></div>
+        <p class="hint"
+           data-en="Pick the folder that holds one family's .cpfont files. Family names may only contain A-Z, a-z, 0-9, _ and -."
+           data-cn="选择包含同一字体族 .cpfont 文件的文件夹。字体族名只允许 A-Z、a-z、0-9、_ 和 -。">
+          Pick the folder that holds one family's .cpfont files.
+        </p>
+      </div>
+
+      <div class="card">
+        <p class="family-meta" style="text-align: center; margin: 0;"
+           data-en="CrossPoint E-Reader • Open Source" data-cn="CrossPoint 电子书阅读器 • 开源">
+          CrossPoint E-Reader • Open Source
+        </p>
+      </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+  <script>
+/* AIWATCH-CORE:START -- edit scripts/sync_web_core.py, not this block */
+let lang = 'en';
+try {
+  const saved = localStorage.getItem('cp-lang');
+  if (saved === 'cn' || saved === 'en') lang = saved;
+  else if ((navigator.language || '').toLowerCase().indexOf('zh') === 0) lang = 'cn';
+} catch (e) { /* private mode: keep the default */ }
+
+// Server language code for endpoints that produce localized strings.
+function apiLang() { return lang === 'cn' ? 'zh-Hans' : 'en'; }
+
+// Page string table: window.CP_STRINGS = { key: { en: '…', cn: '…' } }
+function tr(key) {
+  const s = (window.CP_STRINGS || {})[key];
+  if (!s) return key;
+  return lang === 'cn' ? s.cn : s.en;
+}
+// Attribute pair for JS-built markup, so the next updateLang() can rewrite it
+// in place without re-rendering (and dropping typed input).
+function trAttr(key) {
+  const s = (window.CP_STRINGS || {})[key];
+  if (!s) return '';
+  return ' data-en="' + s.en + '" data-cn="' + s.cn + '"';
+}
+
+// Bottom-right feedback, same behaviour as AIWatch's toast(msg, ok).
+let toastTimer = 0;
+function toast(msg, ok) {
+  const el = document.getElementById('toast');
+  if (!el) return;
+  el.textContent = msg;
+  el.className = 'toast show ' + (ok ? 'ok' : 'err');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function() { el.className = 'toast'; }, 3000);
+}
+
+function updateLang(skipPage) {
+  document.querySelectorAll('[data-en]').forEach(function(el) {
+    el.textContent = el.getAttribute('data-' + lang);
+  });
+  document.querySelectorAll('[data-en-ph]').forEach(function(el) {
+    el.placeholder = el.getAttribute('data-' + lang + '-ph') || el.placeholder;
+  });
+  document.documentElement.lang = lang === 'cn' ? 'zh-Hans' : 'en';
+  const title = document.querySelector('.header h1');
+  if (title) document.title = (lang === 'cn' ? title.dataset.cnTitle : title.dataset.enTitle) || document.title;
+  if (!skipPage && typeof onLangChange === 'function') onLangChange();
+}
+
+// The switcher itself, appended to the header like AIWatch does (index.html:552).
+const cpHeader = document.querySelector('.header');
+if (cpHeader) {
+  const langBtn = document.createElement('button');
+  langBtn.className = 'btn btn-secondary';
+  langBtn.style.padding = '4px 8px';
+  langBtn.style.fontSize = '11px';
+  langBtn.textContent = '中文 / EN';
+  langBtn.onclick = function() {
+    lang = lang === 'en' ? 'cn' : 'en';
+    try { localStorage.setItem('cp-lang', lang); } catch (e) { /* ignore */ }
+    updateLang();
+  };
+  cpHeader.appendChild(langBtn);
+}
+// Header status line: language-neutral (model, IP, free heap) so it needs no
+// translation — AIWatch uses the same slot for its connection state.
+fetch('/api/status').then(function(r) { return r.json(); }).then(function(d) {
+  const el = document.querySelector('.hdr-status');
+  if (!el || !d) return;
+  const kb = d.freeHeap ? Math.round(d.freeHeap / 1024) : 0;
+  el.textContent = (d.device || '') + (d.ip ? ' · ' + d.ip : '') + (kb ? ' · ' + kb + ' KB' : '');
+}).catch(function() { /* status line is optional */ });
+
+updateLang(true);
+/* AIWATCH-CORE:END */
+
+    window.CP_STRINGS = {
+      loading:          { en: 'Loading...', cn: '加载中...' },
+      noFonts:          { en: 'No fonts installed', cn: '尚未安装字体' },
+      delete:           { en: 'Delete', cn: '删除' },
+      deleteFamily:     { en: 'Delete font family', cn: '删除字体族' },
+      failedLoad:       { en: 'Failed to load font list', cn: '字体列表加载失败' },
+      deleting:         { en: 'Deleting', cn: '正在删除' },
+      deleted:          { en: 'Deleted', cn: '已删除' },
+      deleteFailed:     { en: 'Failed to delete', cn: '删除失败' },
+      deleteErr:        { en: 'Delete error:', cn: '删除出错：' },
+      noCpfont:         { en: 'No .cpfont files found in the selected folder.', cn: '所选文件夹中没有 .cpfont 文件。' },
+      filesToFamily:    { en: '{n} files → family "{f}"', cn: '{n} 个文件 → 字体族“{f}”' },
+      fileToFamily:     { en: '{n} file → family "{f}"', cn: '{n} 个文件 → 字体族“{f}”' },
+      noFilesSelected:  { en: 'No .cpfont files selected.', cn: '未选择任何 .cpfont 文件。' },
+      singleFamily:     { en: 'Please select files from a single font family.', cn: '请选择同一字体族的文件。' },
+      uploading:        { en: 'Uploading {n}/{total}: {name}', cn: '正在上传 {n}/{total}：{name}' },
+      failedOn:         { en: 'Failed on', cn: '失败于' },
+      uploadErrOn:      { en: 'Upload error on', cn: '上传出错：' },
+      uploadedOne:      { en: 'Uploaded {n} file to family "{f}".', cn: '已上传 {n} 个文件到字体族“{f}”。' },
+      uploadedMany:     { en: 'Uploaded {n} files to family "{f}".', cn: '已上传 {n} 个文件到字体族“{f}”。' }
+    };
+
+    function fill(tpl, vars) {
+      return tpl.replace(/\{(\w+)\}/g, function(m, k) { return vars[k] !== undefined ? vars[k] : m; });
+    }
+
+    function formatSize(bytes) {
+      if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + ' MB';
+      if (bytes >= 1024) return (bytes / 1024).toFixed(0) + ' KB';
+      return bytes + ' B';
+    }
+
+    // The list is built in JS, so a language switch has to rebuild it.
+    function onLangChange() { loadFonts(); }
+
+    async function loadFonts() {
+      const el = document.getElementById('families');
+      try {
+        const res = await fetch('/api/fonts');
+        const data = await res.json();
+        // Build rows with DOM APIs and textContent so on-device family names
+        // (which can contain arbitrary characters) cannot break markup or
+        // execute script via innerHTML / inline onclick interpolation.
+        el.replaceChildren();
+        if (!data.families || data.families.length === 0) {
+          const p = document.createElement('p');
+          p.className = 'empty';
+          p.textContent = tr('noFonts');
+          el.appendChild(p);
+          return;
+        }
+        for (const f of data.families) {
+          const row = document.createElement('div');
+          row.className = 'family';
+
+          const info = document.createElement('div');
+          info.className = 'family-info';
+          const h3 = document.createElement('h3');
+          h3.textContent = f.name;
+          info.appendChild(h3);
+          const meta = document.createElement('span');
+          meta.className = 'family-meta';
+          const sizes = (f.sizes || []).join(', ');
+          const filesSizes = (f.files || []).map(fi => formatSize(fi.size)).join(' + ');
+          meta.textContent = sizes + 'pt · ' + filesSizes;
+          info.appendChild(meta);
+
+          const btn = document.createElement('button');
+          btn.className = 'btn btn-danger';
+          btn.textContent = tr('delete');
+          // Capture name in the closure rather than interpolating into onclick.
+          const familyName = f.name;
+          btn.addEventListener('click', () => deleteFamily(familyName));
+
+          row.appendChild(info);
+          row.appendChild(btn);
+          el.appendChild(row);
+        }
+      } catch (e) {
+        el.replaceChildren();
+        const p = document.createElement('p');
+        p.className = 'empty';
+        p.textContent = tr('failedLoad');
+        el.appendChild(p);
+      }
+    }
+
+    async function deleteFamily(name) {
+      if (!confirm(tr('deleteFamily') + ' "' + name + '"?')) return;
+      const status = document.getElementById('status');
+      status.className = '';
+      status.style.display = 'block';
+      status.textContent = tr('deleting') + ' ' + name + '...';
+      try {
+        const res = await fetch('/api/fonts/delete', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({family: name})
+        });
+        if (res.ok) {
+          status.className = 'status-ok';
+          status.textContent = tr('deleted') + ' "' + name + '".';
+        } else {
+          status.className = 'status-err';
+          status.textContent = tr('deleteFailed') + ' "' + name + '".';
+        }
+      } catch (err) {
+        status.className = 'status-err';
+        status.textContent = tr('deleteErr') + ' ' + err.message;
+      }
+      await loadFonts();
+    }
+
+    // Derive family name from a .cpfont filename: take everything before the
+    // last '-' or '_' (that separator precedes the size suffix, e.g. Bookerly_12.cpfont).
+    function familyFromFilename(name) {
+      const stem = name.replace(/\.cpfont$/i, '');
+      const cut = Math.max(stem.lastIndexOf('-'), stem.lastIndexOf('_'));
+      return cut > 0 ? stem.slice(0, cut) : stem;
+    }
+
+    // Sanitize to match firmware's [A-Za-z0-9_-]+ pattern.
+    function sanitizeFamily(raw) {
+      return raw.replace(/[^A-Za-z0-9_-]/g, '_');
+    }
+
+    function cpfontFilesOnly(fileList) {
+      return Array.from(fileList).filter(f => /\.cpfont$/i.test(f.name));
+    }
+
+    document.getElementById('fontFiles').addEventListener('change', function() {
+      const info = document.getElementById('pickedInfo');
+      const files = cpfontFilesOnly(this.files);
+      if (files.length === 0) {
+        info.textContent = tr('noCpfont');
+        return;
+      }
+      const family = sanitizeFamily(familyFromFilename(files[0].name));
+      info.textContent = fill(tr(files.length === 1 ? 'fileToFamily' : 'filesToFamily'),
+                              { n: files.length, f: family });
+    });
+
+    document.getElementById('uploadForm').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      const status = document.getElementById('status');
+      const files = cpfontFilesOnly(document.getElementById('fontFiles').files);
+      if (files.length === 0) {
+        status.className = 'status-err';
+        status.style.display = 'block';
+        status.textContent = tr('noFilesSelected');
+        return;
+      }
+
+      // A directory picker may include files from multiple family subfolders.
+      // Reject that up front — otherwise files[0]'s family is silently reused
+      // for every upload, corrupting the install layout.
+      const families = [...new Set(files.map(f => sanitizeFamily(familyFromFilename(f.name))))];
+      if (families.length !== 1) {
+        status.className = 'status-err';
+        status.style.display = 'block';
+        status.textContent = tr('singleFamily');
+        return;
+      }
+      const family = families[0];
+
+      status.className = '';
+      status.style.display = 'block';
+
+      let uploaded = 0;
+      for (const file of files) {
+        status.textContent = fill(tr('uploading'),
+                                  { n: uploaded + 1, total: files.length, name: file.name });
+        const formData = new FormData();
+        formData.append('family', family);
+        formData.append('file', file, file.name);
+        try {
+          const res = await fetch('/api/fonts/upload', { method: 'POST', body: formData });
+          const data = await res.json();
+          if (!data.ok) {
+            status.className = 'status-err';
+            status.textContent = tr('failedOn') + ' ' + file.name + ': ' + (data.error || 'unknown error');
+            await loadFonts();
+            return;
+          }
+        } catch (err) {
+          status.className = 'status-err';
+          status.textContent = tr('uploadErrOn') + ' ' + file.name + ': ' + err.message;
+          await loadFonts();
+          return;
+        }
+        uploaded++;
+      }
+
+      status.className = 'status-ok';
+      status.textContent = fill(tr(uploaded === 1 ? 'uploadedOne' : 'uploadedMany'),
+                                { n: uploaded, f: family });
+      await loadFonts();
+    });
+
+    loadFonts();
+  </script>
+  </body>
+</html>
