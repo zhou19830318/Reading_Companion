@@ -352,17 +352,21 @@ void LyraTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
   const int* buttonPositions = gpio.deviceIsX3() ? x3ButtonPositions : x4ButtonPositions;
 #endif
   const char* labels[] = {btn1, btn2, btn3, btn4};
+  HintBox boxes[4];
+  layoutHintBoxes(renderer, SMALL_FONT_ID, labels, 4, buttonPositions, buttonWidth, 4, renderer.getScreenWidth() - 4,
+                  boxes);
 
   for (int i = 0; i < 4; i++) {
-    const int x = buttonPositions[i];
-    if (labels[i] != nullptr && labels[i][0] != '\0') {
+    const int x = boxes[i].pos;
+    const int width = boxes[i].length;
+    if (!boxes[i].label.empty()) {
       // Draw the filled background and border for a FULL-sized button
-      renderer.fillRoundedRect(x, pageHeight - buttonY, buttonWidth, buttonHeight, cornerRadius, Color::White);
-      renderer.drawRoundedRect(x, pageHeight - buttonY, buttonWidth, buttonHeight, 1, cornerRadius, true, true, false,
-                               false, true);
-      const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, labels[i]);
-      const int textX = x + (buttonWidth - 1 - textWidth) / 2;
-      renderer.drawText(SMALL_FONT_ID, textX, pageHeight - buttonY + textYOffset, labels[i]);
+      renderer.fillRoundedRect(x, pageHeight - buttonY, width, buttonHeight, cornerRadius, Color::White);
+      renderer.drawRoundedRect(x, pageHeight - buttonY, width, buttonHeight, 1, cornerRadius, true, true, false, false,
+                               true);
+      const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, boxes[i].label.c_str());
+      const int textX = x + (width - 1 - textWidth) / 2;
+      renderer.drawText(SMALL_FONT_ID, textX, pageHeight - buttonY + textYOffset, boxes[i].label.c_str());
     } else {
       // Draw the filled background and border for a SMALL-sized button
       renderer.fillRoundedRect(x, pageHeight - smallButtonHeight, buttonWidth, smallButtonHeight, cornerRadius,
@@ -377,49 +381,48 @@ void LyraTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
 
 void LyraTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* topBtn, const char* bottomBtn) const {
   const int screenWidth = renderer.getScreenWidth();
+  const int screenHeight = renderer.getScreenHeight();
   constexpr int buttonWidth = LyraMetrics::values.sideButtonHintsWidth;  // Width on screen (height when rotated)
   constexpr int buttonHeight = 78;                                       // Height on screen (width when rotated)
   constexpr int buttonMargin = 0;
 
+  // Rotated text runs along the box's height, so a label wider than 78 px used to
+  // spill out of the box's ends. Each box grows along the side to hold its label
+  // and the label is ellipsized if even that is not enough.
+  const char* labels[] = {topBtn, bottomBtn};
+  const auto fitBox = [&](const char* label, const int anchorPos, const int low, const int high) {
+    const char* const single[1] = {label};
+    HintBox box;
+    layoutHintBoxes(renderer, SMALL_FONT_ID, single, 1, &anchorPos, buttonHeight, low, high, &box);
+    return box;
+  };
+  const auto drawBox = [&](const int x, const HintBox& box, const bool leftEdge) {
+    if (box.label.empty()) return;
+    renderer.drawRoundedRect(x, box.pos, buttonWidth, box.length, 1, cornerRadius, !leftEdge, leftEdge, !leftEdge,
+                             leftEdge, true);
+    const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, box.label.c_str());
+    renderer.drawTextRotated90CW(SMALL_FONT_ID, x, box.pos + (box.length + textWidth) / 2, box.label.c_str());
+  };
+
   if (gpio.deviceIsX3()) {
     // X3 layout: Up on left side, Down on right side, positioned higher
     constexpr int x3ButtonY = 155;
-
-    if (topBtn != nullptr && topBtn[0] != '\0') {
-      renderer.drawRoundedRect(buttonMargin, x3ButtonY, buttonWidth, buttonHeight, 1, cornerRadius, false, true, false,
-                               true, true);
-      const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, topBtn);
-      renderer.drawTextRotated90CW(SMALL_FONT_ID, buttonMargin, x3ButtonY + (buttonHeight + textWidth) / 2, topBtn);
-    }
-
-    if (bottomBtn != nullptr && bottomBtn[0] != '\0') {
-      const int rightX = screenWidth - buttonWidth;
-      renderer.drawRoundedRect(rightX, x3ButtonY, buttonWidth, buttonHeight, 1, cornerRadius, true, false, true, false,
-                               true);
-      const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, bottomBtn);
-      renderer.drawTextRotated90CW(SMALL_FONT_ID, rightX, x3ButtonY + (buttonHeight + textWidth) / 2, bottomBtn);
-    }
+    drawBox(buttonMargin, fitBox(topBtn, x3ButtonY, 4, screenHeight - 4), true);
+    drawBox(screenWidth - buttonWidth, fitBox(bottomBtn, x3ButtonY, 4, screenHeight - 4), false);
   } else {
     // X4 layout: Both buttons stacked on right side
-    const char* labels[] = {topBtn, bottomBtn};
+    constexpr int stackGap = 5;
+    const int anchors[2] = {topHintButtonY, topHintButtonY + buttonHeight + stackGap};
+    HintBox boxes[2];
+    layoutHintBoxes(renderer, SMALL_FONT_ID, labels, 2, anchors, buttonHeight, 4, screenHeight - 4, boxes);
     const int x = screenWidth - buttonWidth;
-
-    if (topBtn != nullptr && topBtn[0] != '\0') {
-      renderer.drawRoundedRect(x, topHintButtonY, buttonWidth, buttonHeight, 1, cornerRadius, true, false, true, false,
-                               true);
-    }
-
-    if (bottomBtn != nullptr && bottomBtn[0] != '\0') {
-      renderer.drawRoundedRect(x, topHintButtonY + buttonHeight + 5, buttonWidth, buttonHeight, 1, cornerRadius, true,
-                               false, true, false, true);
-    }
-
     for (int i = 0; i < 2; i++) {
-      if (labels[i] != nullptr && labels[i][0] != '\0') {
-        const int y = topHintButtonY + (i * buttonHeight) + 5;
-        const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, labels[i]);
-        renderer.drawTextRotated90CW(SMALL_FONT_ID, x, y + (buttonHeight + textWidth) / 2, labels[i]);
-      }
+      if (boxes[i].label.empty()) continue;
+      renderer.drawRoundedRect(x, boxes[i].pos, buttonWidth, boxes[i].length, 1, cornerRadius, true, false, true, false,
+                               true);
+      const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, boxes[i].label.c_str());
+      renderer.drawTextRotated90CW(SMALL_FONT_ID, x, boxes[i].pos + (boxes[i].length + textWidth) / 2,
+                                   boxes[i].label.c_str());
     }
   }
 }

@@ -249,6 +249,16 @@ int64_t todayHistoryDays() {
   const int64_t localSec = ChatHistoryFormat::localEpochSeconds(nowMs, SETTINGS.clockUtcOffsetQ);
   return localSec >= 0 ? localSec / 86400 : (localSec - 86399) / 86400;
 }
+
+// The six quick marks ("快捷书签"). Why these six: they cover what a reader
+// actually stops for — come back here, liked it, doubt it, keep the line, it's
+// about me, fact-check it — and each one is a fixed string, so marking a page
+// costs an SD append instead of an STT upload plus an agent turn. The page the
+// mark was made on and its opening text are stored with it, which is what makes
+// a two-character tag findable a week later.
+constexpr StrId QUICK_TAGS[] = {StrId::STR_MARK_REVISIT, StrId::STR_MARK_LIKED,  StrId::STR_MARK_DOUBT,
+                                StrId::STR_MARK_QUOTE,  StrId::STR_MARK_PERSONAL, StrId::STR_MARK_VERIFY};
+constexpr size_t QUICK_TAG_COUNT = sizeof(QUICK_TAGS) / sizeof(QUICK_TAGS[0]);
 }  // namespace
 
 void VoiceActivity::openHistory() {
@@ -704,6 +714,27 @@ void VoiceActivity::saveNoteFromTranscript() {
   requestUpdate();
 }
 
+void VoiceActivity::openNoteQuick() {
+  quickSelected_ = 0;
+  state_ = State::NoteQuick;
+  requestUpdate();
+}
+
+void VoiceActivity::saveQuickNote() {
+  // A quick mark goes through the same note append a dictated one does, but
+  // nothing before it: recorder_, runTranscription() and session_ are never
+  // touched, so it costs no STT upload and no agent turn. The composed line is
+  // what the NoteSaved screen then shows, so what the reader sees is exactly
+  // what the .ntf holds.
+  const char* tag = I18N.get(QUICK_TAGS[quickSelected_]);
+  if (noteExcerpt_[0] != '\0') {
+    snprintf(transcript_, sizeof(transcript_), "%s%s%s", tag, tr(STR_NOTE_SEP), noteExcerpt_);
+  } else {
+    snprintf(transcript_, sizeof(transcript_), "%s", tag);
+  }
+  saveNoteFromTranscript();
+}
+
 void VoiceActivity::sendToOpenClaw() {
   // The session may still be handshaking if the user spoke before it settled.
   // Wait in Sending rather than dropping a capture the user just made; loop()
@@ -760,6 +791,13 @@ void VoiceActivity::loop() {
     // An armed delete backs out without leaving the list first.
     if (state_ == State::NoteList && noteDeleteArmed_) {
       noteDeleteArmed_ = false;
+      requestUpdate();
+      return;
+    }
+    // The mark picker backs out to the idle note screen, not out of the
+    // activity: Back there still leaves the way it always did.
+    if (state_ == State::NoteQuick) {
+      state_ = State::Idle;
       requestUpdate();
       return;
     }
@@ -991,17 +1029,42 @@ void VoiceActivity::loop() {
   // Confirm handlers below never run while it is showing.
   if (state_ == State::NoteSaved) {
     if (mappedInput.wasPressed(prevKey)) {
-      // Left opens this book's note list (the chat history browser's slot;
+      // Left opens this book's bookmark list (the chat history browser's slot;
       // that one stays chat-only).
       openNoteList();
     }
     return;
   }
 
-  // The 笔记列表 hint is painted on the idle/failed note screen as well, so
+  // The 书签列表 hint is painted on the idle/failed note screen as well, so
   // the key has to work from there — browsing is not save-exclusive.
   if (noteContext_.valid && mappedInput.wasPressed(prevKey) && (state_ == State::Idle || state_ == State::Failed)) {
     openNoteList();
+    return;
+  }
+  // The other half of the note-mode key map: the front-Right key, which the
+  // chat screen spends on history and this one has no use for, opens the mark
+  // picker. Both keys are painted with these labels on the same screen.
+  if (noteContext_.valid && mappedInput.wasPressed(nextKey) && (state_ == State::Idle || state_ == State::Failed)) {
+    openNoteQuick();
+    return;
+  }
+
+  // ── Quick mark picker ───────────────────────────────────────────
+  if (state_ == State::NoteQuick) {
+    // Side Up/Down move the highlight, Confirm writes the selected mark, Back
+    // returns to the idle screen (handled above). Confirm commits here as it
+    // does everywhere else; the talk key is deliberately not bound on this
+    // screen, so a mark can never start a capture by accident.
+    if (mappedInput.wasPressed(MappedInputManager::Button::Up)) {
+      if (quickSelected_ > 0) quickSelected_--;
+      requestUpdate();
+    } else if (mappedInput.wasPressed(MappedInputManager::Button::Down)) {
+      if (quickSelected_ + 1 < QUICK_TAG_COUNT) quickSelected_++;
+      requestUpdate();
+    } else if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+      saveQuickNote();
+    }
     return;
   }
 
@@ -1065,6 +1128,7 @@ void VoiceActivity::loop() {
     case State::HistoryList:
     case State::HistoryDay:
     case State::NoteSaved:
+    case State::NoteQuick:
       break;  // unreachable: handled above
   }
 }
@@ -1092,7 +1156,7 @@ void VoiceActivity::render(RenderLock&&) {
       // Session progress on the same screen: the user sees the connect (or
       // reconnect) happen.
       if (noteContext_.valid) {
-        snprintf(buf, sizeof(buf), "%s", tr(STR_NOTE));
+        snprintf(buf, sizeof(buf), "%s", tr(STR_VOICE_BOOKMARK));
       } else if (session_.state() == OpenClaw::Session::State::Connected && !session_.reconnecting()) {
         snprintf(buf, sizeof(buf), "%s · %s", tr(STR_OPENCLAW_CONNECTED), session_.status());
       } else {
@@ -1326,7 +1390,7 @@ void VoiceActivity::render(RenderLock&&) {
     }
 
     case State::NoteList: {
-      renderer.drawText(UI_10_FONT_ID, left, y, tr(STR_NOTE), true, EpdFontFamily::BOLD);
+      renderer.drawText(UI_10_FONT_ID, left, y, tr(STR_VOICE_BOOKMARK), true, EpdFontFamily::BOLD);
       y += lineHeight + metrics.verticalSpacing;
       if (noteEntryCount_ == 0) {
         renderer.drawText(UI_10_FONT_ID, left, y, tr(STR_NOTE_LIST_EMPTY));
@@ -1347,20 +1411,67 @@ void VoiceActivity::render(RenderLock&&) {
       for (size_t i = first; i < noteEntryCount_ && i < first + window; i++) {
         // One line per note: timestamp + text head (entry text starts at
         // textOff in the pool, NUL-terminated by load()).
-        char row[64];
         const char* text = historyPool_ + noteEntries_[i].textOff;
-        snprintf(row, sizeof(row), "%u. %.40s", static_cast<unsigned>(i + 1), text);
+        std::string row = std::to_string(static_cast<unsigned>(i + 1)) + ". " + text;
+        // Cut to the panel width, not to a byte count: a fixed byte slice can
+        // end inside a multi-byte character and draw a missing-glyph box.
+        if (renderer.getTextWidth(UI_10_FONT_ID, row.c_str()) > textWidth) {
+          row.resize(renderer.fitPrefixLen(UI_10_FONT_ID, row, textWidth));
+        }
         const bool selected = i == noteSelected_;
         if (selected) {
           renderer.fillRect(left - 4, y - 2, textWidth, lineHeight);
         }
-        renderer.drawText(UI_10_FONT_ID, left, y, row, !selected, EpdFontFamily::REGULAR);
+        renderer.drawText(UI_10_FONT_ID, left, y, row.c_str(), !selected, EpdFontFamily::REGULAR);
         y += lineHeight;
       }
       if (noteDeleteArmed_) {
         // At listBottom, i.e. inside the row reserved above — not after the
         // last note, which now sits exactly at the bottom of the panel.
         renderer.drawText(UI_10_FONT_ID, left, listBottom, tr(STR_CONFIRM_DELETE_NOTE), true, EpdFontFamily::BOLD);
+      }
+      break;
+    }
+
+    case State::NoteQuick: {
+      // Quick marks ("快捷书签"): opened from the idle note screen by the
+      // front-Right key the hint names. Six fixed tags plus a preview of the
+      // line OK stores, and nothing here touches the mic, the STT client or the
+      // session — saveQuickNote() goes straight to the note append, so a mark
+      // costs no audio upload and no agent turn.
+      renderer.drawText(UI_10_FONT_ID, left, y, tr(STR_NOTE_QUICK), true, EpdFontFamily::BOLD);
+      y += lineHeight;
+      for (const auto& line : renderer.wrappedText(UI_10_FONT_ID, tr(STR_NOTE_QUICK_HINT), textWidth, 1)) {
+        renderer.drawText(UI_10_FONT_ID, left, y, line.c_str());
+        y += lineHeight;
+      }
+      y += metrics.verticalSpacing;
+      for (size_t i = 0; i < QUICK_TAG_COUNT; i++) {
+        const bool selected = i == quickSelected_;
+        char row[32];
+        snprintf(row, sizeof(row), "%u. %s", static_cast<unsigned>(i + 1), I18N.get(QUICK_TAGS[i]));
+        if (selected) {
+          renderer.fillRect(left - 4, y - 2, textWidth, lineHeight);
+        }
+        renderer.drawText(UI_10_FONT_ID, left, y, row, !selected, EpdFontFamily::REGULAR);
+        y += lineHeight;
+      }
+      // The composed line, not the bare excerpt: moving the highlight changes
+      // its head, so this answers "存进去是哪条" instead of showing a tag with
+      // an unexplained quote under it. Only the rows the list left above the
+      // hint bar are used, and the side scroll labels claim the right margin.
+      const int bottom = renderer.getScreenHeight() - metrics.buttonHintsHeight - metrics.verticalSpacing;
+      const int capLines = lineHeight > 0 ? (bottom - y) / lineHeight - 1 : 0;
+      if (noteExcerpt_[0] != '\0' && capLines > 0) {
+        char preview[256];
+        snprintf(preview, sizeof(preview), "%s%s%s", I18N.get(QUICK_TAGS[quickSelected_]), tr(STR_NOTE_SEP),
+                 noteExcerpt_);
+        y += metrics.verticalSpacing;
+        const int bodyWidth = textWidth - metrics.sideButtonHintsWidth;
+        for (const auto& line : renderer.wrappedText(UI_10_FONT_ID, preview, bodyWidth, capLines)) {
+          renderer.drawText(UI_10_FONT_ID, left, y, line.c_str());
+          y += lineHeight;
+        }
       }
       break;
     }
@@ -1406,7 +1517,7 @@ void VoiceActivity::render(RenderLock&&) {
   // hierarchy list and scroll a long turn or reply. Empty labels draw
   // nothing, so this is skipped for the states that do not use them.
   if (state_ == State::Answer || state_ == State::HistoryList || state_ == State::HistoryDay ||
-      state_ == State::NoteList || state_ == State::NoteView) {
+      state_ == State::NoteList || state_ == State::NoteView || state_ == State::NoteQuick) {
     GUI.drawSideButtonHints(renderer, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   }
 
@@ -1453,11 +1564,20 @@ void VoiceActivity::render(RenderLock&&) {
       confirmLabel = tr(STR_VOICE_SEND);
       previousLabel = modeHint;
       break;
+    case State::NoteQuick:
+      // Confirm writes the highlighted mark and Back returns to the idle note
+      // screen; the two side keys move the highlight and get their own Up/Down
+      // labels, so the remaining front slots stay blank rather than advertise
+      // keys this screen does not bind.
+      confirmLabel = tr(STR_NOTE_QUICK_SAVE);
+      break;
     default:
       if (quiet) {
         confirmLabel = tr(STR_VOICE_TALK);
         previousLabel = noteContext_.valid ? tr(STR_NOTE_LIST) : modeHint;
-        if (!noteContext_.valid) nextLabel = tr(STR_VOICE_HISTORY);
+        // The front-Right slot: history for the chat screen, the mark picker
+        // for note mode — both are the "keys that browse instead of speak" slot.
+        nextLabel = noteContext_.valid ? tr(STR_NOTE_QUICK) : tr(STR_VOICE_HISTORY);
       }
       break;
   }

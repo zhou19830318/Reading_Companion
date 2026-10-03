@@ -34,7 +34,7 @@ std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuI
   }
   items.push_back({MenuAction::TOGGLE_BOOKMARK, StrId::STR_TOGGLE_BOOKMARK});
   if (hasVoiceNote) {
-    items.push_back({MenuAction::VOICE_NOTE, StrId::STR_NOTE});
+    items.push_back({MenuAction::VOICE_NOTE, StrId::STR_VOICE_BOOKMARK});
   }
   items.push_back({MenuAction::ROTATE_SCREEN, StrId::STR_ORIENTATION});
   items.push_back({MenuAction::AUTO_PAGE_TURN, StrId::STR_AUTO_TURN_PAGES_PER_MIN});

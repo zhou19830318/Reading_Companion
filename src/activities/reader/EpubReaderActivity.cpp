@@ -289,6 +289,26 @@ void EpubReaderActivity::onExit() {
   }
 }
 
+void EpubReaderActivity::captureNoteExcerpt() {
+  // Same page guard addBookmark() uses for its summary: the excerpt is the page
+  // the mark points back to, so an out-of-range page leaves it empty and a
+  // quick mark falls back to the bare tag.
+  noteExcerpt_[0] = '\0';
+  if (!section || notePageCount_ == 0 || notePage_ >= notePageCount_) return;
+  const std::string page = BookmarkUtil::sanitizeBookmarkSummary(section->getTextFromSectionFile());
+  if (page.empty()) return;
+  if (page.size() >= sizeof(noteExcerpt_)) {
+    // "…" is U+2026 = 3 UTF-8 bytes; cut before the reservation and back off to
+    // the codepoint boundary so the excerpt never opens with half a character.
+    constexpr size_t ELLIPSIS_BYTES = 3;
+    size_t limit = sizeof(noteExcerpt_) - 1 - ELLIPSIS_BYTES;
+    while (limit > 0 && (static_cast<unsigned char>(page[limit]) & 0xC0) == 0x80) limit--;
+    snprintf(noteExcerpt_, sizeof(noteExcerpt_), "%.*s…", static_cast<int>(limit), page.c_str());
+    return;
+  }
+  snprintf(noteExcerpt_, sizeof(noteExcerpt_), "%s", page.c_str());
+}
+
 // Shared by the voice-note menu entry and the short-press power shortcut
 // (SETTINGS.shortPwrBtn == SHORT_PWRBTN::VOICE_NOTE).
 void EpubReaderActivity::launchVoiceNote() {
@@ -297,8 +317,9 @@ void EpubReaderActivity::launchVoiceNote() {
   // the book state the note references survives the round trip. The mic
   // rail/e-ink handoff lives in VoiceActivity (paint before MIC.begin()).
   armNoteMode();
+  captureNoteExcerpt();
   auto voice = std::make_unique<VoiceActivity>(renderer, mappedInput);
-  voice->setNoteContext(noteBookBase_, noteSpine_, notePage_, notePageCount_);
+  voice->setNoteContext(noteBookBase_, noteSpine_, notePage_, notePageCount_, noteExcerpt_);
   startActivityForResult(std::move(voice), [this](const ActivityResult& result) {
     noteArmed_ = false;  // one-shot consumed
     // The note browser hands a position back ("jump to page"); a plain

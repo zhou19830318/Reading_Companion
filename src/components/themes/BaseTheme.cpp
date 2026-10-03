@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <string>
+#include <utility>
 
 #include "I18n.h"
 #include "RecentBooksStore.h"
@@ -154,6 +155,56 @@ void BaseTheme::drawProgressBar(const GfxRenderer& renderer, Rect rect, const si
   renderer.drawCenteredText(UI_10_FONT_ID, rect.y + rect.height + 15, percentText.c_str());
 }
 
+void BaseTheme::layoutHintBoxes(const GfxRenderer& renderer, const int fontId, const char* const* labels,
+                                const int count, const int* anchors, const int anchorLength, const int firstLimit,
+                                const int lastLimit, HintBox* boxes) {
+  constexpr int kGap = 6;  // always kept between two neighbouring boxes
+  constexpr int kPad = 5;  // room either side of the label inside its box
+
+  // Each box starts at its anchor (the position that lines it up with the physical
+  // key) and grows towards the width its label needs. A box that needs nothing
+  // leaves its slack to its neighbours: growth is bounded by the neighbour's
+  // current edge, so boxes trade space but never touch. Repeating the pass lets a
+  // box that was blocked by a neighbour that has since moved take the rest.
+  int pos[4];
+  int len[4];
+  int need[4];
+  for (int i = 0; i < count; i++) {
+    pos[i] = anchors[i];
+    len[i] = anchorLength;
+    need[i] = (labels[i] != nullptr && labels[i][0] != '\0')
+                  ? renderer.getTextWidth(fontId, labels[i]) + kPad * 2
+                  : 0;
+  }
+  for (int pass = 0; pass < count; pass++) {
+    bool moved = false;
+    for (int i = 0; i < count; i++) {
+      if (need[i] <= len[i]) continue;
+      const int left = (i == 0) ? firstLimit : std::max(firstLimit, pos[i - 1] + len[i - 1] + kGap);
+      const int right = (i == count - 1) ? lastLimit : std::min(lastLimit, pos[i + 1] - kGap);
+      const int room = right - left;
+      if (room <= len[i]) continue;
+      const int width = std::min(need[i], room);
+      const int center = anchors[i] + anchorLength / 2;
+      pos[i] = std::max(left, std::min(center - width / 2, right - width));
+      len[i] = width;
+      moved = true;
+    }
+    if (!moved) break;
+  }
+
+  for (int i = 0; i < count; i++) {
+    if (need[i] == 0) {
+      boxes[i] = {anchors[i], anchorLength, ""};
+      continue;
+    }
+    // Even the widest box the row can offer has a limit: ellipsize rather than
+    // paint over the neighbouring chip.
+    std::string label = need[i] > len[i] ? renderer.truncatedText(fontId, labels[i], len[i] - kPad * 2) : labels[i];
+    boxes[i] = {pos[i], len[i], std::move(label)};
+  }
+}
+
 void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                 const char* btn4) const {
   const GfxRenderer::Orientation orig_orientation = renderer.getOrientation();
@@ -178,17 +229,20 @@ void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
   const int* buttonPositions = gpio.deviceIsX3() ? x3ButtonPositions : x4ButtonPositions;
 #endif
   const char* labels[] = {btn1, btn2, btn3, btn4};
+  HintBox boxes[4];
+  layoutHintBoxes(renderer, UI_10_FONT_ID, labels, 4, buttonPositions, buttonWidth, 4, renderer.getScreenWidth() - 4,
+                  boxes);
 
   for (int i = 0; i < 4; i++) {
     // Only draw if the label is non-empty
-    if (labels[i] != nullptr && labels[i][0] != '\0') {
-      const int x = buttonPositions[i];
-      renderer.fillRect(x, pageHeight - buttonY, buttonWidth, buttonHeight, false);
-      renderer.drawRect(x, pageHeight - buttonY, buttonWidth, buttonHeight);
-      const int textWidth = renderer.getTextWidth(UI_10_FONT_ID, labels[i]);
-      const int textX = x + (buttonWidth - 1 - textWidth) / 2;
-      renderer.drawText(UI_10_FONT_ID, textX, pageHeight - buttonY + textYOffset, labels[i]);
-    }
+    if (boxes[i].label.empty()) continue;
+    const int x = boxes[i].pos;
+    const int width = boxes[i].length;
+    renderer.fillRect(x, pageHeight - buttonY, width, buttonHeight, false);
+    renderer.drawRect(x, pageHeight - buttonY, width, buttonHeight);
+    const int textWidth = renderer.getTextWidth(UI_10_FONT_ID, boxes[i].label.c_str());
+    const int textX = x + (width - 1 - textWidth) / 2;
+    renderer.drawText(UI_10_FONT_ID, textX, pageHeight - buttonY + textYOffset, boxes[i].label.c_str());
   }
 
   renderer.setOrientation(orig_orientation);

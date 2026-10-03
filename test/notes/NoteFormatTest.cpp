@@ -5,11 +5,13 @@
 #include <vector>
 
 #include "NoteFormat.h"
+#include "NoteStore.h"
 
 using Notes::NoteFormat::baseNameForBook;
 using Notes::NoteFormat::buildLine;
 using Notes::NoteFormat::DIR;
 using Notes::NoteFormat::Entry;
+using Notes::NoteFormat::EXCERPT_CAP;
 using Notes::NoteFormat::EXT;
 using Notes::NoteFormat::LINE_PREFIX;
 using Notes::NoteFormat::NAME_PATH_SIZE;
@@ -213,4 +215,27 @@ TEST(NoteLine, RealLineShape) {
   const size_t n = buildLine(buf.data(), buf.size(), 1790467200123ULL, 12, 3, 210, "h incomes 8");
   ASSERT_GT(n, 0U);
   EXPECT_EQ(std::string(buf.data(), n), "NTF1 1790467200123 12 3 210 \"h incomes 8\"\n");
+}
+
+// A quick mark ("快捷书签") is "<tag>：<page excerpt>" written straight to the
+// note file — the excerpt is what the reader hands over, capped at
+// EXCERPT_CAP bytes. These two cases pin that even the longest mark the picker
+// can produce, including the pathological case where every excerpt byte needs
+// a two-byte JSON escape, still lands in one intact NTF1 line inside the
+// store's own line buffer. The firmware side (EpubReaderActivity's truncation)
+// is device-only, so this bound is the only place it can be checked.
+TEST(NoteLine, LongestQuickMarkSurvivesStoreLine) {
+  std::string cjk;
+  while (cjk.size() < EXCERPT_CAP) cjk += "书";  // 3 bytes per character
+  cjk.resize(EXCERPT_CAP - 1);                   // the longest excerpt the cap allows
+  const std::string mark = "金句摘录：" + cjk;
+  std::vector<char> buf(Notes::NoteStore::LINE_CAP, '\0');
+  const size_t n = buildLine(buf.data(), buf.size(), 1790467200123ULL, 7, 4, 60, mark);
+  ASSERT_GT(n, 0U);
+  EXPECT_EQ(roundTrip(1790467200123ULL, 7, 4, 60, mark, buf.size()), mark);
+
+  // Every byte of the excerpt escapes to two: the head of the line is the same,
+  // so this is the worst case for a quoted passage.
+  const std::string quoted = "有疑问：" + std::string(EXCERPT_CAP - 1, '"');
+  EXPECT_EQ(roundTrip(1790467200123ULL, 7, 4, 60, quoted, buf.size()), quoted);
 }

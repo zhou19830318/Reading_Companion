@@ -44,6 +44,13 @@ inline constexpr const char* EXT = ".ntf";
 // baseNameForBook refuses overlong names rather than truncating mid-UTF-8.
 inline constexpr size_t NAME_PATH_SIZE = 96;
 
+// Capacity of the page excerpt a quick mark ("快捷书签") stores with its tag.
+// The reader truncates the current page's text to this before handing it over,
+// so the composed line stays far inside LINE_CAP no matter how long the chapter
+// page is. 192 bytes is ~60 CJK characters: enough to recognize the passage in
+// the note list, short enough to read on one screen.
+inline constexpr size_t EXCERPT_CAP = 192;
+
 // One note record. Writers fill it (or pass the fields straight to
 // buildLine); parsers fill it from a line. NoteStore::load() reuses the same
 // struct as the pool index and additionally fills textOff/textLen (offset of

@@ -46,14 +46,19 @@ class VoiceActivity final : public Activity {
   // Arms note mode before onEnter(): the transcript lands in the book's note
   // file instead of an OpenClaw round trip (see NoteContext). spineIndex/
   // pageNumber/pageCount mirror the progress triple (progress saves use the
-  // same 0-based page); pageNumber==0 keeps the note file parseable.
-  void setNoteContext(const char* bookBase, uint16_t spineIndex, uint16_t pageNumber, uint16_t pageCount) {
+  // same 0-based page); pageNumber==0 keeps the note file parseable. excerpt is
+  // the current page's text, what a quick mark ("快捷书签") saves without ever
+  // opening the mic; nullptr or "" leaves the mark as the bare tag.
+  void setNoteContext(const char* bookBase, uint16_t spineIndex, uint16_t pageNumber, uint16_t pageCount,
+                      const char* excerpt = nullptr) {
     noteContext_.valid = bookBase != nullptr && bookBase[0] != '\0';
+    noteExcerpt_[0] = '\0';
     if (!noteContext_.valid) return;
     snprintf(noteContext_.bookBase, sizeof(noteContext_.bookBase), "%s", bookBase);
     noteContext_.spineIndex = spineIndex;
     noteContext_.pageNumber = pageNumber;
     noteContext_.pageCount = pageCount;
+    if (excerpt != nullptr) snprintf(noteExcerpt_, sizeof(noteExcerpt_), "%s", excerpt);
   }
 
   void onEnter() override;
@@ -94,6 +99,7 @@ class VoiceActivity final : public Activity {
     NoteSaved,     // note mode: transcript written to /.crosspoint/notes/
     NoteList,      // note mode: this book's notes (prev key enters)
     NoteView,      // note mode: one note, scroll window
+    NoteQuick,     // note mode: quick-mark picker (no mic, no STT, no gateway)
   };
 
   // Recording ceiling. The VAD usually stops long before this (1.5 s of
@@ -268,6 +274,16 @@ class VoiceActivity final : public Activity {
   bool noteDeleteArmed_ = false;
   void openNoteList();
   void deleteSelectedNote();
+  // ── quick marks ("快捷书签") ──────────────────────────────────────────
+  // A fixed tag plus the page text the reader handed over, written straight
+  // through NoteStore::append: no mic, no STT upload, no gateway frame, so one
+  // mark costs nothing but an SD append. The picker is a note-mode state, not
+  // a keyboard, so the whole voice/STT half of the pipeline stays closed. The
+  // tag table lives next to the renderers that read it (VoiceActivity.cpp).
+  size_t quickSelected_ = 0;
+  char noteExcerpt_[Notes::NoteFormat::EXCERPT_CAP] = {};
+  void openNoteQuick();
+  void saveQuickNote();
 
   // Bound to the process-wide instance: the workbench status cards and this
   // activity share one gateway connection, so entering voice does not pay for

@@ -203,6 +203,24 @@ class BaseTheme {
   virtual void drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                const char* btn4) const;
   virtual void drawSideButtonHints(const GfxRenderer& renderer, const char* topBtn, const char* bottomBtn) const;
+
+  // One button-hint box: where it starts on the axis the hints stack along, how
+  // far it extends, and the label that fits inside it.
+  struct HintBox {
+    int pos;
+    int length;
+    std::string label;
+  };
+
+  // Lays out `count` hint boxes anchored at `anchors`, each `anchorLength` long
+  // to begin with. A box grows to hold its label, but only into the space its
+  // neighbours are not using — a box that needs nothing leaves its slack to them,
+  // and the kGap between two chips is never spent — so grown boxes cannot
+  // collide. A label too long even for the widest box the row can offer is
+  // ellipsized. Empty labels come back at the anchor position and size with an
+  // empty string, leaving the caller's stub as it was.
+  static void layoutHintBoxes(const GfxRenderer& renderer, int fontId, const char* const* labels, int count,
+                              const int* anchors, int anchorLength, int firstLimit, int lastLimit, HintBox* boxes);
   virtual int getListPageItems(int contentHeight, bool hasSubtitle) const;
   virtual void drawList(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
                         const std::function<std::string(int index)>& rowTitle,

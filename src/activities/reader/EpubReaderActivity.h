@@ -184,6 +184,10 @@ class EpubReaderActivity final : public Activity {
   // Launches VoiceActivity in note mode from the menu entry or the short
   // power-press shortcut (SETTINGS.shortPwrBtn == SHORT_PWRBTN::VOICE_NOTE).
   void launchVoiceNote();
+  // Quick marks ("快捷书签") attach the page they were made on, and the section
+  // is only reachable from here, so the page text is snapshotted next to the
+  // position it points back to.
+  void captureNoteExcerpt();
 
   // ── voice-note mode arming (M2/AI-02) ──────────────────────────────
   bool noteArmed_ = false;
@@ -191,4 +195,5 @@ class EpubReaderActivity final : public Activity {
   uint16_t noteSpine_ = 0;
   uint16_t notePage_ = 0;
   uint16_t notePageCount_ = 0;
+  char noteExcerpt_[Notes::NoteFormat::EXCERPT_CAP] = {};
 };
