@@ -18,13 +18,6 @@
       font-size: 17px;
       font-weight: 650;
     }
-    .card {
-      background: var(--card-bg);
-      border-radius: 8px;
-      padding: 20px;
-      margin: 15px 0;
-      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-    }
     .page-header {
       display: flex;
       justify-content: space-between;
@@ -62,41 +55,6 @@
     .action-buttons {
       display: flex;
       gap: 10px;
-    }
-    .action-btn {
-      color: var(--text);
-      padding: 10px 16px;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 0.95em;
-      font-weight: 600;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    .upload-action-btn {
-      background: linear-gradient(180deg, #46c75e, #34a84a);
-      color: #04140a;
-    }
-    .upload-action-btn:hover {
-      background: linear-gradient(180deg, #52d368, #3bb454);
-    }
-    .folder-action-btn {
-      background: var(--card-2);
-      color: var(--text);
-      border: 1px solid var(--border);
-    }
-    .folder-action-btn:hover {
-      background: var(--card-hi);
-      border-color: #39414d;
-    }
-    .delete-action-btn {
-      background: linear-gradient(180deg, #fa5d54, #e4423a);
-      color: #fff;
-    }
-    .delete-action-btn:hover {
-      background: linear-gradient(180deg, #fc6c63, #e84b43);
     }
     /* Upload modal */
     .modal-overlay {
@@ -163,14 +121,11 @@
     }
     .modal-close {
       float: right;
-      background: none;
-      border: none;
-      font-size: 1.5em;
-      cursor: pointer;
-      color: var(--label-color);
-      line-height: 1;
-      transition: opacity 0.15s;
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 32px; height: 32px; background: none; border: none; cursor: pointer;
+      color: var(--fg-mut); transition: opacity 0.15s;
     }
+    .modal-close .i { stroke: currentColor; }
     .modal-close:hover {
       color: var(--title-color);
     }
@@ -181,46 +136,45 @@
     .modal-close.disabled:hover {
       color: var(--label-color);
     }
-    .file-table {
-      width: 100%;
-      border-collapse: collapse;
-    }
+
+    /* The core styles table/th/td; these rules add only what the file list needs:
+       tight cells, a shrink-proof name column, a nowrap action column, 36px icon
+       targets, and the per-type icon tints. */
     .file-table th,
-    .file-table td {
-      padding: 12px;
-      text-align: left;
-      border-bottom: 1px solid var(--border-color);
-    }
-    .file-table th {
-      font-weight: 600;
-      color: var(--label-color);
-    }
-    .file-table tr:hover {
-      background-color: var(--accent-color-10);
-    }
-    .epub-badge {
-      display: inline-block;
-      padding: 2px 8px;
-      background-color: var(--green);
-      color: #04140a;
-      border-radius: 10px;
-      font-size: 0.75em;
-      font-weight: 600;
-    }
-    .folder-badge {
-      display: inline-block;
-      padding: 2px 8px;
-      background-color: var(--orange);
-      color: #231a02;
-      border-radius: 10px;
-      font-size: 0.75em;
-      font-weight: 600;
-    }
+    .file-table td { padding: var(--s2) var(--s3); }
+    .check-col { width: 44px; text-align: center; }
+    /* 24px is the WCAG 2.5.8 minimum pointer target; the checkbox is the row's only
+       selection affordance, so it gets the full target rather than a padded wrapper.
+       Row checkboxes carry .select-item and sit in a plain td, so match on the table. */
+    .check-col input[type="checkbox"],
+    .file-table .select-item { width: 24px; height: 24px; cursor: pointer; accent-color: var(--accent); }
+    .file-table td.select-cell { text-align: center; }
+    .name-cell { min-width: 0; }
+    .actions-col { width: 1%; white-space: nowrap; text-align: right; }
     .file-icon {
-      margin-right: 8px;
+      display: inline-flex; align-items: center; margin-right: var(--s2);
+      vertical-align: -4px; color: var(--fg-dim);
     }
+    .folder-row .file-icon { color: var(--info); }
+    .epub-file .file-icon { color: var(--accent); }
+    .action-icon-group { display: inline-flex; gap: var(--s1); }
+    .delete-btn,
+    .rename-btn,
+    .move-btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 36px; height: 36px; padding: 0; background: transparent;
+      border: var(--hair); border-radius: var(--r-sm); cursor: pointer; color: var(--fg-mut);
+      transition: background 150ms, color 150ms, border-color 150ms;
+    }
+    .delete-btn:hover { color: var(--danger); border-color: rgba(240, 96, 90, .45); background: var(--danger-bg); }
+    .rename-btn:hover { color: var(--info); border-color: rgba(90, 162, 232, .45); background: var(--info-bg); }
+    .move-btn:hover { color: var(--accent); border-color: rgba(63, 191, 106, .45); background: var(--ok-bg); }
     .folder-link,
     .file-link {
+      /* The bare text is only 13px tall; padding brings the tap target to 29px
+         without moving the label off the row's baseline grid. */
+      display: inline-block;
+      padding: var(--s2) 0;
       word-break: break-word;
       color: var(--accent-color);
       text-decoration: none;
@@ -559,42 +513,6 @@
       align-items: center;
       justify-content: space-between;
     }
-    .toggle-switch {
-      position: relative;
-      width: 44px;
-      height: 24px;
-      flex-shrink: 0;
-    }
-    .toggle-switch input {
-      opacity: 0;
-      width: 0;
-      height: 0;
-    }
-    .toggle-slider {
-      position: absolute;
-      cursor: pointer;
-      inset: 0;
-      background: var(--border-color);
-      border-radius: 24px;
-      transition: 0.2s;
-    }
-    .toggle-slider:before {
-      position: absolute;
-      content: "";
-      height: 18px;
-      width: 18px;
-      left: 3px;
-      bottom: 3px;
-      background: white;
-      border-radius: 50%;
-      transition: 0.2s;
-    }
-    .toggle-switch input:checked + .toggle-slider {
-      background: var(--accent-color);
-    }
-    .toggle-switch input:checked + .toggle-slider:before {
-      transform: translateX(20px);
-    }
     .setting-desc {
       font-size: 0.75em;
       color: var(--label-color);
@@ -710,47 +628,39 @@
     .image-item.state-0 {
       border-color: var(--border-color);
     }
+    /* Four actionable states, four distinguishable hues (WCAG 1.4.1). */
     .image-item.state-1 {
-      border-color: var(--blue);
-      background: rgba(88, 166, 255, 0.12);
+      border-color: var(--info);
+      background: var(--info-bg);
     }
     .image-item.state-2 {
-      border-color: var(--red);
-      background: rgba(248, 81, 73, 0.12);
+      border-color: var(--danger);
+      background: var(--danger-bg);
     }
     .image-item.state-3 {
-      border-color: var(--purple);
-      background: rgba(188, 140, 255, 0.12);
+      border-color: var(--warn);
+      background: var(--warn-bg);
     }
     .image-item.crop-preview {
-      border-color: var(--green);
-      background: rgba(63, 185, 80, 0.12);
+      border-color: var(--accent);
+      background: var(--ok-bg);
     }
-    .image-item.cover-locked {
-      border-color: #e67e22;
-      background: rgba(230, 126, 34, 0.1);
-      cursor: default;
-      opacity: 0.85;
-    }
-    .image-item.cover-locked:hover {
-      transform: none;
-      border-color: #e67e22;
-    }
-    .image-item.cover-locked .image-state-badge {
-      background: #e67e22;
-    }
+    .image-item.cover-locked,
     .image-item.separator-locked {
-      border-color: #1abc9c;
-      background: rgba(26, 188, 156, 0.1);
+      border-color: var(--border-2);
+      border-style: dashed;
+      background: var(--surface-3);
       cursor: default;
       opacity: 0.85;
     }
+    .image-item.cover-locked:hover,
     .image-item.separator-locked:hover {
       transform: none;
-      border-color: #1abc9c;
+      border-color: var(--border-2);
     }
+    .image-item.cover-locked .image-state-badge,
     .image-item.separator-locked .image-state-badge {
-      background: #1abc9c;
+      background: var(--fg-dim);
     }
     .image-item img {
       width: 100%;
@@ -819,12 +729,12 @@
       border-radius: 2px;
     }
     .split-line.split-h {
-      background: linear-gradient(180deg, var(--blue) 0%, #2f7fd0 100%);
-      box-shadow: 0 0 6px rgba(0, 0, 0, 0.5), 0 0 2px rgba(88, 166, 255, 0.8);
+      background: var(--info);
+      box-shadow: 0 0 6px rgba(0, 0, 0, 0.5), 0 0 2px var(--info);
     }
     .split-line.split-v {
-      background: linear-gradient(180deg, var(--red) 0%, #d44840 100%);
-      box-shadow: 0 0 6px rgba(0, 0, 0, 0.5), 0 0 2px rgba(248, 81, 73, 0.8);
+      background: var(--danger);
+      box-shadow: 0 0 6px rgba(0, 0, 0, 0.5), 0 0 2px var(--danger);
     }
     /* Rotate image on hover for rotation states */
     .image-item.rotate-cw:hover img {
@@ -899,26 +809,10 @@
       font-size: 0.85em;
       margin: 8px 0;
     }
-    .no-files {
-      text-align: center;
-      color: var(--dim);
-      padding: 40px;
-      font-style: italic;
-    }
     .message {
       padding: 15px;
       border-radius: 4px;
       margin: 15px 0;
-    }
-    .message.success {
-      background-color: rgba(63, 185, 80, 0.12);
-      color: var(--green);
-      border: 1px solid rgba(63, 185, 80, 0.35);
-    }
-    .message.error {
-      background-color: rgba(248, 81, 73, 0.12);
-      color: var(--red);
-      border: 1px solid rgba(248, 81, 73, 0.35);
     }
     .contents-header {
       display: flex;
@@ -994,49 +888,6 @@
       color: var(--dim);
       cursor: not-allowed;
     }
-    /* Action button styles */
-    .delete-btn,
-    .rename-btn,
-    .move-btn {
-      background: none;
-      border: none;
-      cursor: pointer;
-      font-size: 1.1em;
-      padding: 4px 8px;
-      border-radius: 4px;
-      transition: all 0.15s;
-    }
-    .delete-btn {
-      color: var(--dim);
-    }
-    .delete-btn:hover {
-      background-color: rgba(248, 81, 73, 0.14);
-      color: var(--red);
-    }
-    .rename-btn {
-      color: var(--blue);
-    }
-    .rename-btn:hover {
-      background-color: rgba(88, 166, 255, 0.14);
-      color: var(--blue);
-    }
-    .move-btn {
-      color: var(--green);
-    }
-    .move-btn:hover {
-      background-color: rgba(63, 185, 80, 0.14);
-      color: var(--green);
-    }
-    .actions-col {
-      width: 140px;
-      text-align: center;
-    }
-    .action-icon-group {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-    }
     /* Failed uploads banner */
     .failed-uploads-banner {
       background-color: rgba(210, 153, 34, 0.12);
@@ -1061,14 +912,11 @@
       margin: 0;
     }
     .dismiss-btn {
-      background: none;
-      border: none;
-      font-size: 1.2em;
-      cursor: pointer;
-      color: var(--orange);
-      padding: 0;
-      line-height: 1;
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 28px; height: 28px; border: none; border-radius: var(--r-sm);
+      cursor: pointer; padding: 0; background: none; color: var(--warn);
     }
+    .dismiss-btn .i { stroke: currentColor; }
     .dismiss-btn:hover {
       color: #f0c33d;
     }
@@ -1195,16 +1043,6 @@
       align-items: center;
       margin: 20px 0;
     }
-    .loader {
-      width: 48px;
-      height: 48px;
-      border: 5px solid var(--border);
-      border-bottom-color: var(--blue);
-      border-radius: 50%;
-      display: inline-block;
-      box-sizing: border-box;
-      animation: rotation 1s linear infinite;
-    }
     /* Mobile responsive styles */
     @media (max-width: 600px) {
       body {
@@ -1230,10 +1068,6 @@
       .action-buttons {
         gap: 6px;
       }
-      .action-btn {
-        padding: 8px 10px;
-        font-size: 0.85em;
-      }
       .file-table th,
       .file-table td {
         padding: 8px 6px;
@@ -1241,14 +1075,6 @@
       }
       .file-table th {
         font-size: 0.85em;
-      }
-      .file-icon {
-        margin-right: 4px;
-      }
-      .epub-badge,
-      .folder-badge {
-        padding: 2px 5px;
-        font-size: 0.65em;
       }
       .contents-header {
         margin-bottom: 8px;
@@ -1263,22 +1089,6 @@
       }
       .modal h3 {
         font-size: 1.1em;
-      }
-      .actions-col {
-        width: 120px;
-      }
-      .delete-btn,
-      .rename-btn,
-      .move-btn {
-        font-size: 1em;
-        padding: 2px 4px;
-      }
-      .action-icon-group {
-        gap: 4px;
-      }
-      .no-files {
-        padding: 20px;
-        font-size: 0.9em;
       }
       .handedness-btn {
         padding: 6px 10px;
@@ -1324,7 +1134,7 @@
       padding: 12px;
       max-height: 300px;
       overflow-y: auto;
-      font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', 'Droid Sans Mono', 'Source Code Pro', monospace;
+      font-family: var(--mono);
       font-size: 0.8em;
     }
     .log-entry {
@@ -1444,198 +1254,379 @@
     }
   
 /* AIWATCH-CORE:START -- edit scripts/sync_web_core.py, not this block */
+/* ── Tokens ───────────────────────────────────────────────────────────── */
 :root{
-  --bg:#0a0e14;--card:#13181f;--border:#262d38;--text:#e6edf3;--dim:#8b949e;
-  --green:#3fb950;--red:#f85149;--orange:#d29922;--blue:#58a6ff;--purple:#bc8cff;
-  --card-2:#171d26;--card-hi:#1c2330;--accent-glow:rgba(88,166,255,.18);
-  --ring:rgba(255,255,255,.06);--shadow:0 1px 0 rgba(255,255,255,.04),0 8px 24px rgba(0,0,0,.35);
-  --radius:14px;--radius-sm:10px;
-  --font-color:var(--text);--title-color:var(--text);--card-bg:var(--card);
-  --label-color:var(--dim);--border-color:var(--border);
-  --accent-color:var(--green);--accent-hover-color:#34a84a;--toggle-bg:var(--border);
+  /* surfaces: page -> card -> raised -> overlay (dark UIs layer by lightness,
+     not by shadow; shadows are nearly invisible on dark) */
+  --bg:#0b0f14;--bg-2:#0d1219;--surface:#141b24;--surface-2:#1a2230;--surface-3:#212b3a;
+  --border:#28313f;--border-2:#3a4557;--hair:1px solid var(--border);
+  /* text: muted must clear 4.5:1 on --surface (WCAG 1.4.3) */
+  --fg:#e6edf3;--fg-mut:#9aa8b8;--fg-dim:#728296;--fg-inv:#04140a;
+  /* one accent + four semantic tint pairs; nothing else gets saturated colour */
+  --accent:#3fbf6a;--accent-2:#37a05a;--accent-glow:rgba(63,191,106,.22);
+  --info:#5aa2e8;--info-bg:rgba(90,162,232,.13);
+  --ok:#3fbf6a;--ok-bg:rgba(63,191,106,.13);
+  --warn:#d9a338;--warn-bg:rgba(217,163,56,.14);
+  --danger:#f0605a;--danger-bg:rgba(240,96,90,.13);
+  --focus:#5aa2e8;
+  /* spacing: 4px base */
+  --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;--gutter:16px;
+  --row:44px;
+  /* type: five steps only */
+  --t-xs:12px;--t-sm:13px;--t-md:14px;--t-lg:16px;--t-xl:20px;--t-num:26px;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --radius:14px;--r-md:10px;--r-sm:8px;--r-pill:999px;
+  --shadow:0 1px 2px rgba(0,0,0,.45);--shadow-up:0 10px 30px rgba(0,0,0,.5);
+  --dur:160ms;--ease:cubic-bezier(.2,0,0,1);
+  --z-sticky:2;--z-bar:5;--z-toast:9;--z-modal:20;
+  /* legacy aliases — pages were written against these names */
+  --card:var(--surface);--card-2:var(--surface-2);--card-hi:var(--surface-3);
+  --text:var(--fg);--dim:var(--fg-mut);--green:var(--accent);--red:var(--danger);
+  --orange:var(--warn);--blue:var(--info);--purple:var(--info);--ring:rgba(255,255,255,.06);
+  --radius-sm:var(--r-sm);--font-color:var(--fg);--title-color:var(--fg);--card-bg:var(--surface);
+  --label-color:var(--fg-mut);--border-color:var(--border);--accent-color:var(--accent);
+  --accent-hover-color:var(--accent-2);--toggle-bg:var(--border-2);
 }
+/* ── Base ─────────────────────────────────────────────────────────────── */
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
 body{
-  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,
+    'Noto Sans SC','Microsoft YaHei',sans-serif;
   background:
-    radial-gradient(1100px 600px at 100% -10%,rgba(88,166,255,.07),transparent 60%),
-    radial-gradient(900px 500px at -10% 0%,rgba(188,140,255,.06),transparent 55%),
+    radial-gradient(1200px 620px at 100% -12%,rgba(90,162,232,.09),transparent 60%),
+    radial-gradient(900px 520px at -12% -4%,rgba(63,191,106,.07),transparent 55%),
     var(--bg);
-  background-attachment:fixed;color:var(--text);min-height:100vh;
-  -webkit-font-smoothing:antialiased;line-height:1.5;margin:0;padding:0;
+  background-attachment:fixed;color:var(--fg);min-height:100vh;line-height:1.5;
+  -webkit-font-smoothing:antialiased;margin:0;padding:0;font-size:var(--t-md);
 }
-/* Header — non-sticky, exactly like AIWatch, so the tab row never overlaps */
+h1,h2,h3,h4{margin:0;font-weight:650;letter-spacing:.1px}
+a{color:var(--info)}
+p{margin:0 0 var(--s3)}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:var(--r-sm)}
+.i{width:18px;height:18px;flex:0 0 auto;stroke:currentColor;fill:none;stroke-width:1.7;
+  stroke-linecap:round;stroke-linejoin:round;vertical-align:-.18em}
+.i-sm{width:14px;height:14px}
+.num{font-variant-numeric:tabular-nums lining-nums;font-feature-settings:"tnum" 1}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+/* ── Header + nav ─────────────────────────────────────────────────────── */
 .header{
-  position:relative;background:linear-gradient(180deg,rgba(28,35,48,.85),rgba(19,24,31,.9));
-  backdrop-filter:blur(8px);border-bottom:1px solid var(--border);
-  padding:14px 22px;display:flex;align-items:center;gap:12px;
+  position:sticky;top:0;z-index:var(--z-bar);display:flex;align-items:center;gap:var(--s3);
+  padding:12px var(--s5);background:rgba(13,18,25,.86);backdrop-filter:blur(10px);
+  border-bottom:var(--hair);flex-wrap:wrap;
 }
-.header h1{font-size:18px;font-weight:700;letter-spacing:.3px;white-space:nowrap;overflow:hidden;
-  text-overflow:ellipsis;flex:0 1 auto;max-width:60%;color:var(--text);border:0;padding:0;margin:0}
-.header h1 span{color:var(--green);font-weight:500;font-size:12px;margin-left:10px;opacity:.9}
-.header .hdr-status{font-size:13px;color:var(--dim);white-space:nowrap;overflow:hidden;
-  text-overflow:ellipsis;flex:1 1 auto;text-align:right}
+.header h1{font-size:var(--t-lg);font-weight:700;display:flex;align-items:center;gap:var(--s2);
+  flex:0 1 auto;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;margin:0;padding:0;border:0;color:var(--fg)}
+.header h1 .i{stroke:var(--accent)}
+.header h1 .sub{color:var(--fg-dim);font-weight:500;font-size:var(--t-xs);margin-left:var(--s2)}
+.header .hdr-status{font-size:var(--t-sm);color:var(--fg-mut);flex:1 1 auto;min-width:0;
+  text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  font-variant-numeric:tabular-nums}
 .header .btn{flex:0 0 auto}
-/* Tabs — one per page, links instead of AIWatch's SPA panel switcher */
-.tabs{display:flex;gap:2px;background:var(--card);border-bottom:1px solid var(--border);
-  overflow-x:auto;padding:0 8px;scrollbar-width:thin}
+.tabs{display:flex;gap:2px;background:var(--bg-2);border-bottom:var(--hair);
+  overflow-x:auto;padding:0 var(--s2);scrollbar-width:thin;position:sticky;
+  top:var(--row);z-index:calc(var(--z-bar) - 1)}
 .tabs::-webkit-scrollbar{height:5px}
 .tabs::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
-.tab{padding:11px 16px;cursor:pointer;color:var(--dim);border-bottom:2px solid transparent;
-  font-size:13.5px;font-weight:500;white-space:nowrap;text-decoration:none;
-  transition:color .18s,background .18s,border-color .18s;border-radius:8px 8px 0 0}
-.tab:hover{color:var(--text);background:rgba(255,255,255,.025)}
-.tab.active{color:var(--text);border-bottom-color:var(--blue);
-  background:linear-gradient(180deg,transparent,rgba(88,166,255,.07))}
-.content{max-width:860px;margin:0 auto;padding:18px 16px 48px}
-.card{
-  background:linear-gradient(180deg,var(--card-hi),var(--card));border:1px solid var(--border);
-  border-radius:var(--radius);padding:18px;margin:0 0 14px;box-shadow:var(--shadow);
-}
-.card h2,.card h3{font-size:15px;font-weight:650;margin:0 0 14px;color:var(--text);
-  display:flex;align-items:center;gap:9px}
-/* Stat grid (AIWatch dashboard) */
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}
-.stat{text-align:center;padding:10px 6px;border-radius:var(--radius-sm);
-  background:rgba(255,255,255,.025);border:1px solid var(--ring)}
-.stat .val{font-size:20px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;
-  text-overflow:ellipsis;line-height:1.2}
-.stat .lbl{font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.6px;
-  margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-/* Forms — label above the control, full width */
-.form-group{margin-bottom:14px}
-.form-group label{display:block;font-size:12.5px;color:var(--dim);margin-bottom:6px;letter-spacing:.2px}
-.form-group input,.form-group select,.form-group textarea{
-  width:100%;padding:9px 12px;background:var(--bg);border:1px solid var(--border);
-  border-radius:var(--radius-sm);color:var(--text);font-size:14px;outline:none;
-  transition:border-color .15s,box-shadow .15s}
-.form-group input:focus,.form-group select:focus{border-color:var(--blue);
-  box-shadow:0 0 0 3px var(--accent-glow)}
-.form-group input::placeholder{color:#5c6672}
-/* Range sliders — AIWatch index.html:78-80 (6px track, glowing 16px blue thumb) */
-.form-group input[type=range]{-webkit-appearance:none;appearance:none;padding:0;height:6px;
-  border-radius:6px;background:var(--border);border:none}
-.form-group input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;
-  border-radius:50%;background:var(--blue);cursor:pointer;border:2px solid #0a0e14;
-  box-shadow:0 0 8px rgba(88,166,255,.6)}
-.form-group input[type=range]::-moz-range-thumb{width:16px;height:16px;border-radius:50%;
-  background:var(--blue);cursor:pointer;border:2px solid #0a0e14}
-.range-row{display:flex;align-items:center;gap:10px}
+.tab{display:inline-flex;align-items:center;gap:7px;min-height:var(--row);padding:0 var(--s4);
+  cursor:pointer;color:var(--fg-mut);border-bottom:2px solid transparent;font-size:var(--t-sm);
+  font-weight:550;white-space:nowrap;text-decoration:none;border-radius:var(--r-sm) var(--r-sm) 0 0;
+  transition:color var(--dur),background var(--dur),border-color var(--dur)}
+.tab:hover{color:var(--fg);background:rgba(255,255,255,.03)}
+.tab.active{color:var(--fg);border-bottom-color:var(--accent);background:rgba(63,191,106,.08)}
+.content{max-width:880px;margin:0 auto;padding:var(--s5) var(--gutter) 64px}
+/* ── Cards ────────────────────────────────────────────────────────────── */
+.card{background:linear-gradient(180deg,var(--surface-2),var(--surface));border:var(--hair);
+  border-radius:var(--radius);padding:var(--s5);margin:0 0 var(--s4);box-shadow:var(--shadow);
+  animation:rise var(--dur) var(--ease) both}
+.card h2,.card h3{font-size:var(--t-lg);display:flex;align-items:center;gap:var(--s3);
+  margin:0 0 var(--s4);color:var(--fg)}
+.card h2 .i,.card h3 .i{stroke:var(--accent)}
+.card h4{font-size:var(--t-sm);color:var(--fg-mut);text-transform:uppercase;letter-spacing:.7px;
+  margin:var(--s4) 0 var(--s2)}
+.card-note{font-size:var(--t-sm);color:var(--fg-mut);margin:calc(var(--s4) * -1 + 2px) 0 var(--s4)}
+/* Disclosure for help text: always visible as a question mark, never a wall of prose */
+.help{border:0;border-top:var(--hair);margin:var(--s3) 0 0;padding-top:var(--s2)}
+.help>summary{cursor:pointer;list-style:none;display:inline-flex;align-items:center;gap:6px;
+  color:var(--fg-dim);font-size:var(--t-xs);text-transform:uppercase;letter-spacing:.6px;
+  min-height:32px}
+.help>summary::-webkit-details-marker{display:none}
+.help>summary .i{width:14px;height:14px}
+.help[open]>summary{color:var(--fg-mut)}
+.help-body{font-size:var(--t-sm);color:var(--fg-mut);margin-top:var(--s2);max-inline-size:66ch}
+.hint{display:block;font-size:var(--t-sm);color:var(--fg-mut);margin:var(--s2) 0 0;max-inline-size:66ch}
+/* ── Stats ────────────────────────────────────────────────────────────── */
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:var(--s3)}
+.stat{text-align:left;padding:var(--s3) var(--s4);border-radius:var(--r-md);
+  background:var(--surface-3);border:1px solid rgba(255,255,255,.05)}
+.stat .val{font-size:var(--t-num);font-weight:700;line-height:1.15;letter-spacing:-.4px;
+  font-variant-numeric:tabular-nums lining-nums;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.stat .lbl{font-size:var(--t-xs);color:var(--fg-mut);text-transform:uppercase;letter-spacing:.6px;
+  margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stat.alert .val{color:var(--warn)}
+/* ── Forms ────────────────────────────────────────────────────────────── */
+.form-group,.field{margin-bottom:var(--s4)}
+.form-group label,.field>label{display:block;font-size:var(--t-xs);color:var(--fg-mut);
+  margin-bottom:6px;letter-spacing:.3px;text-transform:uppercase;font-weight:600}
+.form-group input,.form-group select,.form-group textarea,
+.field input,.field select,.field textarea,
+.set-row select,.set-row input[type=text],.set-row input[type=password],
+.set-row input[type=url],.set-row input[type=number]{
+  width:100%;min-height:40px;padding:9px var(--s3);background:var(--bg-2);border:var(--hair);
+  border-radius:var(--r-md);color:var(--fg);font:inherit;font-size:var(--t-md);outline:none;
+  transition:border-color 150ms,box-shadow 150ms}
+.form-group select,.field select,.set-row select{appearance:none;background-image:
+  linear-gradient(45deg,transparent 50%,var(--fg-mut) 50%),
+  linear-gradient(135deg,var(--fg-mut) 50%,transparent 50%);
+  background-position:calc(100% - 18px) 18px,calc(100% - 13px) 18px;
+  background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:36px}
+.form-group input:focus,.form-group select:focus,.form-group textarea:focus,
+.field input:focus,.field select:focus,.set-row input:focus,.set-row select:focus{
+  border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow)}
+.form-group input::placeholder,.field input::placeholder{color:var(--fg-dim)}
+/* The element is 24px tall so the drag target meets WCAG 2.5.8; the visible 6px bar
+   is the track pseudo-element, which keeps the original look. */
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:24px;
+  background:transparent;border:none;padding:0;margin:0}
+input[type=range]::-webkit-slider-runnable-track{height:6px;border-radius:6px;
+  background:var(--border-2)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;
+  margin-top:-6px;border-radius:50%;background:var(--accent);cursor:pointer;
+  border:2px solid var(--bg);box-shadow:0 0 0 4px var(--accent-glow)}
+input[type=range]::-moz-range-track{height:6px;border-radius:6px;background:var(--border-2)}
+input[type=range]::-moz-range-thumb{width:18px;height:18px;border-radius:50%;background:var(--accent);
+  cursor:pointer;border:2px solid var(--bg)}
+.range-row{display:flex;align-items:center;gap:var(--s3)}
 .range-row input[type=range]{flex:1}
-.range-val{display:inline-block;width:40px;text-align:right;color:var(--blue);font-weight:700}
-.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-@media(max-width:500px){.form-row{grid-template-columns:1fr}.header h1{max-width:48%}}
-/* Buttons */
-.btn{padding:8px 16px;border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;
-  font-size:13px;font-weight:550;background:var(--card-2);color:var(--text);
-  transition:transform .12s,box-shadow .15s,background .15s,border-color .15s}
-.btn:hover{background:var(--card-hi);border-color:#39414d}
-.btn:active{transform:translateY(1px)}
-.btn:disabled{opacity:.5;cursor:not-allowed}
-.btn-primary{background:linear-gradient(180deg,#46c75e,#34a84a);color:#04140a;border-color:transparent;
-  box-shadow:0 4px 14px rgba(63,185,80,.28)}
-.btn-primary:hover{background:linear-gradient(180deg,#52d368,#3bb454);
-  box-shadow:0 6px 18px rgba(63,185,80,.38);border-color:transparent}
-.btn-danger{background:linear-gradient(180deg,#fa5d54,#e4423a);color:#fff;border-color:transparent;
-  box-shadow:0 4px 14px rgba(248,81,73,.26)}
-.btn-danger:hover{background:linear-gradient(180deg,#fc6c63,#e84b43);
-  box-shadow:0 6px 18px rgba(248,81,73,.36);border-color:transparent}
-.btn-secondary{background:var(--card-2);color:var(--text);border:1px solid var(--border)}
-.btn-secondary:hover{background:var(--card-hi);border-color:#39414d}
-.btn-row{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
-/* This project's own button class names, restyled onto the AIWatch system */
-.save-btn,.btn-small,.btn-add,.btn-save-server,.action-btn{padding:8px 16px;
-  border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-size:13px;
-  font-weight:550;background:var(--card-2);color:var(--text);
-  transition:transform .12s,box-shadow .15s,background .15s,border-color .15s}
-.save-btn:hover,.btn-small:hover,.btn-add:hover,.btn-save-server:hover,.action-btn:hover{
-  background:var(--card-hi);border-color:#39414d}
-.save-btn:active,.btn-small:active,.btn-add:active,.btn-save-server:active,.action-btn:active{
-  transform:translateY(1px)}
-.save-btn:disabled,.btn-small:disabled,.btn-add:disabled,.btn-save-server:disabled,
-.action-btn:disabled{opacity:.5;cursor:not-allowed}
-.save-btn,.btn-save-server,.btn-add,.upload-action-btn{
-  background:linear-gradient(180deg,#46c75e,#34a84a);color:#04140a;border-color:transparent;
-  box-shadow:0 4px 14px rgba(63,185,80,.28)}
-.save-btn:hover,.btn-save-server:hover,.btn-add:hover,.upload-action-btn:hover{
-  background:linear-gradient(180deg,#52d368,#3bb454);box-shadow:0 6px 18px rgba(63,185,80,.38);
-  border-color:transparent}
-.btn-delete,.delete-action-btn{background:linear-gradient(180deg,#fa5d54,#e4423a);color:#fff;
-  border-color:transparent;box-shadow:0 4px 14px rgba(248,81,73,.26)}
-.btn-delete:hover,.delete-action-btn:hover{background:linear-gradient(180deg,#fc6c63,#e84b43);
-  box-shadow:0 6px 18px rgba(248,81,73,.36);border-color:transparent}
-.save-btn{padding:12px 32px;font-size:14px;font-weight:650}
-/* Toggles — AIWatch 44x24 pill on both class spellings */
-.toggle,.toggle-switch{position:relative;width:44px;height:24px;display:inline-block;flex-shrink:0;
+.range-val{display:inline-block;min-width:44px;text-align:right;color:var(--fg);font-weight:700;
+  font-variant-numeric:tabular-nums}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:var(--s3)}
+/* Setting line: label left, control right, 44px tall (WCAG 2.5.5 target size) */
+.set-row{display:flex;align-items:center;gap:var(--s3);min-height:var(--row);
+  padding:var(--s2) 0;border-bottom:1px solid rgba(255,255,255,.04)}
+.set-row:last-child{border-bottom:0}
+.set-row>label,.set-row .set-label{flex:1 1 auto;min-width:0;font-size:var(--t-md);color:var(--fg);
+  margin:0;text-transform:none;letter-spacing:0;font-weight:500}
+.set-row .set-desc{display:block;font-size:var(--t-xs);color:var(--fg-mut);font-weight:400;
+  margin-top:1px}
+.set-row select,.set-row input[type=text],.set-row input[type=password],.set-row input[type=url]{
+  flex:0 1 46%;min-width:120px;width:auto}
+.set-row input[type=number]{flex:0 0 110px;min-width:0;width:auto}
+.set-row .range-row{flex:0 1 46%;min-width:150px}
+.set-row.stack{flex-wrap:wrap}
+.set-row.stack select,.set-row.stack input{flex:1 1 100%}
+/* Toggles — 44x24 pill inside a 44px row */
+.toggle,.toggle-switch{position:relative;width:44px;height:24px;display:inline-block;flex:0 0 auto;
   vertical-align:middle}
-.toggle input,.toggle-switch input{opacity:0;width:0;height:0}
-.toggle .slider,.toggle-slider{position:absolute;inset:0;background:var(--border);border-radius:24px;
-  cursor:pointer;transition:background .25s}
-.toggle .slider:before,.toggle-slider:before{content:"";position:absolute;height:18px;width:18px;
-  left:3px;bottom:3px;background:#fff;border-radius:50%;transition:transform .25s;
-  box-shadow:0 1px 3px rgba(0,0,0,.4)}
-.toggle input:checked+.slider,.toggle-switch input:checked+.toggle-slider{
-  background:linear-gradient(180deg,#46c75e,#34a84a)}
-.toggle input:checked+.slider:before,.toggle-switch input:checked+.toggle-slider:before{
-  transform:translateX(20px)}
-/* Toast (AIWatch bottom-right) */
-.toast{position:fixed;bottom:22px;right:22px;padding:11px 18px;border-radius:10px;font-size:13.5px;
-  font-weight:500;z-index:999;opacity:0;transform:translateY(6px);
-  transition:opacity .3s,transform .3s;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,.45);
-  max-width:min(420px,calc(100vw - 44px))}
+.toggle input,.toggle-switch input{opacity:0;width:100%;height:100%;margin:0;cursor:pointer}
+.toggle .slider,.toggle-slider,.toggle .toggle-slider{position:absolute;inset:0;
+  background:var(--toggle-bg);border-radius:var(--r-pill);pointer-events:none;
+  transition:background var(--dur) var(--ease)}
+.toggle .slider:before,.toggle-slider:before,.toggle .toggle-slider:before{content:"";position:absolute;
+  height:18px;width:18px;left:3px;top:3px;background:#fff;border-radius:50%;
+  box-shadow:0 1px 3px rgba(0,0,0,.45);transition:transform var(--dur) var(--ease)}
+.toggle input:checked+.slider,.toggle input:checked+.toggle-slider,
+.toggle-switch input:checked+.toggle-slider{background:var(--accent)}
+.toggle input:checked+.slider:before,.toggle input:checked+.toggle-slider:before,
+.toggle-switch input:checked+.toggle-slider:before{transform:translateX(20px)}
+.toggle input:focus-visible+.slider,.toggle input:focus-visible+.toggle-slider,
+.toggle-switch input:focus-visible+.toggle-slider{outline:2px solid var(--focus);outline-offset:2px}
+/* ── Buttons ──────────────────────────────────────────────────────────── */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:var(--row);
+  padding:0 var(--s4);border:var(--hair);border-radius:var(--r-md);cursor:pointer;font:inherit;
+  font-size:var(--t-sm);font-weight:600;background:var(--surface-2);color:var(--fg);
+  text-decoration:none;transition:transform 120ms,background 150ms,border-color 150ms,opacity 150ms}
+.btn:hover{background:var(--surface-3);border-color:var(--border-2)}
+.btn:active{transform:translateY(1px)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn .i{width:16px;height:16px}
+.btn-primary{background:var(--accent);color:var(--fg-inv);border-color:transparent;font-weight:700}
+.btn-primary:hover{background:var(--accent-2);border-color:transparent;color:var(--fg-inv)}
+.btn-danger{background:transparent;color:var(--danger);border-color:rgba(240,96,90,.45)}
+.btn-danger:hover{background:var(--danger-bg);border-color:var(--danger);color:var(--danger)}
+.btn-danger-solid{background:var(--danger);color:#fff;border-color:transparent}
+.btn-secondary,.btn-ghost{background:transparent;border-color:var(--border-2);color:var(--fg-mut)}
+.btn-secondary:hover,.btn-ghost:hover{background:rgba(255,255,255,.04);color:var(--fg)}
+.btn-small,.btn-xs{min-height:36px;padding:0 var(--s3);font-size:var(--t-xs)}
+.btn-icon{min-height:36px;width:36px;padding:0}
+.btn-row{display:flex;gap:var(--s2);margin-top:var(--s4);flex-wrap:wrap}
+.btn-row.end{justify-content:flex-end}
+/* This project's own button class names, mapped onto the same three variants */
+.save-btn,.btn-save-server,.btn-add,.upload-action-btn{display:inline-flex;align-items:center;
+  justify-content:center;gap:7px;min-height:var(--row);padding:0 var(--s5);border:0;
+  border-radius:var(--r-md);cursor:pointer;font:inherit;font-size:var(--t-md);font-weight:700;
+  background:var(--accent);color:var(--fg-inv);transition:background 150ms,transform 120ms}
+.save-btn:hover,.btn-save-server:hover,.btn-add:hover,.upload-action-btn:hover{background:var(--accent-2)}
+.save-btn:active,.btn-save-server:active,.btn-add:active,.upload-action-btn:active{transform:translateY(1px)}
+.btn:disabled,.save-btn:disabled,.btn-save-server:disabled,.btn-add:disabled,
+.upload-action-btn:disabled,.btn-small:disabled,.action-btn:disabled{
+  opacity:.45;cursor:not-allowed;pointer-events:none}
+.btn-add,.action-btn{display:inline-flex;align-items:center;
+  justify-content:center;gap:6px;min-height:36px;padding:0 var(--s3);border:var(--hair);
+  border-radius:var(--r-sm);cursor:pointer;font:inherit;font-size:var(--t-sm);font-weight:600;
+  background:var(--surface-2);color:var(--fg)}
+.action-btn:hover,.btn-small:hover{background:var(--surface-3);border-color:var(--border-2)}
+.btn-delete,.delete-action-btn{background:transparent;color:var(--danger);
+  border:1px solid rgba(240,96,90,.45)}
+.btn-delete:hover,.delete-action-btn:hover{background:var(--danger-bg);border-color:var(--danger)}
+/* ── Badges, chips, lists ─────────────────────────────────────────────── */
+.badge{display:inline-flex;align-items:center;gap:5px;padding:2px var(--s2);border-radius:var(--r-pill);
+  font-size:var(--t-xs);font-weight:600;letter-spacing:.3px;background:rgba(255,255,255,.06);
+  color:var(--fg-mut);border:1px solid rgba(255,255,255,.06);white-space:nowrap}
+.badge.ok{background:var(--ok-bg);color:var(--ok);border-color:rgba(63,191,106,.3)}
+.badge.info{background:var(--info-bg);color:var(--info);border-color:rgba(90,162,232,.3)}
+/* Right-align the last item in a flex row (a badge in a card title, a count) */
+.push{margin-left:auto;flex:0 0 auto}
+.badge.warn{background:var(--warn-bg);color:var(--warn);border-color:rgba(217,163,56,.32)}
+.badge.err{background:var(--danger-bg);color:var(--danger);border-color:rgba(240,96,90,.32)}
+.subtabs{display:flex;gap:var(--s2);overflow-x:auto;padding:2px 0 var(--s3);scrollbar-width:thin}
+.subtab{flex:0 0 auto;min-height:36px;padding:0 var(--s3);border-radius:var(--r-pill);
+  border:var(--hair);background:transparent;color:var(--fg-mut);font:inherit;font-size:var(--t-sm);
+  font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px;
+  transition:background 150ms,color 150ms,border-color 150ms}
+.subtab:hover{color:var(--fg);border-color:var(--border-2)}
+.subtab .i{width:15px;height:15px}
+.subtab.active{background:var(--accent);border-color:transparent;color:var(--fg-inv)}
+/* Unsaved-changes dot on a category chip */
+.subtab.dirty::after{content:"";width:7px;height:7px;border-radius:50%;background:var(--warn)}
+.list{display:flex;flex-direction:column;gap:var(--s3)}
+.list-item{border:var(--hair);border-radius:var(--r-md);padding:var(--s3) var(--s4);
+  background:var(--surface-2)}
+.list-item .li-head{display:flex;align-items:center;gap:var(--s3);min-height:28px}
+.list-item .li-title{font-weight:650;flex:1 1 auto;min-width:0;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.list-item .li-body{margin-top:var(--s3)}
+a.list-item{display:block;color:var(--fg);text-decoration:none;
+  transition:border-color 150ms,background 150ms}
+a.list-item:hover{border-color:var(--border-2);background:var(--surface-3)}
+a.list-item .i-arrow{stroke:var(--fg-dim);transition:transform 150ms,stroke 150ms}
+a.list-item:hover .i-arrow{transform:translateX(3px);stroke:var(--accent)}
+.foot-note{text-align:center;color:var(--fg-dim);font-size:var(--t-sm);margin:var(--s5) 0 0}
+/* ── Tables ───────────────────────────────────────────────────────────── */
+.table-wrap{overflow-x:auto;border:var(--hair);border-radius:var(--r-md);
+  background:var(--surface);-webkit-overflow-scrolling:touch}
+table{width:100%;border-collapse:collapse;font-size:var(--t-sm)}
+th{text-align:left;font-size:var(--t-xs);text-transform:uppercase;letter-spacing:.6px;
+  color:var(--fg-mut);font-weight:650;padding:var(--s3) var(--s4);border-bottom:var(--hair);
+  background:var(--surface-2);white-space:nowrap;position:sticky;top:0;z-index:1}
+td{padding:var(--s3) var(--s4);border-bottom:1px solid rgba(255,255,255,.045);vertical-align:middle}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover{background:rgba(255,255,255,.028)}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td .row-actions{display:flex;gap:6px;justify-content:flex-end}
+/* ── Feedback ─────────────────────────────────────────────────────────── */
+.toast{position:fixed;bottom:var(--s5);right:var(--s5);z-index:var(--z-toast);
+  display:flex;align-items:center;gap:var(--s3);padding:var(--s3) var(--s4);border-radius:var(--r-md);
+  font-size:var(--t-sm);font-weight:600;max-width:min(420px,calc(100vw - 32px));
+  background:var(--surface-3);color:var(--fg);border:var(--hair);box-shadow:var(--shadow-up);
+  opacity:0;transform:translateY(8px);pointer-events:none;
+  transition:opacity var(--dur) var(--ease),transform var(--dur) var(--ease)}
 .toast.show{opacity:1;transform:none}
-.toast.ok{background:linear-gradient(180deg,#46c75e,#34a84a);color:#04140a}
-.toast.err{background:linear-gradient(180deg,#fa5d54,#e4423a);color:#fff}
-/* Spinner (shared base so every page gets the same 48px ring) */
-.loader{width:48px;height:48px;border:5px solid var(--border);border-bottom-color:var(--blue);
-  border-radius:50%;display:inline-block;box-sizing:border-box;animation:rotation 1s linear infinite}
-@keyframes rotation{from{transform:rotate(0)}to{transform:rotate(360deg)}}
-/* Inline feedback banners (pages that are not on the toast API yet) */
-.status-ok,.message.success{background:rgba(63,185,80,.12);color:var(--green);
-  border:1px solid rgba(63,185,80,.35)}
-.status-err,.message.error{background:rgba(248,81,73,.12);color:var(--red);
-  border:1px solid rgba(248,81,73,.35)}
-::-webkit-scrollbar{width:9px;height:9px}
-::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:var(--border);border-radius:6px}
-::-webkit-scrollbar-thumb:hover{background:#39414d}
+.toast.err{border-color:rgba(240,96,90,.5)}
+.toast.ok{border-color:rgba(63,191,106,.5)}
+.toast .i{width:16px;height:16px}
+.toast.err .i{stroke:var(--danger)}
+.toast.ok .i{stroke:var(--ok)}
+.toast .t-x{margin-left:auto;background:none;border:0;color:var(--fg-mut);cursor:pointer;
+  padding:4px;display:flex;min-height:0}
+.banner{display:flex;align-items:flex-start;gap:var(--s3);padding:var(--s3) var(--s4);
+  border-radius:var(--r-md);border:var(--hair);background:var(--surface-2);font-size:var(--t-sm);
+  margin-bottom:var(--s4)}
+.banner.warn{background:var(--warn-bg);border-color:rgba(217,163,56,.35);color:var(--warn)}
+.banner.err{background:var(--danger-bg);border-color:rgba(240,96,90,.35);color:var(--danger)}
+.banner.info{background:var(--info-bg);border-color:rgba(90,162,232,.3);color:var(--info)}
+.banner .i{stroke:currentColor;margin-top:2px}
+.status-ok,.message.success{display:block;padding:var(--s3) var(--s4);border-radius:var(--r-md);
+  background:var(--ok-bg);color:var(--ok);border:1px solid rgba(63,191,106,.3);font-size:var(--t-sm)}
+.status-err,.message.error{display:block;padding:var(--s3) var(--s4);border-radius:var(--r-md);
+  background:var(--danger-bg);color:var(--danger);border:1px solid rgba(240,96,90,.3);font-size:var(--t-sm)}
+.empty{display:flex;flex-direction:column;align-items:center;gap:var(--s2);padding:var(--s6) var(--s4);
+  color:var(--fg-mut);text-align:center;font-size:var(--t-sm);border:1px dashed var(--border-2);
+  border-radius:var(--r-md);background:rgba(255,255,255,.015)}
+.empty .i{width:26px;height:26px;stroke:var(--fg-dim)}
+.bar{height:6px;border-radius:6px;background:var(--border);overflow:hidden}
+.bar>i{display:block;height:100%;background:var(--accent);border-radius:6px;
+  transition:width var(--dur) var(--ease)}
+.mono{font-family:var(--mono);font-size:var(--t-xs);line-height:1.55}
+/* Loading: skeleton beats a spinner for content that will fill the same shape */
+.sk{position:relative;overflow:hidden;background:var(--surface-2);border-radius:var(--r-sm);
+  height:14px;margin:var(--s2) 0}
+.sk.tall{height:44px}
+.stat .sk{height:22px;width:72%;margin:0}
+.sk::after{content:"";position:absolute;inset:0;transform:translateX(-100%);
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.06),transparent);
+  animation:shimmer 1.3s infinite}
+.loader{width:34px;height:34px;border:3px solid var(--border);border-bottom-color:var(--accent);
+  border-radius:50%;display:inline-block;animation:spin .9s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes shimmer{to{transform:translateX(100%)}}
+@keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 @keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+/* ── Scrollbars ───────────────────────────────────────────────────────── */
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:6px;border:2px solid transparent;
+  background-clip:content-box}
+::-webkit-scrollbar-thumb:hover{background:var(--border-2)}
+/* ── Responsive (WCAG 1.4.10 reflow at 320px; Material/Flutter 600px rule) ─ */
+@media(max-width:600px){
+  :root{--gutter:12px;--t-num:22px}
+  .header{padding:10px var(--gutter)}
+  .header h1{font-size:var(--t-md)}
+  .header .hdr-status{display:none}
+  .form-row{grid-template-columns:1fr}
+  .card{padding:var(--s4);border-radius:var(--r-md)}
+  .content{padding-top:var(--s4)}
+  .set-row select,.set-row input[type=text],.set-row input[type=password],.set-row input[type=url]{
+    flex:1 1 40%;min-width:110px}
+  .toast{left:var(--s3);right:var(--s3);bottom:var(--s3);max-width:none}
+  .col-size{display:none}
+}
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001ms !important;animation-iteration-count:1 !important;
+    transition-duration:.001ms !important;scroll-behavior:auto !important}
+  .sk::after{animation:none}
+}
 /* AIWATCH-CORE:END */
 </style>
 </head>
 <body>
 <div class="header">
-  <h1 data-en="📚 CrossPoint Reader" data-cn="📚 CrossPoint 阅读器"
-      data-en-title="Files - CrossPoint Reader" data-cn-title="文件管理 - CrossPoint Reader">📚 CrossPoint Reader</h1>
+  <h1 data-en-title="Files - CrossPoint Reader" data-cn-title="文件管理 - CrossPoint 阅读器">
+    <svg class="i" aria-hidden="true"><use href="#i-book"/></svg>
+    <span data-en="CrossPoint Reader" data-cn="CrossPoint 阅读器">CrossPoint Reader</span>
+    <span class="sub">OnePage</span>
+  </h1>
   <span class="hdr-status"></span>
 </div>
 
 <div class="tabs">
-  <a class="tab" href="/" data-en="Home" data-cn="首页">Home</a>
-  <a class="tab active" href="/files" data-en="File Manager" data-cn="文件管理">File Manager</a>
-  <a class="tab" href="/settings" data-en="Settings" data-cn="设置">Settings</a>
-  <a class="tab" href="/fonts" data-en="Fonts" data-cn="字体">Fonts</a>
+  <a class="tab" href="/"><svg class="i i-sm" aria-hidden="true"><use href="#i-home"/></svg><span data-en="Home" data-cn="首页">Home</span></a>
+  <a class="tab active" href="/files"><svg class="i i-sm" aria-hidden="true"><use href="#i-folder"/></svg><span data-en="File Manager" data-cn="文件管理">File Manager</span></a>
+  <a class="tab" href="/settings"><svg class="i i-sm" aria-hidden="true"><use href="#i-gear"/></svg><span data-en="Settings" data-cn="设置">Settings</span></a>
+  <a class="tab" href="/fonts"><svg class="i i-sm" aria-hidden="true"><use href="#i-type"/></svg><span data-en="Fonts" data-cn="字体">Fonts</span></a>
 </div>
 
 <div class="content">
 <div class="page-header">
   <div class="page-header-left">
-    <h2 data-en="📁 File Manager" data-cn="📁 文件管理">📁 File Manager</h2>
+    <h2><svg class="i" aria-hidden="true"><use href="#i-folder"/></svg><span data-en="File Manager" data-cn="文件管理">File Manager</span></h2>
   </div>
 
   <div class="action-buttons">
-    <button class="action-btn upload-action-btn" onclick="openUploadModal()" data-en="📤 Upload" data-cn="📤 上传">📤 Upload</button>
-    <button class="action-btn folder-action-btn" onclick="openFolderModal()" data-en="📁 New Folder" data-cn="📁 新建文件夹">📁 New Folder</button>
-    <button class="action-btn delete-action-btn" onclick="openDeleteSelectedModal()" data-en="🗑️ Delete Selected" data-cn="🗑️ 删除所选">🗑️ Delete Selected</button>
+    <button class="btn btn-primary" onclick="openUploadModal()"><svg class="i i-sm" aria-hidden="true"><use href="#i-upload"/></svg><span data-en="Upload" data-cn="上传">Upload</span></button>
+    <button class="btn btn-secondary" onclick="openFolderModal()"><svg class="i i-sm" aria-hidden="true"><use href="#i-plus"/></svg><span data-en="New Folder" data-cn="新建文件夹">New Folder</span></button>
+    <button class="btn btn-danger" onclick="openDeleteSelectedModal()"><svg class="i i-sm" aria-hidden="true"><use href="#i-trash"/></svg><span data-en="Delete Selected" data-cn="删除所选">Delete Selected</span></button>
   </div>
 </div>
 
 <!-- Failed Uploads Banner -->
 <div class="failed-uploads-banner" id="failedUploadsBanner">
   <div class="failed-uploads-header">
-    <h3 class="failed-uploads-title" data-en="⚠️ Some files failed to upload" data-cn="⚠️ 部分文件上传失败">⚠️ Some files failed to upload</h3>
-    <button class="dismiss-btn" onclick="dismissFailedUploads()" title="Dismiss">&times;</button>
+    <h3 class="failed-uploads-title"><svg class="i i-sm" aria-hidden="true"><use href="#i-alert"/></svg><span data-en="Some files failed to upload" data-cn="部分文件上传失败">Some files failed to upload</span></h3>
+    <button class="dismiss-btn" onclick="dismissFailedUploads()" aria-label="Dismiss"><svg class="i i-sm" aria-hidden="true"><use href="#i-x"/></svg></button>
   </div>
   <div id="failedFilesList"></div>
   <button class="retry-all-btn" onclick="retryAllFailedUploads()" data-en="Retry All Failed Uploads" data-cn="重试全部失败文件">Retry All Failed Uploads</button>
@@ -1648,8 +1639,8 @@ body{
   </div>
 
   <div id="file-table">
-    <div class="loader-container">
-      <span class="loader"></span>
+    <div class="list" id="file-table-skeleton">
+      <span class="sk tall"></span><span class="sk tall"></span><span class="sk tall"></span><span class="sk tall"></span>
     </div>
   </div>
 </div>
@@ -1668,13 +1659,13 @@ body{
 <!-- Upload Modal -->
 <div class="modal-overlay" id="uploadModal">
   <div class="modal">
-    <button class="modal-close" id="uploadModalClose" onclick="closeUploadModal()">&times;</button>
-    <h3 data-en="📤 Upload file" data-cn="📤 上传文件">📤 Upload file</h3>
+    <button class="modal-close" id="uploadModalClose" onclick="closeUploadModal()"><svg class="i i-sm" aria-hidden="true"><use href="#i-x"/></svg></button>
+<h3><svg class="i i-sm" aria-hidden="true"><use href="#i-upload"/></svg><span data-en="Upload file" data-cn="上传文件">Upload file</span></h3>
     <div class="upload-form">
       <p class="file-info"><span data-en="Select a file to upload to " data-cn="选择上传到 ">Select a file to upload to </span><strong id="uploadPathDisplay"></strong></p>
       <div class="drop-zone" id="dropZone">
         <input type="file" id="fileInput" onchange="validateFile()" multiple>
-        <p class="drop-zone-hint" data-en="⬇ Drop files here — or click to browse" data-cn="⬇ 将文件拖到此处，或点击浏览">⬇ Drop files here — or click to browse</p>
+        <p class="drop-zone-hint"><svg class="i i-sm" aria-hidden="true"><use href="#i-upload"/></svg><span data-en="Drop files here — or click to browse" data-cn="将文件拖到此处，或点击浏览">Drop files here — or click to browse</span></p>
       </div>
       <div class="picker-columns" id="pickerColumns">
         <div class="convert-options" id="convertOptions" style="display:none;">
@@ -1694,16 +1685,15 @@ body{
           </div>
 
           <div class="convert-settings" id="convertSettings" style="display:block;">
-            <span data-en="⚫ True-Grayscale" data-cn="⚫ 真灰度">⚫ True-Grayscale</span>
-          <span id="convertSizeSummary">📏 Max 480×800px</span>
-          <span>📦 85% JPEG</span>
-          <span data-en="🔧 Fix SVG" data-cn="🔧 修复 SVG">🔧 Fix SVG</span>
+            <span data-en="True grayscale" data-cn="真灰度">True grayscale</span>
+            <span id="convertSizeSummary">Max 480×800px</span>
+            <span data-en="Fix SVG" data-cn="修复 SVG">Fix SVG</span>
         </div>
         <!-- Advanced Settings Content -->
         <div class="advanced-settings-content" id="advancedSettingsContent">
           <!-- JPEG Quality -->
           <div class="advanced-setting-row quality-row">
-            <div class="setting-title" data-en="📦 JPEG Quality" data-cn="📦 JPEG 质量">📦 JPEG Quality</div>
+            <div class="setting-title" data-en="JPEG Quality" data-cn="JPEG 质量">JPEG Quality</div>
             <div class="quality-presets">
               <button class="quality-preset" data-value="30" onclick="setQualityPreset(30)" title="Minimum quality">30%</button>
               <button class="quality-preset" data-value="45" onclick="setQualityPreset(45)" title="Low quality">45%</button>
@@ -1720,7 +1710,7 @@ body{
           <div class="advanced-setting-row" style="display:none;">
             <div class="setting-toggle">
               <div>
-                <div class="setting-title" data-en="⚫ True-Grayscale" data-cn="⚫ 真灰度">⚫ True-Grayscale</div>
+                <div class="setting-title" data-en="True-Grayscale" data-cn="真灰度">True-Grayscale</div>
                 <div class="setting-desc" data-en="BT.601 luminance formula (recommended for e-ink)" data-cn="BT.601 亮度公式（推荐用于墨水屏）">BT.601 luminance formula (recommended for e-ink)</div>
               </div>
               <label class="toggle-switch">
@@ -1733,7 +1723,7 @@ body{
           <!-- Auto-crop Margins -->
           <div class="advanced-setting-row">
             <div class="setting-label">
-              <div class="setting-title" data-en="✂ Auto-crop Margins" data-cn="✂ 自动裁边">✂ Auto-crop Margins</div>
+              <div class="setting-title" data-en="Auto-crop Margins" data-cn="自动裁边">Auto-crop Margins</div>
               <div class="setting-desc" data-en="Trim uniform borders and scale image content to fit" data-cn="裁剪留白边距并缩放图片以适应页面">Trim uniform borders and scale image content to fit</div>
             </div>
             <div class="setting-controls">
@@ -1745,7 +1735,7 @@ body{
           </div>
           <!-- Target Device -->
           <div class="advanced-setting-row" id="deviceSettingRow">
-            <div class="setting-title" data-en="📱 Target Device" data-cn="📱 目标设备">📱 Target Device</div>
+            <div class="setting-title" data-en="Target Device" data-cn="目标设备">Target Device</div>
             <div class="setting-controls">
               <div class="rotation-buttons">
                 <button class="rotation-btn device-btn active" data-value="auto" onclick="setDeviceTarget('auto')">
@@ -1772,7 +1762,7 @@ body{
           </div>
           <!-- Overlap Settings -->
           <div class="advanced-setting-row" id="overlapSettingRow">
-            <div class="setting-title" data-en="📐 Min Overlap" data-cn="📐 最小重叠">📐 Min Overlap</div>
+            <div class="setting-title" data-en="Min Overlap" data-cn="最小重叠">Min Overlap</div>
             <div class="setting-controls">
               <div class="overlap-selector">
                 <button class="overlap-btn active" data-value="5" onclick="setOverlap(5)">5%</button>
@@ -1784,7 +1774,7 @@ body{
           <!-- Conversion Log Export -->
           <div class="advanced-setting-row">
             <div class="setting-label">
-              <div class="setting-title" data-en="📥 Auto-download Log" data-cn="📥 自动下载日志">📥 Auto-download Log</div>
+              <div class="setting-title" data-en="Auto-download Log" data-cn="自动下载日志">Auto-download Log</div>
               <div class="setting-desc" data-en="Export detailed log with statistics" data-cn="导出含统计信息的详细日志">Export detailed log with statistics</div>
             </div>
             <div class="setting-controls">
@@ -1799,31 +1789,31 @@ body{
       <!-- Image Picker Section - in picker-columns for two-column layout -->
       <div class="image-picker-section" id="imagePickerSection" style="display:none;">
         <div class="image-picker-header">
-          <span class="image-picker-title" data-en="🖼️ Image Processing Options" data-cn="🖼️ 图片处理选项">🖼️ Image Processing Options</span>
+          <span class="image-picker-title"><svg class="i i-sm" aria-hidden="true"><use href="#i-image"/></svg><span data-en="Image Processing Options" data-cn="图片处理选项">Image Processing Options</span></span>
           <span class="image-picker-count" id="imagePickerCount">0 images</span>
         </div>
         <div class="state-legend">
-          <div class="legend-item locked">
-            <span>🔒</span>
+          <div class="legend-item locked" data-en-title="Locked by the converter" data-cn-title="由转换器锁定">
+            <span class="legend-color" style="background:var(--border-2)"></span>
             <span data-en="Cover" data-cn="封面">Cover</span>
           </div>
-          <div class="legend-item locked">
-            <span style="color:#1abc9c">✦</span>
+          <div class="legend-item locked" data-en-title="Locked by the converter" data-cn-title="由转换器锁定">
+            <span class="legend-color" style="background:var(--surface-3)"></span>
             <span data-en="Separator" data-cn="分隔页">Separator</span>
           </div>
-          <button class="legend-btn" style="--btn-color:var(--label-color)" onclick="applyStateToAll(0)">
+          <button class="legend-btn" style="--btn-color:var(--border-2)" onclick="applyStateToAll(0)">
             <div class="legend-color"></div>
             <span data-en="Normal" data-cn="正常">Normal</span>
           </button>
-          <button class="legend-btn" style="--btn-color:var(--blue)" onclick="applyStateToAll(1)">
+          <button class="legend-btn" style="--btn-color:var(--info)" onclick="applyStateToAll(1)">
             <div class="legend-color"></div>
-            <span>H-Split</span>
+            <span data-en="H-Split" data-cn="横向分割">H-Split</span>
           </button>
-          <button class="legend-btn" style="--btn-color:var(--red)" onclick="applyStateToAll(2)">
+          <button class="legend-btn" style="--btn-color:var(--danger)" onclick="applyStateToAll(2)">
             <div class="legend-color"></div>
-            <span>V-Split</span>
+            <span data-en="V-Split" data-cn="纵向分割">V-Split</span>
           </button>
-          <button class="legend-btn" style="--btn-color:var(--purple)" onclick="applyStateToAll(3)">
+          <button class="legend-btn" style="--btn-color:var(--warn)" onclick="applyStateToAll(3)">
             <div class="legend-color"></div>
             <span data-en="Rotate" data-cn="旋转">Rotate</span>
           </button>
@@ -1833,7 +1823,7 @@ body{
       </div><!-- end picker-columns -->
       <!-- Sync compatibility warning - outside picker-columns -->
       <div class="convert-warning" id="convertWarning" style="display:none;" role="alert" aria-live="polite">
-        <span data-en="⚠️ Converting will modify files and can break hash‑based sync. ⚠️" data-cn="⚠️ 转换会修改文件，可能破坏基于哈希的同步。 ⚠️">⚠️ Converting will modify files and can break hash‑based sync. ⚠️</span><br>
+        <span><svg class="i i-sm" aria-hidden="true"><use href="#i-alert"/></svg><span data-en="Converting will modify files and can break hash-based sync." data-cn="转换会修改文件，可能破坏基于哈希的同步。">Converting will modify files and can break hash-based sync.</span></span><br>
         <span data-en="Please back up or disable sync before proceeding." data-cn="请先备份或关闭同步再继续。">Please back up or disable sync before proceeding.</span>
       </div>
       <!-- Optimize & Upload button - shown when picker is visible, replaces Upload -->
@@ -1846,7 +1836,7 @@ body{
       </div>
       <div class="log-section" id="log-section">
         <div class="log-header">
-          <div class="log-title" data-en="📋 Conversion Log" data-cn="📋 转换日志">📋 Conversion Log</div>
+          <div class="log-title" data-en="Conversion Log" data-cn="转换日志">Conversion Log</div>
         </div>
         <div class="log-container" id="log-container"></div>
       </div>
@@ -1857,8 +1847,8 @@ body{
 <!-- New Folder Modal -->
 <div class="modal-overlay" id="folderModal">
   <div class="modal">
-    <button class="modal-close" onclick="closeFolderModal()">&times;</button>
-    <h3 data-en="📁 New Folder" data-cn="📁 新建文件夹">📁 New Folder</h3>
+    <button class="modal-close" onclick="closeFolderModal()"><svg class="i i-sm" aria-hidden="true"><use href="#i-x"/></svg></button>
+<h3><svg class="i i-sm" aria-hidden="true"><use href="#i-folder"/></svg><span data-en="New Folder" data-cn="新建文件夹">New Folder</span></h3>
     <div class="folder-form">
       <p class="file-info"><span data-en="Create a new folder in " data-cn="在以下位置新建文件夹 ">Create a new folder in </span><strong id="folderPathDisplay"></strong></p>
       <input type="text" id="folderName" class="folder-input" placeholder="Folder name..."
@@ -1872,10 +1862,10 @@ body{
 <!-- Delete Confirmation Modal -->
 <div class="modal-overlay" id="deleteModal">
   <div class="modal">
-    <button class="modal-close" onclick="closeDeleteModal()">&times;</button>
-    <h3 data-en="🗑️ Delete Item(s)" data-cn="🗑️ 删除项目">🗑️ Delete Item(s)</h3>
+    <button class="modal-close" onclick="closeDeleteModal()"><svg class="i i-sm" aria-hidden="true"><use href="#i-x"/></svg></button>
+<h3><svg class="i i-sm" aria-hidden="true"><use href="#i-trash"/></svg><span data-en="Delete Item(s)" data-cn="删除项目">Delete Item(s)</span></h3>
     <div class="folder-form">
-      <p class="delete-warning" data-en="⚠️ This action cannot be undone!" data-cn="⚠️ 此操作无法撤销！">⚠️ This action cannot be undone!</p>
+      <p class="delete-warning"><svg class="i i-sm" aria-hidden="true"><use href="#i-alert"/></svg><span data-en="This action cannot be undone!" data-cn="此操作无法撤销！">This action cannot be undone!</span></p>
       <p class="file-info" data-en="Are you sure you want to delete the following item(s)?" data-cn="确定要删除以下项目吗？">Are you sure you want to delete the following item(s)?</p>
       <div id="deleteItemList" style="max-height:240px; overflow:auto; margin-bottom:10px;"></div>
       <button class="delete-btn-confirm" onclick="confirmDelete()" data-en="Delete" data-cn="删除">Delete</button>
@@ -1887,8 +1877,8 @@ body{
 <!-- Rename Modal -->
 <div class="modal-overlay" id="renameModal">
   <div class="modal">
-    <button class="modal-close" onclick="closeRenameModal()">&times;</button>
-    <h3 data-en="✏️ Rename File" data-cn="✏️ 重命名文件">✏️ Rename File</h3>
+    <button class="modal-close" onclick="closeRenameModal()"><svg class="i i-sm" aria-hidden="true"><use href="#i-x"/></svg></button>
+    <h3><svg class="i i-sm" aria-hidden="true"><use href="#i-pencil"/></svg><span data-en="Rename File" data-cn="重命名文件">Rename File</span></h3>
     <div class="folder-form">
       <p class="file-info"><span data-en="Renaming " data-cn="重命名 ">Renaming </span><strong id="renameItemName"></strong></p>
       <input type="text" id="renameNewName" class="folder-input" placeholder="New file name..."
@@ -1903,8 +1893,8 @@ body{
 <!-- Move Modal -->
 <div class="modal-overlay" id="moveModal">
   <div class="modal">
-    <button class="modal-close" onclick="closeMoveModal()">&times;</button>
-    <h3 data-en="📂 Move File" data-cn="📂 移动文件">📂 Move File</h3>
+    <button class="modal-close" onclick="closeMoveModal()"><svg class="i i-sm" aria-hidden="true"><use href="#i-x"/></svg></button>
+<h3><svg class="i i-sm" aria-hidden="true"><use href="#i-arrow-right"/></svg><span data-en="Move File" data-cn="移动文件">Move File</span></h3>
     <div class="folder-form">
       <p class="file-info"><span data-en="Moving " data-cn="移动 ">Moving </span><strong id="moveItemName"></strong></p>
       <input type="text" id="moveDestPath" class="folder-input" list="moveFolderOptions" placeholder="/Destination/Folder"
@@ -1943,22 +1933,105 @@ function trAttr(key) {
   return ' data-en="' + s.en + '" data-cn="' + s.cn + '"';
 }
 
-// Bottom-right feedback, same behaviour as AIWatch's toast(msg, ok).
+/* Icon sprite. Pages reference symbols as <svg class="i"><use href="#i-name"/></svg>;
+ a <use> resolves once the symbol exists, so injecting it here (before first paint
+ of any dynamic markup) is enough, and the sprite is written once for 4 pages.
+ Stroke-based 24x24 geometry, decorative by default (aria-hidden). */
+const CP_ICONS = '<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">' + [
+  ['home', 'M4 11l8-6.5 8 6.5v8a1.5 1.5 0 01-1.5 1.5H15v-6H9v6H3.5A1.5 1.5 0 012 19z']
+  , ['folder', 'M3 7a2 2 0 012-2h4l2 2.5h8a2 2 0 012 2V18a2 2 0 01-2 2H5a2 2 0 01-2-2z']
+  , ['gear', 'M12 15a3 3 0 100-6 3 3 0 000 6z', 'M19.4 15a1.6 1.6 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.6 1.6 0 00-2.7 1.1V21a2 2 0 11-4 0v-.1A1.6 1.6 0 006.9 19l-.1.1a2 2 0 11-2.8-2.8l.1-.1A1.6 1.6 0 003 13.5H3a2 2 0 110-4h.1A1.6 1.6 0 005.4 6.9L5.3 6.8a2 2 0 112.8-2.8l.1.1A1.6 1.6 0 0011 3.1V3a2 2 0 114 0v.1a1.6 1.6 0 002.7 1.1l.1-.1a2 2 0 112.8 2.8l-.1.1a1.6 1.6 0 001.1 2.7H21a2 2 0 110 4h-.1a1.6 1.6 0 00-1.5 1.2z']
+  , ['type', 'M4 6V4h16v2', 'M12 4v16', 'M9 20h6']
+  , ['wifi', 'M2.5 8.5a15 15 0 0119 0', 'M6 12a10 10 0 0112 0', 'M9.5 15.5a5 5 0 015 0', 'M12 19h.01']
+  , ['cloud', 'M7 18a4 4 0 01-.6-8A5.5 5.5 0 0117 10.5a3.7 3.7 0 011 7.5z']
+  , ['link', 'M10 13a4 4 0 006 .5l2-2a4 4 0 00-5.7-5.7L11 7', 'M14 11a4 4 0 00-6-.5l-2 2A4 4 0 0011.7 18l1.3-1.2']
+  , ['trash', 'M4 7h16', 'M9 7V4h6v3', 'M6 7l1 13h10l1-13', 'M10 11v6M14 11v6']
+  , ['upload', 'M12 16V4', 'M7 9l5-5 5 5', 'M4 17v3h16v-3']
+  , ['download', 'M12 4v12', 'M7 11l5 5 5-5', 'M4 17v3h16v-3']
+  , ['pencil', 'M4 20h4L20 8l-4-4L4 16z', 'M14 6l4 4']
+  , ['arrow-right', 'M4 12h15', 'M13 6l6 6-6 6']
+  , ['plus', 'M12 5v14M5 12h14']
+  , ['check', 'M4 12.5l5 5L20 6.5']
+  , ['x', 'M6 6l12 12M18 6L6 18']
+  , ['alert', 'M12 3l9.5 17H2.5z', 'M12 9v5', 'M12 17h.01']
+  , ['info', 'M12 21a9 9 0 100-18 9 9 0 000 18z', 'M12 11v5', 'M12 8h.01']
+  , ['help', 'M12 21a9 9 0 100-18 9 9 0 000 18z', 'M9.5 9a2.6 2.6 0 015 .9c0 1.7-2.5 2.1-2.5 3.6', 'M12 17h.01']
+  , ['mic', 'M12 15a3 3 0 003-3V6a3 3 0 00-6 0v6a3 3 0 003 3z', 'M5 11a7 7 0 0014 0', 'M12 18v3']
+  , ['grid', 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z']
+  , ['refresh', 'M20 11A8 8 0 006 6l-2 2', 'M4 13a8 8 0 0014 5l2-2', 'M4 4v4h4M20 20v-4h-4']
+  , ['book', 'M4 5a2 2 0 012-2h12v18H6a2 2 0 01-2-2z', 'M8 7h8M8 11h6']
+  , ['clock', 'M12 21a9 9 0 100-18 9 9 0 000 18z', 'M12 7v5l3.5 2']
+  , ['search', 'M11 18a7 7 0 100-14 7 7 0 000 14z', 'M16.5 16.5L21 21']
+  , ['power', 'M12 4v8', 'M17.5 7a7 7 0 11-11 0']
+  , ['battery', 'M3 8h14v8H3zM20 11v2', 'M6 11h5v2H6z']
+  , ['chip', 'M7 7h10v10H7z', 'M10 4v3M14 4v3M10 17v3M14 17v3M4 10h3M4 14h3M17 10h3M17 14h3']
+  , ['save', 'M5 5h11l3 3v11H5z', 'M9 5v5h7V5', 'M8 16h8']
+  , ['server', 'M4 5h16v5H4zM4 14h16v5H4z', 'M8 7.5h.01M8 16.5h.01']
+  , ['sun', 'M12 17a5 5 0 100-10 5 5 0 000 10z', 'M12 2v2M12 20v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M2 12h2M20 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4']
+  , ['sliders', 'M4 7h10M18 7h2M4 17h4M12 17h8', 'M16 4.5v5M8 14.5v5']
+  , ['list', 'M4 6h.01M4 12h.01M4 18h.01', 'M8 6h12M8 12h12M8 18h12']
+  , ['doc', 'M6 3h7l5 5v13H6z', 'M13 3v5h5']
+  , ['image', 'M4 5h16v14H4z', 'M9.2 11a1.7 1.7 0 100-3.4 1.7 1.7 0 000 3.4z', 'M5 18l5-5 3 3 3-3 3 3']
+].map(function (g) {
+    const name = g[0];
+    const paths = g.slice(1).map(function (d) { return '<path d="' + d + '"/>'; }).join('');
+    return '<symbol id="i-' + name + '" viewBox="0 0 24 24">' + paths + '</symbol>';
+  }).join('') + '</svg>';
+
+function icon(name, cls) {
+  return '<svg class="i' + (cls ? ' ' + cls : '') + '" aria-hidden="true"><use href="#i-' +
+    name + '"/></svg>';
+}
+
+// Bottom-right feedback. Errors stay until dismissed (a 3s auto-fade makes critical
+// messages missable); successes expire after 4s.
 let toastTimer = 0;
 function toast(msg, ok) {
   const el = document.getElementById('toast');
   if (!el) return;
-  el.textContent = msg;
-  el.className = 'toast show ' + (ok ? 'ok' : 'err');
+  el.innerHTML = '';
+  const mark = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  mark.setAttribute('class', 'i');
+  mark.setAttribute('aria-hidden', 'true');
+  const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+  use.setAttribute('href', '#i-' + (ok === false ? 'alert' : 'check'));
+  mark.appendChild(use);
+  const text = document.createElement('span');
+  text.textContent = msg;
+  el.appendChild(mark);
+  el.appendChild(text);
+  el.className = 'toast show ' + (ok === false ? 'err' : 'ok');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(function() { el.className = 'toast'; }, 3000);
+  if (ok !== false) toastTimer = setTimeout(function () { el.className = 'toast'; }, 4000);
+}
+document.addEventListener('click', function (e) {
+  const t = e.target && e.target.closest ? e.target.closest('.toast') : null;
+  if (t && t.classList.contains('show')) t.className = 'toast';
+});
+
+// Unsaved-changes guard: pages call cpDirty(true/false) so leaving the tab cannot
+// silently drop edits, and so a chip can show a dot.
+let cpIsDirty = false;
+function cpDirty(on) {
+  cpIsDirty = !!on;
+  window.onbeforeunload = cpIsDirty ? function () { return true; } : null;
 }
 
 function updateLang(skipPage) {
-  document.querySelectorAll('[data-en]').forEach(function(el) {
-    el.textContent = el.getAttribute('data-' + lang);
+  document.querySelectorAll('[data-en]').forEach(function (el) {
+    const next = el.getAttribute('data-' + lang);
+    if (next === null) return;
+    // textContent would destroy child elements (icons, badges). When the labelled
+    // node has element children, rewrite only its first text node instead.
+    if (el.children.length && el.firstChild && el.firstChild.nodeType === 3) {
+      el.firstChild.nodeValue = next;
+    } else if (!el.children.length) {
+      el.textContent = next;
+    } else {
+      el.textContent = next;
+    }
   });
-  document.querySelectorAll('[data-en-ph]').forEach(function(el) {
+  document.querySelectorAll('[data-en-ph]').forEach(function (el) {
     el.placeholder = el.getAttribute('data-' + lang + '-ph') || el.placeholder;
   });
   document.documentElement.lang = lang === 'cn' ? 'zh-Hans' : 'en';
@@ -1967,29 +2040,37 @@ function updateLang(skipPage) {
   if (!skipPage && typeof onLangChange === 'function') onLangChange();
 }
 
-// The switcher itself, appended to the header like AIWatch does (index.html:552).
-const cpHeader = document.querySelector('.header');
-if (cpHeader) {
-  const langBtn = document.createElement('button');
-  langBtn.className = 'btn btn-secondary';
-  langBtn.style.padding = '4px 8px';
-  langBtn.style.fontSize = '11px';
-  langBtn.textContent = '中文 / EN';
-  langBtn.onclick = function() {
-    lang = lang === 'en' ? 'cn' : 'en';
-    try { localStorage.setItem('cp-lang', lang); } catch (e) { /* ignore */ }
-    updateLang();
-  };
-  cpHeader.appendChild(langBtn);
-}
-// Header status line: language-neutral (model, IP, free heap) so it needs no
-// translation — AIWatch uses the same slot for its connection state.
-fetch('/api/status').then(function(r) { return r.json(); }).then(function(d) {
+(function bootCore() {
+  const holder = document.createElement('div');
+  holder.innerHTML = CP_ICONS;
+  document.body.insertBefore(holder, document.body.firstChild);
+
+  const cpHeader = document.querySelector('.header');
+  if (cpHeader) {
+    const langBtn = document.createElement('button');
+    langBtn.className = 'btn btn-secondary btn-small';
+    langBtn.type = 'button';
+    langBtn.textContent = '中文 / EN';
+    langBtn.onclick = function () {
+      lang = lang === 'en' ? 'cn' : 'en';
+      try { localStorage.setItem('cp-lang', lang); } catch (e) { /* ignore */ }
+      updateLang();
+    };
+    cpHeader.appendChild(langBtn);
+  }
+})();
+
+// One /api/status fetch shared by every page (the header line and the Home stats
+// used to each fire their own). Await CP_STATUS elsewhere; it resolves to the
+// parsed object or null.
+window.CP_STATUS = fetch('/api/status').then(function (r) { return r.ok ? r.json() : null; })
+  .catch(function () { return null; });
+window.CP_STATUS.then(function (d) {
   const el = document.querySelector('.hdr-status');
   if (!el || !d) return;
   const kb = d.freeHeap ? Math.round(d.freeHeap / 1024) : 0;
   el.textContent = (d.device || '') + (d.ip ? ' · ' + d.ip : '') + (kb ? ' · ' + kb + ' KB' : '');
-}).catch(function() { /* status line is optional */ });
+});
 
 updateLang(true);
 /* AIWATCH-CORE:END */
@@ -2003,7 +2084,31 @@ updateLang(true);
     colType:     { en: 'Type', cn: '类型' },
     colSize:     { en: 'Size', cn: '大小' },
     colActions:  { en: 'Actions', cn: '操作' },
-    homeCrumb:   { en: '🏠 Home', cn: '🏠 主页' }
+    homeCrumb:   { en: 'Home', cn: '主页' },
+    // Feedback for the validation and failure paths that used to be English alert()s.
+    jszipMissing:     { en: 'JSZip is not loaded, so the image picker is skipped. Conversion will continue.', cn: 'JSZip 未加载，将跳过图片选择步骤，转换继续。' },
+    previewFailed:    { en: 'Failed to preview images', cn: '图片预览失败' },
+    pickItems:        { en: 'Select at least one item to delete.', cn: '请先勾选要删除的项目。' },
+    deleteFailed:     { en: 'Failed to delete', cn: '删除失败' },
+    deleteNetErr:     { en: 'Failed to delete - network error', cn: '删除失败 - 网络错误' },
+    pickFiles:        { en: 'Select at least one file.', cn: '请先选择至少一个文件。' },
+    folderNameRequired: { en: 'Enter a folder name.', cn: '请输入文件夹名称。' },
+    folderNameBad:    { en: 'Folder names cannot contain " * : < > ? / \\ | and must not be . or ..', cn: '文件夹名不能包含 " * : < > ? / \\ |，也不能是 . 或 ..' },
+    createFolderFailed: { en: 'Failed to create folder', cn: '创建文件夹失败' },
+    createFolderNetErr: { en: 'Failed to create folder - network error', cn: '创建文件夹失败 - 网络错误' },
+    newNameRequired:  { en: 'Enter a new name.', cn: '请输入新名称。' },
+    nameNoSlashes:    { en: 'File names cannot include slashes.', cn: '文件名不能包含斜杠。' },
+    renameFailed:     { en: 'Failed to rename', cn: '重命名失败' },
+    renameNetErr:     { en: 'Failed to rename - network error', cn: '重命名失败 - 网络错误' },
+    destRequired:     { en: 'Enter a destination folder.', cn: '请输入目标文件夹。' },
+    moveFailed:       { en: 'Failed to move', cn: '移动失败' },
+    moveNetErr:       { en: 'Failed to move - network error', cn: '移动失败 - 网络错误' },
+    retry:            { en: 'Retry', cn: '重试' },
+    errorPrefix:      { en: 'Error', cn: '错误' },
+    moveFile:         { en: 'Move file', cn: '移动文件' },
+    renameFile:       { en: 'Rename file', cn: '重命名文件' },
+    deleteFile:       { en: 'Delete file', cn: '删除文件' },
+    deleteFolder:     { en: 'Delete folder', cn: '删除文件夹' }
   };
 
   // get current path from query parameter
@@ -2134,7 +2239,7 @@ updateLang(true);
       files = await response.json();
     } catch (e) {
       console.error(e);
-      fileTable.innerHTML = '<div class="no-files"' + trAttr('loadError') + '>' + tr('loadError') + '</div>';
+      fileTable.innerHTML = '<div class="empty">' + icon('alert') + '<span' + trAttr('loadError') + '>' + tr('loadError') + '</span></div>';
       return;
     }
 
@@ -2156,12 +2261,12 @@ updateLang(true);
     bilingual(summary, sumEn, sumCn);
 
     if (files.length === 0) {
-      fileTable.innerHTML = '<div class="no-files"' + trAttr('emptyFolder') + '>' + tr('emptyFolder') + '</div>';
+      fileTable.innerHTML = '<div class="empty">' + icon('folder') + '<span' + trAttr('emptyFolder') + '>' + tr('emptyFolder') + '</span></div>';
     } else {
-      let fileTableContent = '<table class="file-table">';
+      let fileTableContent = '<div class="table-wrap"><table class="file-table">';
 
 				// Add select-all checkbox column
-      fileTableContent += '<tr><th style="width:40px"><input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll(this)"></th><th' + trAttr('colName') + '>' + tr('colName') + '</th><th' + trAttr('colType') + '>' + tr('colType') + '</th><th' + trAttr('colSize') + '>' + tr('colSize') + '</th><th class="actions-col"' + trAttr('colActions') + '>' + tr('colActions') + '</th></tr>';
+      fileTableContent += '<tr><th class="check-col"><input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll(this)"></th><th class="name-cell"' + trAttr('colName') + '>' + tr('colName') + '</th><th' + trAttr('colType') + '>' + tr('colType') + '</th><th class="col-size"' + trAttr('colSize') + '>' + tr('colSize') + '</th><th class="actions-col"' + trAttr('colActions') + '>' + tr('colActions') + '</th></tr>';
 
 
       const sortedFiles = files.sort((a, b) => {
@@ -2181,11 +2286,11 @@ updateLang(true);
 
          // Checkbox cell + folder row
           fileTableContent += `<tr class="folder-row">`;
-          fileTableContent += `<td><input type="checkbox" class="select-item" data-path="${encodeURIComponent(folderPath)}" data-name="${escapeHtml(file.name)}" data-type="folder"></td>`;
-          fileTableContent += `<td><span class="file-icon">📁</span><a href="/files?path=${encodeURIComponent(folderPath)}" class="folder-link">${escapeHtml(file.name)}</a></td>`;
-          fileTableContent += '<td><span class="folder-badge">FOLDER</span></td>';
-          fileTableContent += '<td>-</td>';
-          fileTableContent += `<td class="actions-col"><div class="action-icon-group"><button class="delete-btn" onclick="openDeleteModal('${file.name.replaceAll("'", "\\'")}', '${folderPath.replaceAll("'", "\\'")}', true)" title="Delete folder">🗑️</button></div></td>`;
+          fileTableContent += `<td class="select-cell"><input type="checkbox" class="select-item" data-path="${encodeURIComponent(folderPath)}" data-name="${escapeHtml(file.name)}" data-type="folder"></td>`;
+          fileTableContent += `<td class="name-cell"><span class="file-icon">${icon('folder')}</span><a href="/files?path=${encodeURIComponent(folderPath)}" class="folder-link">${escapeHtml(file.name)}</a></td>`;
+          fileTableContent += '<td><span class="badge info">FOLDER</span></td>';
+          fileTableContent += '<td class="col-size">-</td>';
+          fileTableContent += `<td class="actions-col"><div class="action-icon-group"><button class="delete-btn" onclick="openDeleteModal('${file.name.replaceAll("'", "\\'")}', '${folderPath.replaceAll("'", "\\'")}', true)" title="${tr('deleteFolder')}" aria-label="${tr('deleteFolder')}">${icon('trash', 'i-sm')}</button></div></td>`;
           fileTableContent += '</tr>';
         } else {
           let filePath = currentPath;
@@ -2194,22 +2299,22 @@ updateLang(true);
 
           // Checkbox cell + file row
           fileTableContent += `<tr class="${file.isEpub ? 'epub-file' : ''}">`;
-          fileTableContent += `<td><input type="checkbox" class="select-item" data-path="${encodeURIComponent(filePath)}" data-name="${escapeHtml(file.name)}" data-type="file"></td>`;
-          fileTableContent += `<td><span class="file-icon">${file.isEpub ? '📗' : '📄'}</span>`;
+          fileTableContent += `<td class="select-cell"><input type="checkbox" class="select-item" data-path="${encodeURIComponent(filePath)}" data-name="${escapeHtml(file.name)}" data-type="file"></td>`;
+          fileTableContent += `<td class="name-cell"><span class="file-icon">${icon(file.isEpub ? 'book' : 'doc')}</span>`;
           fileTableContent += `<a rel="noopener noreferrer" target="_blank" href="/download?path=${encodeURIComponent(filePath)}" class="file-link">${escapeHtml(file.name)}</a>`;
           fileTableContent += '</td>';
-          fileTableContent += file.isEpub ? '<td><span class="epub-badge">EPUB</span></td>' : `<td>${escapeHtml(file.name.split('.').pop().toUpperCase())}</td>`;
-          fileTableContent += `<td>${formatFileSize(file.size)}</td>`;
+          fileTableContent += file.isEpub ? '<td><span class="badge ok">EPUB</span></td>' : `<td>${escapeHtml(file.name.split('.').pop().toUpperCase())}</td>`;
+          fileTableContent += `<td class="col-size num">${formatFileSize(file.size)}</td>`;
           fileTableContent += `<td class="actions-col"><div class="action-icon-group">`;
-          fileTableContent += `<button class="move-btn" onclick="openMoveModal('${file.name.replaceAll("'", "\\'")}', '${filePath.replaceAll("'", "\\'")}' )" title="Move file">📂</button>`;
-          fileTableContent += `<button class="rename-btn" onclick="openRenameModal('${file.name.replaceAll("'", "\\'")}', '${filePath.replaceAll("'", "\\'")}' )" title="Rename file">✏️</button>`;
-          fileTableContent += `<button class="delete-btn" onclick="openDeleteModal('${file.name.replaceAll("'", "\\'")}', '${filePath.replaceAll("'", "\\'")}', false)" title="Delete file">🗑️</button>`;
+          fileTableContent += `<button class="move-btn" onclick="openMoveModal('${file.name.replaceAll("'", "\\'")}', '${filePath.replaceAll("'", "\\'")}' )" title="${tr('moveFile')}" aria-label="${tr('moveFile')}">${icon('arrow-right', 'i-sm')}</button>`;
+          fileTableContent += `<button class="rename-btn" onclick="openRenameModal('${file.name.replaceAll("'", "\\'")}', '${filePath.replaceAll("'", "\\'")}' )" title="${tr('renameFile')}" aria-label="${tr('renameFile')}">${icon('pencil', 'i-sm')}</button>`;
+          fileTableContent += `<button class="delete-btn" onclick="openDeleteModal('${file.name.replaceAll("'", "\\'")}', '${filePath.replaceAll("'", "\\'")}', false)" title="${tr('deleteFile')}" aria-label="${tr('deleteFile')}">${icon('trash', 'i-sm')}</button>`;
           fileTableContent += `</div></td>`;
           fileTableContent += '</tr>';
         }
       });
 
-      fileTableContent += '</table>';
+      fileTableContent += '</table></div>';
       fileTable.innerHTML = fileTableContent;
     }
   }
@@ -2239,7 +2344,7 @@ updateLang(true);
     const logContainer = document.getElementById('log-container');
     if (logContainer) logContainer.innerHTML = '';
 
-    document.getElementById('uploadPathDisplay').textContent = currentPath === '/' ? '/ 🏠' : currentPath;
+    document.getElementById('uploadPathDisplay').textContent = currentPath;
     document.getElementById('uploadModal').classList.add('open');
   }
 
@@ -2413,7 +2518,7 @@ updateLang(true);
     // Update displays (if element exists)
     const qualityDisplay = document.getElementById('qualityDisplaySimple');
     if (qualityDisplay) {
-      qualityDisplay.textContent = '📦 ' + quality + '% JPEG';
+      qualityDisplay.textContent = quality + '% JPEG';
     }
 
     // Update converter variables (used by processImage and applyGrayscale)
@@ -2838,7 +2943,7 @@ updateLang(true);
     // Check if JSZip is available
     if (typeof JSZip === 'undefined') {
       console.error('JSZip not loaded');
-      alert('JSZip library not available. Conversion will proceed without image picker.');
+      showNotification(tr('jszipMissing'), 'error');
       startConversionWithImageStates();
       return;
     }
@@ -2896,7 +3001,7 @@ updateLang(true);
 
     } catch (error) {
       console.error('Failed to extract images:', error);
-      alert('Failed to preview images: ' + error.message + '\n\nConversion will proceed normally.');
+      showNotification(tr('previewFailed') + ': ' + error.message, 'error');
       // Fallback: start conversion directly
       startConversionWithImageStates();
     }
@@ -3131,7 +3236,7 @@ updateLang(true);
   });
 
   function openFolderModal() {
-    document.getElementById('folderPathDisplay').textContent = currentPath === '/' ? '/ 🏠' : currentPath;
+    document.getElementById('folderPathDisplay').textContent = currentPath;
     document.getElementById('folderModal').classList.add('open');
     document.getElementById('folderName').value = '';
     setTimeout(() => document.getElementById('folderName').focus(), 50);
@@ -3166,7 +3271,7 @@ updateLang(true);
   function openDeleteSelectedModal() {
     const items = getSelectedItems();
     if (items.length === 0) {
-      alert('Please select at least one item to delete.');
+      showNotification(tr('pickItems'), 'error');
       return;
     }
     openDeleteModalForItems(items);
@@ -3186,7 +3291,7 @@ updateLang(true);
     items.forEach(it => {
       const div = document.createElement('div');
       div.style.marginBottom = '6px';
-      div.textContent = (it.isFolder ? '📁 ' : '📄 ') + it.path;
+      div.innerHTML = '<span class="file-icon">' + icon(it.isFolder ? 'folder' : 'doc') + '</span>' + escapeHtml(it.path);
       listEl.appendChild(div);
     });
     document.getElementById('deleteModal').classList.add('open');
@@ -3219,11 +3324,11 @@ updateLang(true);
         window.location.reload();
       } else {
         const text = await res.text();
-        alert('Failed to delete: ' + text);
+        showNotification(tr('deleteFailed') + ': ' + text, 'error');
         closeDeleteModal();
       }
     }).catch(() => {
-      alert('Failed to delete - network error');
+      showNotification(tr('deleteNetErr'), 'error');
       closeDeleteModal();
     });
   }
@@ -3476,7 +3581,7 @@ function applyDeviceTarget() {
 
   const summary = document.getElementById('convertSizeSummary');
   if (summary) {
-    summary.textContent = `📏 Max ${profile.width}×${profile.height}px`;
+    summary.textContent = `Max ${profile.width}×${profile.height}px`;
   }
   document.querySelectorAll('.device-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.value === DEVICE_TARGET);
@@ -5350,7 +5455,7 @@ function uploadFile() {
   const convertEnabled = document.getElementById('convertBeforeUpload').checked;
 
   if (files.length === 0) {
-    alert('Please select at least one file!');
+    showNotification(tr('pickFiles'), 'error');
     return;
   }
 
@@ -5556,7 +5661,7 @@ function uploadFile() {
 
           // If conversion fails, try uploading original file
           progressText.textContent = `Conversion failed, uploading original ${file.name}...`;
-          progressFill.style.backgroundColor = '#e67e22'; // Orange for fallback
+          progressFill.style.backgroundColor = 'var(--warn)';
           // Reset progress bar to 0% for original file upload
           progressFill.style.width = '0%';
         }
@@ -5610,10 +5715,10 @@ function showFailedUploadsBanner() {
     item.className = 'failed-file-item';
     item.innerHTML = `
       <div class="failed-file-info">
-        <div class="failed-file-name">📄 ${escapeHtml(failedFile.name)}</div>
-        <div class="failed-file-error">Error: ${escapeHtml(failedFile.error)}</div>
+        <div class="failed-file-name"><span class="file-icon">${icon('doc')}</span>${escapeHtml(failedFile.name)}</div>
+        <div class="failed-file-error">${tr('errorPrefix')}: ${escapeHtml(failedFile.error)}</div>
       </div>
-      <button class="retry-btn" onclick="retrySingleUpload(${index})">Retry</button>
+      <button class="retry-btn" onclick="retrySingleUpload(${index})">${tr('retry')}</button>
     `;
     filesList.appendChild(item);
   });
@@ -5680,14 +5785,14 @@ function retryAllFailedUploads() {
     const folderName = document.getElementById('folderName').value.trim();
 
     if (!folderName) {
-      alert('Please enter a folder name!');
+      showNotification(tr('folderNameRequired'), 'error');
       return;
     }
 
     // Validate folder name
     const validName = /^(?!\.{1,2}$)[^"*:<>?\/\\|]+$/.test(folderName);
     if (!validName) {
-      alert('Folder name cannot contain \" * : < > ? / \\ | and must not be . or ..');
+      showNotification(tr('folderNameBad'), 'error');
       return;
     }
 
@@ -5702,12 +5807,12 @@ function retryAllFailedUploads() {
       if (xhr.status === 200) {
         window.location.reload();
       } else {
-        alert('Failed to create folder: ' + xhr.responseText);
+        showNotification(tr('createFolderFailed') + ': ' + xhr.responseText, 'error');
       }
     };
 
     xhr.onerror = function() {
-      alert('Failed to create folder - network error');
+      showNotification(tr('createFolderNetErr'), 'error');
     };
 
     xhr.send(formData);
@@ -5715,7 +5820,7 @@ function retryAllFailedUploads() {
 
   // Rename functions
   function openRenameModal(name, path) {
-    document.getElementById('renameItemName').textContent = '📄 ' + name;
+    document.getElementById('renameItemName').innerHTML = '<span class="file-icon">' + icon('doc') + '</span>' + escapeHtml(name);
     document.getElementById('renameItemPath').value = path;
     document.getElementById('renameNewName').value = name;
     document.getElementById('renameModal').classList.add('open');
@@ -5735,11 +5840,11 @@ function retryAllFailedUploads() {
     const newName = document.getElementById('renameNewName').value.trim();
 
     if (!newName) {
-      alert('Please enter a new name.');
+      showNotification(tr('newNameRequired'), 'error');
       return;
     }
     if (newName.includes('/') || newName.includes('\\')) {
-      alert('File name cannot include slashes.');
+      showNotification(tr('nameNoSlashes'), 'error');
       return;
     }
 
@@ -5754,13 +5859,13 @@ function retryAllFailedUploads() {
       if (xhr.status === 200) {
         window.location.reload();
       } else {
-        alert('Failed to rename: ' + xhr.responseText);
+        showNotification(tr('renameFailed') + ': ' + xhr.responseText, 'error');
       }
       closeRenameModal();
     };
 
     xhr.onerror = function() {
-      alert('Failed to rename - network error');
+      showNotification(tr('renameNetErr'), 'error');
       closeRenameModal();
     };
 
@@ -5830,7 +5935,7 @@ function retryAllFailedUploads() {
   }
 
   function openMoveModal(name, path) {
-    document.getElementById('moveItemName').textContent = '📄 ' + name;
+    document.getElementById('moveItemName').innerHTML = '<span class="file-icon">' + icon('doc') + '</span>' + escapeHtml(name);
     document.getElementById('moveItemPath').value = path;
     document.getElementById('moveDestPath').value = currentPath === '/' ? '/' : currentPath;
     document.getElementById('moveModal').classList.add('open');
@@ -5849,7 +5954,7 @@ function retryAllFailedUploads() {
     const destPath = normalizePath(document.getElementById('moveDestPath').value);
 
     if (!destPath) {
-      alert('Please enter a destination folder.');
+      showNotification(tr('destRequired'), 'error');
       return;
     }
 
@@ -5864,13 +5969,13 @@ function retryAllFailedUploads() {
       if (xhr.status === 200) {
         window.location.reload();
       } else {
-        alert('Failed to move: ' + xhr.responseText);
+        showNotification(tr('moveFailed') + ': ' + xhr.responseText, 'error');
       }
       closeMoveModal();
     };
 
     xhr.onerror = function() {
-      alert('Failed to move - network error');
+      showNotification(tr('moveNetErr'), 'error');
       closeMoveModal();
     };
 

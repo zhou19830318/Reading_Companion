@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Keep every web page on the AIWatch_Ver2.0 design system.
+"""Keep every web page on one design system.
 
 The four pages under src/network/html/ are self-contained (build_html.py inlines
 and gzips each one, there is no shared-include mechanism), so the shared parts
@@ -13,6 +13,10 @@ are duplicated on purpose and this script is what keeps the copies identical:
 
 The header bar and the .tabs row are written by hand per page (they differ in
 which tab is active); everything that must look the same is in here.
+
+The block markers keep the AIWATCH-CORE name because the four pages were first
+aligned to AIWatch_Ver2.0; the tokens below have since diverged on purpose —
+this is now the OnePage design system, and AIWatch is not updated from it.
 
     python3 scripts/sync_web_core.py          # rewrite the blocks in place
     python3 scripts/sync_web_core.py --check  # exit 1 if any page drifted
@@ -38,172 +42,354 @@ END = "/* AIWATCH-CORE:END */"
 # "-- edit …" note, so re-runs replace in place instead of appending a copy.
 BLOCK_RE = re.compile(r"/\* AIWATCH-CORE:START[^\n]*\*/[\s\S]*?/\* AIWATCH-CORE:END \*/")
 
-# ── CSS: lifted from AIWatch_Ver2.0/components/webserver/index.html ──────────
-# The design tokens are verbatim so colors match the reference page. The
-# "--legacy" aliases below let this project's own rules (which were written
-# against --font-color / --card-bg / --border-color …) follow the new theme
-# without editing a single selector.
+# ── CSS ──────────────────────────────────────────────────────────────────────
+# One token layer (surface / text / accent / spacing / type / radius / motion /
+# depth) and a component set built only from those tokens. Rules are written
+# against roles, never raw hex, so a page can restyle itself by overriding a
+# handful of custom properties.
+#
+# Budget note: this block is duplicated into 4 pages, so every byte here is
+# paid 4x raw (gzip absorbs most of it, but keep it lean). ~15 KB raw is the
+# agreed ceiling; measure with scripts/build_html.py output.
 CORE_CSS = """/* AIWATCH-CORE:START -- edit scripts/sync_web_core.py, not this block */
+/* ── Tokens ───────────────────────────────────────────────────────────── */
 :root{
-  --bg:#0a0e14;--card:#13181f;--border:#262d38;--text:#e6edf3;--dim:#8b949e;
-  --green:#3fb950;--red:#f85149;--orange:#d29922;--blue:#58a6ff;--purple:#bc8cff;
-  --card-2:#171d26;--card-hi:#1c2330;--accent-glow:rgba(88,166,255,.18);
-  --ring:rgba(255,255,255,.06);--shadow:0 1px 0 rgba(255,255,255,.04),0 8px 24px rgba(0,0,0,.35);
-  --radius:14px;--radius-sm:10px;
-  --font-color:var(--text);--title-color:var(--text);--card-bg:var(--card);
-  --label-color:var(--dim);--border-color:var(--border);
-  --accent-color:var(--green);--accent-hover-color:#34a84a;--toggle-bg:var(--border);
+  /* surfaces: page -> card -> raised -> overlay (dark UIs layer by lightness,
+     not by shadow; shadows are nearly invisible on dark) */
+  --bg:#0b0f14;--bg-2:#0d1219;--surface:#141b24;--surface-2:#1a2230;--surface-3:#212b3a;
+  --border:#28313f;--border-2:#3a4557;--hair:1px solid var(--border);
+  /* text: muted must clear 4.5:1 on --surface (WCAG 1.4.3) */
+  --fg:#e6edf3;--fg-mut:#9aa8b8;--fg-dim:#728296;--fg-inv:#04140a;
+  /* one accent + four semantic tint pairs; nothing else gets saturated colour */
+  --accent:#3fbf6a;--accent-2:#37a05a;--accent-glow:rgba(63,191,106,.22);
+  --info:#5aa2e8;--info-bg:rgba(90,162,232,.13);
+  --ok:#3fbf6a;--ok-bg:rgba(63,191,106,.13);
+  --warn:#d9a338;--warn-bg:rgba(217,163,56,.14);
+  --danger:#f0605a;--danger-bg:rgba(240,96,90,.13);
+  --focus:#5aa2e8;
+  /* spacing: 4px base */
+  --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;--gutter:16px;
+  --row:44px;
+  /* type: five steps only */
+  --t-xs:12px;--t-sm:13px;--t-md:14px;--t-lg:16px;--t-xl:20px;--t-num:26px;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --radius:14px;--r-md:10px;--r-sm:8px;--r-pill:999px;
+  --shadow:0 1px 2px rgba(0,0,0,.45);--shadow-up:0 10px 30px rgba(0,0,0,.5);
+  --dur:160ms;--ease:cubic-bezier(.2,0,0,1);
+  --z-sticky:2;--z-bar:5;--z-toast:9;--z-modal:20;
+  /* legacy aliases — pages were written against these names */
+  --card:var(--surface);--card-2:var(--surface-2);--card-hi:var(--surface-3);
+  --text:var(--fg);--dim:var(--fg-mut);--green:var(--accent);--red:var(--danger);
+  --orange:var(--warn);--blue:var(--info);--purple:var(--info);--ring:rgba(255,255,255,.06);
+  --radius-sm:var(--r-sm);--font-color:var(--fg);--title-color:var(--fg);--card-bg:var(--surface);
+  --label-color:var(--fg-mut);--border-color:var(--border);--accent-color:var(--accent);
+  --accent-hover-color:var(--accent-2);--toggle-bg:var(--border-2);
 }
+/* ── Base ─────────────────────────────────────────────────────────────── */
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
 body{
-  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,
+    'Noto Sans SC','Microsoft YaHei',sans-serif;
   background:
-    radial-gradient(1100px 600px at 100% -10%,rgba(88,166,255,.07),transparent 60%),
-    radial-gradient(900px 500px at -10% 0%,rgba(188,140,255,.06),transparent 55%),
+    radial-gradient(1200px 620px at 100% -12%,rgba(90,162,232,.09),transparent 60%),
+    radial-gradient(900px 520px at -12% -4%,rgba(63,191,106,.07),transparent 55%),
     var(--bg);
-  background-attachment:fixed;color:var(--text);min-height:100vh;
-  -webkit-font-smoothing:antialiased;line-height:1.5;margin:0;padding:0;
+  background-attachment:fixed;color:var(--fg);min-height:100vh;line-height:1.5;
+  -webkit-font-smoothing:antialiased;margin:0;padding:0;font-size:var(--t-md);
 }
-/* Header — non-sticky, exactly like AIWatch, so the tab row never overlaps */
+h1,h2,h3,h4{margin:0;font-weight:650;letter-spacing:.1px}
+a{color:var(--info)}
+p{margin:0 0 var(--s3)}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:var(--r-sm)}
+.i{width:18px;height:18px;flex:0 0 auto;stroke:currentColor;fill:none;stroke-width:1.7;
+  stroke-linecap:round;stroke-linejoin:round;vertical-align:-.18em}
+.i-sm{width:14px;height:14px}
+.num{font-variant-numeric:tabular-nums lining-nums;font-feature-settings:"tnum" 1}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+/* ── Header + nav ─────────────────────────────────────────────────────── */
 .header{
-  position:relative;background:linear-gradient(180deg,rgba(28,35,48,.85),rgba(19,24,31,.9));
-  backdrop-filter:blur(8px);border-bottom:1px solid var(--border);
-  padding:14px 22px;display:flex;align-items:center;gap:12px;
+  position:sticky;top:0;z-index:var(--z-bar);display:flex;align-items:center;gap:var(--s3);
+  padding:12px var(--s5);background:rgba(13,18,25,.86);backdrop-filter:blur(10px);
+  border-bottom:var(--hair);flex-wrap:wrap;
 }
-.header h1{font-size:18px;font-weight:700;letter-spacing:.3px;white-space:nowrap;overflow:hidden;
-  text-overflow:ellipsis;flex:0 1 auto;max-width:60%;color:var(--text);border:0;padding:0;margin:0}
-.header h1 span{color:var(--green);font-weight:500;font-size:12px;margin-left:10px;opacity:.9}
-.header .hdr-status{font-size:13px;color:var(--dim);white-space:nowrap;overflow:hidden;
-  text-overflow:ellipsis;flex:1 1 auto;text-align:right}
+.header h1{font-size:var(--t-lg);font-weight:700;display:flex;align-items:center;gap:var(--s2);
+  flex:0 1 auto;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;margin:0;padding:0;border:0;color:var(--fg)}
+.header h1 .i{stroke:var(--accent)}
+.header h1 .sub{color:var(--fg-dim);font-weight:500;font-size:var(--t-xs);margin-left:var(--s2)}
+.header .hdr-status{font-size:var(--t-sm);color:var(--fg-mut);flex:1 1 auto;min-width:0;
+  text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  font-variant-numeric:tabular-nums}
 .header .btn{flex:0 0 auto}
-/* Tabs — one per page, links instead of AIWatch's SPA panel switcher */
-.tabs{display:flex;gap:2px;background:var(--card);border-bottom:1px solid var(--border);
-  overflow-x:auto;padding:0 8px;scrollbar-width:thin}
+.tabs{display:flex;gap:2px;background:var(--bg-2);border-bottom:var(--hair);
+  overflow-x:auto;padding:0 var(--s2);scrollbar-width:thin;position:sticky;
+  top:var(--row);z-index:calc(var(--z-bar) - 1)}
 .tabs::-webkit-scrollbar{height:5px}
 .tabs::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
-.tab{padding:11px 16px;cursor:pointer;color:var(--dim);border-bottom:2px solid transparent;
-  font-size:13.5px;font-weight:500;white-space:nowrap;text-decoration:none;
-  transition:color .18s,background .18s,border-color .18s;border-radius:8px 8px 0 0}
-.tab:hover{color:var(--text);background:rgba(255,255,255,.025)}
-.tab.active{color:var(--text);border-bottom-color:var(--blue);
-  background:linear-gradient(180deg,transparent,rgba(88,166,255,.07))}
-.content{max-width:860px;margin:0 auto;padding:18px 16px 48px}
-.card{
-  background:linear-gradient(180deg,var(--card-hi),var(--card));border:1px solid var(--border);
-  border-radius:var(--radius);padding:18px;margin:0 0 14px;box-shadow:var(--shadow);
-}
-.card h2,.card h3{font-size:15px;font-weight:650;margin:0 0 14px;color:var(--text);
-  display:flex;align-items:center;gap:9px}
-/* Stat grid (AIWatch dashboard) */
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}
-.stat{text-align:center;padding:10px 6px;border-radius:var(--radius-sm);
-  background:rgba(255,255,255,.025);border:1px solid var(--ring)}
-.stat .val{font-size:20px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;
-  text-overflow:ellipsis;line-height:1.2}
-.stat .lbl{font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.6px;
-  margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-/* Forms — label above the control, full width */
-.form-group{margin-bottom:14px}
-.form-group label{display:block;font-size:12.5px;color:var(--dim);margin-bottom:6px;letter-spacing:.2px}
-.form-group input,.form-group select,.form-group textarea{
-  width:100%;padding:9px 12px;background:var(--bg);border:1px solid var(--border);
-  border-radius:var(--radius-sm);color:var(--text);font-size:14px;outline:none;
-  transition:border-color .15s,box-shadow .15s}
-.form-group input:focus,.form-group select:focus{border-color:var(--blue);
-  box-shadow:0 0 0 3px var(--accent-glow)}
-.form-group input::placeholder{color:#5c6672}
-/* Range sliders — AIWatch index.html:78-80 (6px track, glowing 16px blue thumb) */
-.form-group input[type=range]{-webkit-appearance:none;appearance:none;padding:0;height:6px;
-  border-radius:6px;background:var(--border);border:none}
-.form-group input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;
-  border-radius:50%;background:var(--blue);cursor:pointer;border:2px solid #0a0e14;
-  box-shadow:0 0 8px rgba(88,166,255,.6)}
-.form-group input[type=range]::-moz-range-thumb{width:16px;height:16px;border-radius:50%;
-  background:var(--blue);cursor:pointer;border:2px solid #0a0e14}
-.range-row{display:flex;align-items:center;gap:10px}
+.tab{display:inline-flex;align-items:center;gap:7px;min-height:var(--row);padding:0 var(--s4);
+  cursor:pointer;color:var(--fg-mut);border-bottom:2px solid transparent;font-size:var(--t-sm);
+  font-weight:550;white-space:nowrap;text-decoration:none;border-radius:var(--r-sm) var(--r-sm) 0 0;
+  transition:color var(--dur),background var(--dur),border-color var(--dur)}
+.tab:hover{color:var(--fg);background:rgba(255,255,255,.03)}
+.tab.active{color:var(--fg);border-bottom-color:var(--accent);background:rgba(63,191,106,.08)}
+.content{max-width:880px;margin:0 auto;padding:var(--s5) var(--gutter) 64px}
+/* ── Cards ────────────────────────────────────────────────────────────── */
+.card{background:linear-gradient(180deg,var(--surface-2),var(--surface));border:var(--hair);
+  border-radius:var(--radius);padding:var(--s5);margin:0 0 var(--s4);box-shadow:var(--shadow);
+  animation:rise var(--dur) var(--ease) both}
+.card h2,.card h3{font-size:var(--t-lg);display:flex;align-items:center;gap:var(--s3);
+  margin:0 0 var(--s4);color:var(--fg)}
+.card h2 .i,.card h3 .i{stroke:var(--accent)}
+.card h4{font-size:var(--t-sm);color:var(--fg-mut);text-transform:uppercase;letter-spacing:.7px;
+  margin:var(--s4) 0 var(--s2)}
+.card-note{font-size:var(--t-sm);color:var(--fg-mut);margin:calc(var(--s4) * -1 + 2px) 0 var(--s4)}
+/* Disclosure for help text: always visible as a question mark, never a wall of prose */
+.help{border:0;border-top:var(--hair);margin:var(--s3) 0 0;padding-top:var(--s2)}
+.help>summary{cursor:pointer;list-style:none;display:inline-flex;align-items:center;gap:6px;
+  color:var(--fg-dim);font-size:var(--t-xs);text-transform:uppercase;letter-spacing:.6px;
+  min-height:32px}
+.help>summary::-webkit-details-marker{display:none}
+.help>summary .i{width:14px;height:14px}
+.help[open]>summary{color:var(--fg-mut)}
+.help-body{font-size:var(--t-sm);color:var(--fg-mut);margin-top:var(--s2);max-inline-size:66ch}
+.hint{display:block;font-size:var(--t-sm);color:var(--fg-mut);margin:var(--s2) 0 0;max-inline-size:66ch}
+/* ── Stats ────────────────────────────────────────────────────────────── */
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:var(--s3)}
+.stat{text-align:left;padding:var(--s3) var(--s4);border-radius:var(--r-md);
+  background:var(--surface-3);border:1px solid rgba(255,255,255,.05)}
+.stat .val{font-size:var(--t-num);font-weight:700;line-height:1.15;letter-spacing:-.4px;
+  font-variant-numeric:tabular-nums lining-nums;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.stat .lbl{font-size:var(--t-xs);color:var(--fg-mut);text-transform:uppercase;letter-spacing:.6px;
+  margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stat.alert .val{color:var(--warn)}
+/* ── Forms ────────────────────────────────────────────────────────────── */
+.form-group,.field{margin-bottom:var(--s4)}
+.form-group label,.field>label{display:block;font-size:var(--t-xs);color:var(--fg-mut);
+  margin-bottom:6px;letter-spacing:.3px;text-transform:uppercase;font-weight:600}
+.form-group input,.form-group select,.form-group textarea,
+.field input,.field select,.field textarea,
+.set-row select,.set-row input[type=text],.set-row input[type=password],
+.set-row input[type=url],.set-row input[type=number]{
+  width:100%;min-height:40px;padding:9px var(--s3);background:var(--bg-2);border:var(--hair);
+  border-radius:var(--r-md);color:var(--fg);font:inherit;font-size:var(--t-md);outline:none;
+  transition:border-color 150ms,box-shadow 150ms}
+.form-group select,.field select,.set-row select{appearance:none;background-image:
+  linear-gradient(45deg,transparent 50%,var(--fg-mut) 50%),
+  linear-gradient(135deg,var(--fg-mut) 50%,transparent 50%);
+  background-position:calc(100% - 18px) 18px,calc(100% - 13px) 18px;
+  background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:36px}
+.form-group input:focus,.form-group select:focus,.form-group textarea:focus,
+.field input:focus,.field select:focus,.set-row input:focus,.set-row select:focus{
+  border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow)}
+.form-group input::placeholder,.field input::placeholder{color:var(--fg-dim)}
+/* The element is 24px tall so the drag target meets WCAG 2.5.8; the visible 6px bar
+   is the track pseudo-element, which keeps the original look. */
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:24px;
+  background:transparent;border:none;padding:0;margin:0}
+input[type=range]::-webkit-slider-runnable-track{height:6px;border-radius:6px;
+  background:var(--border-2)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;
+  margin-top:-6px;border-radius:50%;background:var(--accent);cursor:pointer;
+  border:2px solid var(--bg);box-shadow:0 0 0 4px var(--accent-glow)}
+input[type=range]::-moz-range-track{height:6px;border-radius:6px;background:var(--border-2)}
+input[type=range]::-moz-range-thumb{width:18px;height:18px;border-radius:50%;background:var(--accent);
+  cursor:pointer;border:2px solid var(--bg)}
+.range-row{display:flex;align-items:center;gap:var(--s3)}
 .range-row input[type=range]{flex:1}
-.range-val{display:inline-block;width:40px;text-align:right;color:var(--blue);font-weight:700}
-.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-@media(max-width:500px){.form-row{grid-template-columns:1fr}.header h1{max-width:48%}}
-/* Buttons */
-.btn{padding:8px 16px;border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;
-  font-size:13px;font-weight:550;background:var(--card-2);color:var(--text);
-  transition:transform .12s,box-shadow .15s,background .15s,border-color .15s}
-.btn:hover{background:var(--card-hi);border-color:#39414d}
-.btn:active{transform:translateY(1px)}
-.btn:disabled{opacity:.5;cursor:not-allowed}
-.btn-primary{background:linear-gradient(180deg,#46c75e,#34a84a);color:#04140a;border-color:transparent;
-  box-shadow:0 4px 14px rgba(63,185,80,.28)}
-.btn-primary:hover{background:linear-gradient(180deg,#52d368,#3bb454);
-  box-shadow:0 6px 18px rgba(63,185,80,.38);border-color:transparent}
-.btn-danger{background:linear-gradient(180deg,#fa5d54,#e4423a);color:#fff;border-color:transparent;
-  box-shadow:0 4px 14px rgba(248,81,73,.26)}
-.btn-danger:hover{background:linear-gradient(180deg,#fc6c63,#e84b43);
-  box-shadow:0 6px 18px rgba(248,81,73,.36);border-color:transparent}
-.btn-secondary{background:var(--card-2);color:var(--text);border:1px solid var(--border)}
-.btn-secondary:hover{background:var(--card-hi);border-color:#39414d}
-.btn-row{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
-/* This project's own button class names, restyled onto the AIWatch system */
-.save-btn,.btn-small,.btn-add,.btn-save-server,.action-btn{padding:8px 16px;
-  border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-size:13px;
-  font-weight:550;background:var(--card-2);color:var(--text);
-  transition:transform .12s,box-shadow .15s,background .15s,border-color .15s}
-.save-btn:hover,.btn-small:hover,.btn-add:hover,.btn-save-server:hover,.action-btn:hover{
-  background:var(--card-hi);border-color:#39414d}
-.save-btn:active,.btn-small:active,.btn-add:active,.btn-save-server:active,.action-btn:active{
-  transform:translateY(1px)}
-.save-btn:disabled,.btn-small:disabled,.btn-add:disabled,.btn-save-server:disabled,
-.action-btn:disabled{opacity:.5;cursor:not-allowed}
-.save-btn,.btn-save-server,.btn-add,.upload-action-btn{
-  background:linear-gradient(180deg,#46c75e,#34a84a);color:#04140a;border-color:transparent;
-  box-shadow:0 4px 14px rgba(63,185,80,.28)}
-.save-btn:hover,.btn-save-server:hover,.btn-add:hover,.upload-action-btn:hover{
-  background:linear-gradient(180deg,#52d368,#3bb454);box-shadow:0 6px 18px rgba(63,185,80,.38);
-  border-color:transparent}
-.btn-delete,.delete-action-btn{background:linear-gradient(180deg,#fa5d54,#e4423a);color:#fff;
-  border-color:transparent;box-shadow:0 4px 14px rgba(248,81,73,.26)}
-.btn-delete:hover,.delete-action-btn:hover{background:linear-gradient(180deg,#fc6c63,#e84b43);
-  box-shadow:0 6px 18px rgba(248,81,73,.36);border-color:transparent}
-.save-btn{padding:12px 32px;font-size:14px;font-weight:650}
-/* Toggles — AIWatch 44x24 pill on both class spellings */
-.toggle,.toggle-switch{position:relative;width:44px;height:24px;display:inline-block;flex-shrink:0;
+.range-val{display:inline-block;min-width:44px;text-align:right;color:var(--fg);font-weight:700;
+  font-variant-numeric:tabular-nums}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:var(--s3)}
+/* Setting line: label left, control right, 44px tall (WCAG 2.5.5 target size) */
+.set-row{display:flex;align-items:center;gap:var(--s3);min-height:var(--row);
+  padding:var(--s2) 0;border-bottom:1px solid rgba(255,255,255,.04)}
+.set-row:last-child{border-bottom:0}
+.set-row>label,.set-row .set-label{flex:1 1 auto;min-width:0;font-size:var(--t-md);color:var(--fg);
+  margin:0;text-transform:none;letter-spacing:0;font-weight:500}
+.set-row .set-desc{display:block;font-size:var(--t-xs);color:var(--fg-mut);font-weight:400;
+  margin-top:1px}
+.set-row select,.set-row input[type=text],.set-row input[type=password],.set-row input[type=url]{
+  flex:0 1 46%;min-width:120px;width:auto}
+.set-row input[type=number]{flex:0 0 110px;min-width:0;width:auto}
+.set-row .range-row{flex:0 1 46%;min-width:150px}
+.set-row.stack{flex-wrap:wrap}
+.set-row.stack select,.set-row.stack input{flex:1 1 100%}
+/* Toggles — 44x24 pill inside a 44px row */
+.toggle,.toggle-switch{position:relative;width:44px;height:24px;display:inline-block;flex:0 0 auto;
   vertical-align:middle}
-.toggle input,.toggle-switch input{opacity:0;width:0;height:0}
-.toggle .slider,.toggle-slider{position:absolute;inset:0;background:var(--border);border-radius:24px;
-  cursor:pointer;transition:background .25s}
-.toggle .slider:before,.toggle-slider:before{content:"";position:absolute;height:18px;width:18px;
-  left:3px;bottom:3px;background:#fff;border-radius:50%;transition:transform .25s;
-  box-shadow:0 1px 3px rgba(0,0,0,.4)}
-.toggle input:checked+.slider,.toggle-switch input:checked+.toggle-slider{
-  background:linear-gradient(180deg,#46c75e,#34a84a)}
-.toggle input:checked+.slider:before,.toggle-switch input:checked+.toggle-slider:before{
-  transform:translateX(20px)}
-/* Toast (AIWatch bottom-right) */
-.toast{position:fixed;bottom:22px;right:22px;padding:11px 18px;border-radius:10px;font-size:13.5px;
-  font-weight:500;z-index:999;opacity:0;transform:translateY(6px);
-  transition:opacity .3s,transform .3s;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,.45);
-  max-width:min(420px,calc(100vw - 44px))}
+.toggle input,.toggle-switch input{opacity:0;width:100%;height:100%;margin:0;cursor:pointer}
+.toggle .slider,.toggle-slider,.toggle .toggle-slider{position:absolute;inset:0;
+  background:var(--toggle-bg);border-radius:var(--r-pill);pointer-events:none;
+  transition:background var(--dur) var(--ease)}
+.toggle .slider:before,.toggle-slider:before,.toggle .toggle-slider:before{content:"";position:absolute;
+  height:18px;width:18px;left:3px;top:3px;background:#fff;border-radius:50%;
+  box-shadow:0 1px 3px rgba(0,0,0,.45);transition:transform var(--dur) var(--ease)}
+.toggle input:checked+.slider,.toggle input:checked+.toggle-slider,
+.toggle-switch input:checked+.toggle-slider{background:var(--accent)}
+.toggle input:checked+.slider:before,.toggle input:checked+.toggle-slider:before,
+.toggle-switch input:checked+.toggle-slider:before{transform:translateX(20px)}
+.toggle input:focus-visible+.slider,.toggle input:focus-visible+.toggle-slider,
+.toggle-switch input:focus-visible+.toggle-slider{outline:2px solid var(--focus);outline-offset:2px}
+/* ── Buttons ──────────────────────────────────────────────────────────── */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:var(--row);
+  padding:0 var(--s4);border:var(--hair);border-radius:var(--r-md);cursor:pointer;font:inherit;
+  font-size:var(--t-sm);font-weight:600;background:var(--surface-2);color:var(--fg);
+  text-decoration:none;transition:transform 120ms,background 150ms,border-color 150ms,opacity 150ms}
+.btn:hover{background:var(--surface-3);border-color:var(--border-2)}
+.btn:active{transform:translateY(1px)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn .i{width:16px;height:16px}
+.btn-primary{background:var(--accent);color:var(--fg-inv);border-color:transparent;font-weight:700}
+.btn-primary:hover{background:var(--accent-2);border-color:transparent;color:var(--fg-inv)}
+.btn-danger{background:transparent;color:var(--danger);border-color:rgba(240,96,90,.45)}
+.btn-danger:hover{background:var(--danger-bg);border-color:var(--danger);color:var(--danger)}
+.btn-danger-solid{background:var(--danger);color:#fff;border-color:transparent}
+.btn-secondary,.btn-ghost{background:transparent;border-color:var(--border-2);color:var(--fg-mut)}
+.btn-secondary:hover,.btn-ghost:hover{background:rgba(255,255,255,.04);color:var(--fg)}
+.btn-small,.btn-xs{min-height:36px;padding:0 var(--s3);font-size:var(--t-xs)}
+.btn-icon{min-height:36px;width:36px;padding:0}
+.btn-row{display:flex;gap:var(--s2);margin-top:var(--s4);flex-wrap:wrap}
+.btn-row.end{justify-content:flex-end}
+/* This project's own button class names, mapped onto the same three variants */
+.save-btn,.btn-save-server,.btn-add,.upload-action-btn{display:inline-flex;align-items:center;
+  justify-content:center;gap:7px;min-height:var(--row);padding:0 var(--s5);border:0;
+  border-radius:var(--r-md);cursor:pointer;font:inherit;font-size:var(--t-md);font-weight:700;
+  background:var(--accent);color:var(--fg-inv);transition:background 150ms,transform 120ms}
+.save-btn:hover,.btn-save-server:hover,.btn-add:hover,.upload-action-btn:hover{background:var(--accent-2)}
+.save-btn:active,.btn-save-server:active,.btn-add:active,.upload-action-btn:active{transform:translateY(1px)}
+.btn:disabled,.save-btn:disabled,.btn-save-server:disabled,.btn-add:disabled,
+.upload-action-btn:disabled,.btn-small:disabled,.action-btn:disabled{
+  opacity:.45;cursor:not-allowed;pointer-events:none}
+.btn-add,.action-btn{display:inline-flex;align-items:center;
+  justify-content:center;gap:6px;min-height:36px;padding:0 var(--s3);border:var(--hair);
+  border-radius:var(--r-sm);cursor:pointer;font:inherit;font-size:var(--t-sm);font-weight:600;
+  background:var(--surface-2);color:var(--fg)}
+.action-btn:hover,.btn-small:hover{background:var(--surface-3);border-color:var(--border-2)}
+.btn-delete,.delete-action-btn{background:transparent;color:var(--danger);
+  border:1px solid rgba(240,96,90,.45)}
+.btn-delete:hover,.delete-action-btn:hover{background:var(--danger-bg);border-color:var(--danger)}
+/* ── Badges, chips, lists ─────────────────────────────────────────────── */
+.badge{display:inline-flex;align-items:center;gap:5px;padding:2px var(--s2);border-radius:var(--r-pill);
+  font-size:var(--t-xs);font-weight:600;letter-spacing:.3px;background:rgba(255,255,255,.06);
+  color:var(--fg-mut);border:1px solid rgba(255,255,255,.06);white-space:nowrap}
+.badge.ok{background:var(--ok-bg);color:var(--ok);border-color:rgba(63,191,106,.3)}
+.badge.info{background:var(--info-bg);color:var(--info);border-color:rgba(90,162,232,.3)}
+/* Right-align the last item in a flex row (a badge in a card title, a count) */
+.push{margin-left:auto;flex:0 0 auto}
+.badge.warn{background:var(--warn-bg);color:var(--warn);border-color:rgba(217,163,56,.32)}
+.badge.err{background:var(--danger-bg);color:var(--danger);border-color:rgba(240,96,90,.32)}
+.subtabs{display:flex;gap:var(--s2);overflow-x:auto;padding:2px 0 var(--s3);scrollbar-width:thin}
+.subtab{flex:0 0 auto;min-height:36px;padding:0 var(--s3);border-radius:var(--r-pill);
+  border:var(--hair);background:transparent;color:var(--fg-mut);font:inherit;font-size:var(--t-sm);
+  font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px;
+  transition:background 150ms,color 150ms,border-color 150ms}
+.subtab:hover{color:var(--fg);border-color:var(--border-2)}
+.subtab .i{width:15px;height:15px}
+.subtab.active{background:var(--accent);border-color:transparent;color:var(--fg-inv)}
+/* Unsaved-changes dot on a category chip */
+.subtab.dirty::after{content:"";width:7px;height:7px;border-radius:50%;background:var(--warn)}
+.list{display:flex;flex-direction:column;gap:var(--s3)}
+.list-item{border:var(--hair);border-radius:var(--r-md);padding:var(--s3) var(--s4);
+  background:var(--surface-2)}
+.list-item .li-head{display:flex;align-items:center;gap:var(--s3);min-height:28px}
+.list-item .li-title{font-weight:650;flex:1 1 auto;min-width:0;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.list-item .li-body{margin-top:var(--s3)}
+a.list-item{display:block;color:var(--fg);text-decoration:none;
+  transition:border-color 150ms,background 150ms}
+a.list-item:hover{border-color:var(--border-2);background:var(--surface-3)}
+a.list-item .i-arrow{stroke:var(--fg-dim);transition:transform 150ms,stroke 150ms}
+a.list-item:hover .i-arrow{transform:translateX(3px);stroke:var(--accent)}
+.foot-note{text-align:center;color:var(--fg-dim);font-size:var(--t-sm);margin:var(--s5) 0 0}
+/* ── Tables ───────────────────────────────────────────────────────────── */
+.table-wrap{overflow-x:auto;border:var(--hair);border-radius:var(--r-md);
+  background:var(--surface);-webkit-overflow-scrolling:touch}
+table{width:100%;border-collapse:collapse;font-size:var(--t-sm)}
+th{text-align:left;font-size:var(--t-xs);text-transform:uppercase;letter-spacing:.6px;
+  color:var(--fg-mut);font-weight:650;padding:var(--s3) var(--s4);border-bottom:var(--hair);
+  background:var(--surface-2);white-space:nowrap;position:sticky;top:0;z-index:1}
+td{padding:var(--s3) var(--s4);border-bottom:1px solid rgba(255,255,255,.045);vertical-align:middle}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover{background:rgba(255,255,255,.028)}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td .row-actions{display:flex;gap:6px;justify-content:flex-end}
+/* ── Feedback ─────────────────────────────────────────────────────────── */
+.toast{position:fixed;bottom:var(--s5);right:var(--s5);z-index:var(--z-toast);
+  display:flex;align-items:center;gap:var(--s3);padding:var(--s3) var(--s4);border-radius:var(--r-md);
+  font-size:var(--t-sm);font-weight:600;max-width:min(420px,calc(100vw - 32px));
+  background:var(--surface-3);color:var(--fg);border:var(--hair);box-shadow:var(--shadow-up);
+  opacity:0;transform:translateY(8px);pointer-events:none;
+  transition:opacity var(--dur) var(--ease),transform var(--dur) var(--ease)}
 .toast.show{opacity:1;transform:none}
-.toast.ok{background:linear-gradient(180deg,#46c75e,#34a84a);color:#04140a}
-.toast.err{background:linear-gradient(180deg,#fa5d54,#e4423a);color:#fff}
-/* Spinner (shared base so every page gets the same 48px ring) */
-.loader{width:48px;height:48px;border:5px solid var(--border);border-bottom-color:var(--blue);
-  border-radius:50%;display:inline-block;box-sizing:border-box;animation:rotation 1s linear infinite}
-@keyframes rotation{from{transform:rotate(0)}to{transform:rotate(360deg)}}
-/* Inline feedback banners (pages that are not on the toast API yet) */
-.status-ok,.message.success{background:rgba(63,185,80,.12);color:var(--green);
-  border:1px solid rgba(63,185,80,.35)}
-.status-err,.message.error{background:rgba(248,81,73,.12);color:var(--red);
-  border:1px solid rgba(248,81,73,.35)}
-::-webkit-scrollbar{width:9px;height:9px}
-::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:var(--border);border-radius:6px}
-::-webkit-scrollbar-thumb:hover{background:#39414d}
+.toast.err{border-color:rgba(240,96,90,.5)}
+.toast.ok{border-color:rgba(63,191,106,.5)}
+.toast .i{width:16px;height:16px}
+.toast.err .i{stroke:var(--danger)}
+.toast.ok .i{stroke:var(--ok)}
+.toast .t-x{margin-left:auto;background:none;border:0;color:var(--fg-mut);cursor:pointer;
+  padding:4px;display:flex;min-height:0}
+.banner{display:flex;align-items:flex-start;gap:var(--s3);padding:var(--s3) var(--s4);
+  border-radius:var(--r-md);border:var(--hair);background:var(--surface-2);font-size:var(--t-sm);
+  margin-bottom:var(--s4)}
+.banner.warn{background:var(--warn-bg);border-color:rgba(217,163,56,.35);color:var(--warn)}
+.banner.err{background:var(--danger-bg);border-color:rgba(240,96,90,.35);color:var(--danger)}
+.banner.info{background:var(--info-bg);border-color:rgba(90,162,232,.3);color:var(--info)}
+.banner .i{stroke:currentColor;margin-top:2px}
+.status-ok,.message.success{display:block;padding:var(--s3) var(--s4);border-radius:var(--r-md);
+  background:var(--ok-bg);color:var(--ok);border:1px solid rgba(63,191,106,.3);font-size:var(--t-sm)}
+.status-err,.message.error{display:block;padding:var(--s3) var(--s4);border-radius:var(--r-md);
+  background:var(--danger-bg);color:var(--danger);border:1px solid rgba(240,96,90,.3);font-size:var(--t-sm)}
+.empty{display:flex;flex-direction:column;align-items:center;gap:var(--s2);padding:var(--s6) var(--s4);
+  color:var(--fg-mut);text-align:center;font-size:var(--t-sm);border:1px dashed var(--border-2);
+  border-radius:var(--r-md);background:rgba(255,255,255,.015)}
+.empty .i{width:26px;height:26px;stroke:var(--fg-dim)}
+.bar{height:6px;border-radius:6px;background:var(--border);overflow:hidden}
+.bar>i{display:block;height:100%;background:var(--accent);border-radius:6px;
+  transition:width var(--dur) var(--ease)}
+.mono{font-family:var(--mono);font-size:var(--t-xs);line-height:1.55}
+/* Loading: skeleton beats a spinner for content that will fill the same shape */
+.sk{position:relative;overflow:hidden;background:var(--surface-2);border-radius:var(--r-sm);
+  height:14px;margin:var(--s2) 0}
+.sk.tall{height:44px}
+.stat .sk{height:22px;width:72%;margin:0}
+.sk::after{content:"";position:absolute;inset:0;transform:translateX(-100%);
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.06),transparent);
+  animation:shimmer 1.3s infinite}
+.loader{width:34px;height:34px;border:3px solid var(--border);border-bottom-color:var(--accent);
+  border-radius:50%;display:inline-block;animation:spin .9s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes shimmer{to{transform:translateX(100%)}}
+@keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 @keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+/* ── Scrollbars ───────────────────────────────────────────────────────── */
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:6px;border:2px solid transparent;
+  background-clip:content-box}
+::-webkit-scrollbar-thumb:hover{background:var(--border-2)}
+/* ── Responsive (WCAG 1.4.10 reflow at 320px; Material/Flutter 600px rule) ─ */
+@media(max-width:600px){
+  :root{--gutter:12px;--t-num:22px}
+  .header{padding:10px var(--gutter)}
+  .header h1{font-size:var(--t-md)}
+  .header .hdr-status{display:none}
+  .form-row{grid-template-columns:1fr}
+  .card{padding:var(--s4);border-radius:var(--r-md)}
+  .content{padding-top:var(--s4)}
+  .set-row select,.set-row input[type=text],.set-row input[type=password],.set-row input[type=url]{
+    flex:1 1 40%;min-width:110px}
+  .toast{left:var(--s3);right:var(--s3);bottom:var(--s3);max-width:none}
+  .col-size{display:none}
+}
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001ms !important;animation-iteration-count:1 !important;
+    transition-duration:.001ms !important;scroll-behavior:auto !important}
+  .sk::after{animation:none}
+}
 /* AIWATCH-CORE:END */"""
 
-# ── JS: language state + the 中文 / EN button AIWatch appends to its header ──
+# ── JS ───────────────────────────────────────────────────────────────────────
 # Runs first in the page script. `updateLang(true)` skips onLangChange() so the
 # page's own state is not touched before it has initialised; pages call
 # updateLang() again once their dynamic markup exists.
@@ -232,22 +418,105 @@ function trAttr(key) {
   return ' data-en="' + s.en + '" data-cn="' + s.cn + '"';
 }
 
-// Bottom-right feedback, same behaviour as AIWatch's toast(msg, ok).
+/* Icon sprite. Pages reference symbols as <svg class="i"><use href="#i-name"/></svg>;
+ a <use> resolves once the symbol exists, so injecting it here (before first paint
+ of any dynamic markup) is enough, and the sprite is written once for 4 pages.
+ Stroke-based 24x24 geometry, decorative by default (aria-hidden). */
+const CP_ICONS = '<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">' + [
+  ['home', 'M4 11l8-6.5 8 6.5v8a1.5 1.5 0 01-1.5 1.5H15v-6H9v6H3.5A1.5 1.5 0 012 19z']
+  , ['folder', 'M3 7a2 2 0 012-2h4l2 2.5h8a2 2 0 012 2V18a2 2 0 01-2 2H5a2 2 0 01-2-2z']
+  , ['gear', 'M12 15a3 3 0 100-6 3 3 0 000 6z', 'M19.4 15a1.6 1.6 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.6 1.6 0 00-2.7 1.1V21a2 2 0 11-4 0v-.1A1.6 1.6 0 006.9 19l-.1.1a2 2 0 11-2.8-2.8l.1-.1A1.6 1.6 0 003 13.5H3a2 2 0 110-4h.1A1.6 1.6 0 005.4 6.9L5.3 6.8a2 2 0 112.8-2.8l.1.1A1.6 1.6 0 0011 3.1V3a2 2 0 114 0v.1a1.6 1.6 0 002.7 1.1l.1-.1a2 2 0 112.8 2.8l-.1.1a1.6 1.6 0 001.1 2.7H21a2 2 0 110 4h-.1a1.6 1.6 0 00-1.5 1.2z']
+  , ['type', 'M4 6V4h16v2', 'M12 4v16', 'M9 20h6']
+  , ['wifi', 'M2.5 8.5a15 15 0 0119 0', 'M6 12a10 10 0 0112 0', 'M9.5 15.5a5 5 0 015 0', 'M12 19h.01']
+  , ['cloud', 'M7 18a4 4 0 01-.6-8A5.5 5.5 0 0117 10.5a3.7 3.7 0 011 7.5z']
+  , ['link', 'M10 13a4 4 0 006 .5l2-2a4 4 0 00-5.7-5.7L11 7', 'M14 11a4 4 0 00-6-.5l-2 2A4 4 0 0011.7 18l1.3-1.2']
+  , ['trash', 'M4 7h16', 'M9 7V4h6v3', 'M6 7l1 13h10l1-13', 'M10 11v6M14 11v6']
+  , ['upload', 'M12 16V4', 'M7 9l5-5 5 5', 'M4 17v3h16v-3']
+  , ['download', 'M12 4v12', 'M7 11l5 5 5-5', 'M4 17v3h16v-3']
+  , ['pencil', 'M4 20h4L20 8l-4-4L4 16z', 'M14 6l4 4']
+  , ['arrow-right', 'M4 12h15', 'M13 6l6 6-6 6']
+  , ['plus', 'M12 5v14M5 12h14']
+  , ['check', 'M4 12.5l5 5L20 6.5']
+  , ['x', 'M6 6l12 12M18 6L6 18']
+  , ['alert', 'M12 3l9.5 17H2.5z', 'M12 9v5', 'M12 17h.01']
+  , ['info', 'M12 21a9 9 0 100-18 9 9 0 000 18z', 'M12 11v5', 'M12 8h.01']
+  , ['help', 'M12 21a9 9 0 100-18 9 9 0 000 18z', 'M9.5 9a2.6 2.6 0 015 .9c0 1.7-2.5 2.1-2.5 3.6', 'M12 17h.01']
+  , ['mic', 'M12 15a3 3 0 003-3V6a3 3 0 00-6 0v6a3 3 0 003 3z', 'M5 11a7 7 0 0014 0', 'M12 18v3']
+  , ['grid', 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z']
+  , ['refresh', 'M20 11A8 8 0 006 6l-2 2', 'M4 13a8 8 0 0014 5l2-2', 'M4 4v4h4M20 20v-4h-4']
+  , ['book', 'M4 5a2 2 0 012-2h12v18H6a2 2 0 01-2-2z', 'M8 7h8M8 11h6']
+  , ['clock', 'M12 21a9 9 0 100-18 9 9 0 000 18z', 'M12 7v5l3.5 2']
+  , ['search', 'M11 18a7 7 0 100-14 7 7 0 000 14z', 'M16.5 16.5L21 21']
+  , ['power', 'M12 4v8', 'M17.5 7a7 7 0 11-11 0']
+  , ['battery', 'M3 8h14v8H3zM20 11v2', 'M6 11h5v2H6z']
+  , ['chip', 'M7 7h10v10H7z', 'M10 4v3M14 4v3M10 17v3M14 17v3M4 10h3M4 14h3M17 10h3M17 14h3']
+  , ['save', 'M5 5h11l3 3v11H5z', 'M9 5v5h7V5', 'M8 16h8']
+  , ['server', 'M4 5h16v5H4zM4 14h16v5H4z', 'M8 7.5h.01M8 16.5h.01']
+  , ['sun', 'M12 17a5 5 0 100-10 5 5 0 000 10z', 'M12 2v2M12 20v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M2 12h2M20 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4']
+  , ['sliders', 'M4 7h10M18 7h2M4 17h4M12 17h8', 'M16 4.5v5M8 14.5v5']
+  , ['list', 'M4 6h.01M4 12h.01M4 18h.01', 'M8 6h12M8 12h12M8 18h12']
+  , ['doc', 'M6 3h7l5 5v13H6z', 'M13 3v5h5']
+  , ['image', 'M4 5h16v14H4z', 'M9.2 11a1.7 1.7 0 100-3.4 1.7 1.7 0 000 3.4z', 'M5 18l5-5 3 3 3-3 3 3']
+].map(function (g) {
+    const name = g[0];
+    const paths = g.slice(1).map(function (d) { return '<path d="' + d + '"/>'; }).join('');
+    return '<symbol id="i-' + name + '" viewBox="0 0 24 24">' + paths + '</symbol>';
+  }).join('') + '</svg>';
+
+function icon(name, cls) {
+  return '<svg class="i' + (cls ? ' ' + cls : '') + '" aria-hidden="true"><use href="#i-' +
+    name + '"/></svg>';
+}
+
+// Bottom-right feedback. Errors stay until dismissed (a 3s auto-fade makes critical
+// messages missable); successes expire after 4s.
 let toastTimer = 0;
 function toast(msg, ok) {
   const el = document.getElementById('toast');
   if (!el) return;
-  el.textContent = msg;
-  el.className = 'toast show ' + (ok ? 'ok' : 'err');
+  el.innerHTML = '';
+  const mark = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  mark.setAttribute('class', 'i');
+  mark.setAttribute('aria-hidden', 'true');
+  const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+  use.setAttribute('href', '#i-' + (ok === false ? 'alert' : 'check'));
+  mark.appendChild(use);
+  const text = document.createElement('span');
+  text.textContent = msg;
+  el.appendChild(mark);
+  el.appendChild(text);
+  el.className = 'toast show ' + (ok === false ? 'err' : 'ok');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(function() { el.className = 'toast'; }, 3000);
+  if (ok !== false) toastTimer = setTimeout(function () { el.className = 'toast'; }, 4000);
+}
+document.addEventListener('click', function (e) {
+  const t = e.target && e.target.closest ? e.target.closest('.toast') : null;
+  if (t && t.classList.contains('show')) t.className = 'toast';
+});
+
+// Unsaved-changes guard: pages call cpDirty(true/false) so leaving the tab cannot
+// silently drop edits, and so a chip can show a dot.
+let cpIsDirty = false;
+function cpDirty(on) {
+  cpIsDirty = !!on;
+  window.onbeforeunload = cpIsDirty ? function () { return true; } : null;
 }
 
 function updateLang(skipPage) {
-  document.querySelectorAll('[data-en]').forEach(function(el) {
-    el.textContent = el.getAttribute('data-' + lang);
+  document.querySelectorAll('[data-en]').forEach(function (el) {
+    const next = el.getAttribute('data-' + lang);
+    if (next === null) return;
+    // textContent would destroy child elements (icons, badges). When the labelled
+    // node has element children, rewrite only its first text node instead.
+    if (el.children.length && el.firstChild && el.firstChild.nodeType === 3) {
+      el.firstChild.nodeValue = next;
+    } else if (!el.children.length) {
+      el.textContent = next;
+    } else {
+      el.textContent = next;
+    }
   });
-  document.querySelectorAll('[data-en-ph]').forEach(function(el) {
+  document.querySelectorAll('[data-en-ph]').forEach(function (el) {
     el.placeholder = el.getAttribute('data-' + lang + '-ph') || el.placeholder;
   });
   document.documentElement.lang = lang === 'cn' ? 'zh-Hans' : 'en';
@@ -256,29 +525,37 @@ function updateLang(skipPage) {
   if (!skipPage && typeof onLangChange === 'function') onLangChange();
 }
 
-// The switcher itself, appended to the header like AIWatch does (index.html:552).
-const cpHeader = document.querySelector('.header');
-if (cpHeader) {
-  const langBtn = document.createElement('button');
-  langBtn.className = 'btn btn-secondary';
-  langBtn.style.padding = '4px 8px';
-  langBtn.style.fontSize = '11px';
-  langBtn.textContent = '中文 / EN';
-  langBtn.onclick = function() {
-    lang = lang === 'en' ? 'cn' : 'en';
-    try { localStorage.setItem('cp-lang', lang); } catch (e) { /* ignore */ }
-    updateLang();
-  };
-  cpHeader.appendChild(langBtn);
-}
-// Header status line: language-neutral (model, IP, free heap) so it needs no
-// translation — AIWatch uses the same slot for its connection state.
-fetch('/api/status').then(function(r) { return r.json(); }).then(function(d) {
+(function bootCore() {
+  const holder = document.createElement('div');
+  holder.innerHTML = CP_ICONS;
+  document.body.insertBefore(holder, document.body.firstChild);
+
+  const cpHeader = document.querySelector('.header');
+  if (cpHeader) {
+    const langBtn = document.createElement('button');
+    langBtn.className = 'btn btn-secondary btn-small';
+    langBtn.type = 'button';
+    langBtn.textContent = '中文 / EN';
+    langBtn.onclick = function () {
+      lang = lang === 'en' ? 'cn' : 'en';
+      try { localStorage.setItem('cp-lang', lang); } catch (e) { /* ignore */ }
+      updateLang();
+    };
+    cpHeader.appendChild(langBtn);
+  }
+})();
+
+// One /api/status fetch shared by every page (the header line and the Home stats
+// used to each fire their own). Await CP_STATUS elsewhere; it resolves to the
+// parsed object or null.
+window.CP_STATUS = fetch('/api/status').then(function (r) { return r.ok ? r.json() : null; })
+  .catch(function () { return null; });
+window.CP_STATUS.then(function (d) {
   const el = document.querySelector('.hdr-status');
   if (!el || !d) return;
   const kb = d.freeHeap ? Math.round(d.freeHeap / 1024) : 0;
   el.textContent = (d.device || '') + (d.ip ? ' · ' + d.ip : '') + (kb ? ' · ' + kb + ' KB' : '');
-}).catch(function() { /* status line is optional */ });
+});
 
 updateLang(true);
 /* AIWATCH-CORE:END */"""
