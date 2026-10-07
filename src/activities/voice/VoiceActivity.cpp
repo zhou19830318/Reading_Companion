@@ -120,9 +120,24 @@ void VoiceActivity::onEnter() {
     }
   }
   // Days are listed lazily when the browser opens; nothing SD here.
-  // Connect once per entry: loadConfig() validates what it can before any
-  // radio work, so a missing host/token shows the reason immediately instead
-  // of failing after a recording the user just made.
+  //
+  // Note mode brings no radio up here, and must not be gated on one: a quick
+  // mark ("快捷书签") is a plain NoteStore::append and the note browser is plain
+  // SD reads, so both were unreachable offline — the Wi-Fi list popped before
+  // this screen could paint, and Back from it finished the whole activity.
+  // STT is the only network user in note mode, and it degrades on its own
+  // instead of detouring: startRecording() reports STR_STT_NO_NETWORK and the
+  // edit keyboard's dictation does the same, so the mark picker and the note
+  // list stay one key away. The session is never dialled in note mode either
+  // way, so the Idle panel needs no status line.
+  if (noteContext_.valid) {
+    LOG_INF("VOICE", "note mode: no Wi-Fi bring-up (status=%d)", static_cast<int>(WiFi.status()));
+    requestUpdate();
+    return;
+  }
+  // Chat mode connects once per entry: loadConfig() validates what it can
+  // before any radio work, so a missing host/token shows the reason immediately
+  // instead of failing after a recording the user just made.
   //
   // Bring the network up first when it is down: without it, the STT upload
   // and the chat.send both fail at the moment the user presses Confirm, long
@@ -140,19 +155,8 @@ void VoiceActivity::onEnter() {
                                finish();
                                return;
                              }
-                             if (noteContext_.valid) {
-                               // Note mode: STT needs the network, the agent
-                               // session does not — nothing to dial.
-                               requestUpdate();
-                               return;
-                             }
                              startSession();
                            });
-    requestUpdate();
-    return;
-  }
-  if (noteContext_.valid) {
-    // Note mode: the session stays closed; the Idle panel needs no status.
     requestUpdate();
     return;
   }
@@ -375,6 +379,31 @@ const char* VoiceActivity::gatewayStatus() const {
 
 void VoiceActivity::startRecording() {
   if (WiFi.status() != WL_CONNECTED) {
+    // Note mode never brings the radio up on entry (see onEnter), so the talk
+    // key is the point that has to: connect first, then transcribe. The detour
+    // is opt-in — a quick mark never reaches it — and cancelling it lands on
+    // this screen's own no-network failure instead of finishing the activity,
+    // so the mark picker and the note list stay one key away.
+    //
+    // The capture starts inside the result handler, the way the other Wi-Fi
+    // children resume their work (FontDownloadActivity): ActivityManager
+    // queues one requestUpdate() right after a handler returns, so deferring
+    // to loop() would make requestUpdateAndWait() return on that repaint
+    // instead of on the recording frame — the mic would come up before the
+    // screen showed it. Here the frame is requested first; the repaint
+    // ActivityManager then queues is the same frame, drawn once more.
+    if (noteContext_.valid) {
+      LOG_INF("VOICE", "note capture offline, opening Wi-Fi selection");
+      startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
+                             [this](const ActivityResult& result) {
+                               if (result.isCancelled || WiFi.status() != WL_CONNECTED) {
+                                 fail(tr(STR_STT_NO_NETWORK));
+                                 return;
+                               }
+                               startRecording();
+                             });
+      return;
+    }
     fail(tr(STR_STT_NO_NETWORK));
     return;
   }
