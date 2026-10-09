@@ -52,3 +52,39 @@ TEST(Utf8ComposeNfc, ComposesWithinWord) {
   // "Ti" + e+circ+acute + "ng" -> "Tiếng"
   EXPECT_EQ(utf8ComposeNfc("Ti" + std::string("e") + kCombCirc + kCombAcute + "ng"), "Ti\xE1\xBA\xBFng");
 }
+
+// ---- utf8ValidSequenceLen -------------------------------------------------
+
+namespace {
+const unsigned char* bytes(const char* s) { return reinterpret_cast<const unsigned char*>(s); }
+}  // namespace
+
+// Well-formed input reports its byte length, from ASCII through the 4-byte form.
+TEST(Utf8ValidSequenceLen, AcceptsWellFormedSequences) {
+  EXPECT_EQ(utf8ValidSequenceLen(bytes("a")), 1u);
+  EXPECT_EQ(utf8ValidSequenceLen(bytes("")), 0u);                  // end of string
+  EXPECT_EQ(utf8ValidSequenceLen(bytes("\xC3\xA9")), 2u);          // é
+  EXPECT_EQ(utf8ValidSequenceLen(bytes("\xE4\xB8\xAD")), 3u);      // 中
+  EXPECT_EQ(utf8ValidSequenceLen(bytes("\xF0\x9F\x98\x80")), 4u);  // U+1F600
+}
+
+// The shape this exists for: a lead byte with its tail missing, which is what
+// a byte-sized snprintf of a CJK title leaves behind.
+TEST(Utf8ValidSequenceLen, RejectsTruncatedSequences) {
+  EXPECT_EQ(utf8ValidSequenceLen(bytes("\xE4")), 0u);
+  EXPECT_EQ(utf8ValidSequenceLen(bytes("\xE4"
+                                       "A")),
+            0u);                                               // lead then plain ASCII
+  EXPECT_EQ(utf8ValidSequenceLen(bytes("\xE4\x84")), 0u);      // one continuation of two
+  EXPECT_EQ(utf8ValidSequenceLen(bytes("\xF0\x9F\x98")), 0u);  // 3 of 4 bytes
+}
+
+// The rest of RFC 3629: shape, range and overlong checks, not just the tail.
+TEST(Utf8ValidSequenceLen, RejectsIllFormedButCompleteSequences) {
+  EXPECT_EQ(utf8ValidSequenceLen(bytes("\x84")), 0u);              // stray continuation byte
+  EXPECT_EQ(utf8ValidSequenceLen(bytes("\xC0\xAF")), 0u);          // overlong '/'
+  EXPECT_EQ(utf8ValidSequenceLen(bytes("\xE0\x80\xAF")), 0u);      // overlong 3-byte form
+  EXPECT_EQ(utf8ValidSequenceLen(bytes("\xED\xA0\x80")), 0u);      // U+D800 surrogate half
+  EXPECT_EQ(utf8ValidSequenceLen(bytes("\xF4\x90\x80\x80")), 0u);  // above U+10FFFF
+  EXPECT_EQ(utf8ValidSequenceLen(bytes("\xF5\x80\x80\x80")), 0u);  // impossible lead byte
+}

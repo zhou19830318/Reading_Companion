@@ -23,6 +23,17 @@ std::string utf8ComposeNfc(const std::string& in);
 // incomplete trailing bytes are excluded.
 int utf8SafeTruncateBuffer(const char* buf, int len);
 
+// Length in bytes (1..4) of the well-formed UTF-8 sequence starting at `s`,
+// or 0 when there is no such sequence — end of string, or bytes that do not
+// form one. Covers the whole RFC 3629 shape: continuation bytes, overlong
+// forms, UTF-16 surrogate halves and anything above U+10FFFF are rejected, not
+// just a lead byte missing its tail.
+//
+// `s` must be NUL-terminated: a sequence running into the terminator is
+// incomplete and therefore ill formed, and the scan never reads past that
+// terminator — a missing continuation is always detected before it would.
+size_t utf8ValidSequenceLen(const unsigned char* s);
+
 // Returns true for CJK characters that allow line breaks on either side without hyphenation.
 // Covers CJK Unified Ideographs, Hiragana, Katakana, Hangul Syllables, CJK punctuation,
 // and fullwidth forms — the ranges where word boundaries are implicit per character.

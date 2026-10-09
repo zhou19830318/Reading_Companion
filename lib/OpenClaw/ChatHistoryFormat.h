@@ -53,6 +53,10 @@ inline constexpr std::string_view LINE_PREFIX = "OCL1 ";
 // "dir/" + path in the same buffer.
 inline constexpr size_t DATE_PATH_SIZE = 24;
 
+// "YYYY-MM-DD/HH:MM" is 16 chars + NUL — the destination size for
+// formatStampForOffset().
+inline constexpr size_t STAMP_SIZE = 17;
+
 // ── codepoint classes ────────────────────────────────────────────────────────
 // Returns true when the codepoint never carries conversational content and is
 // not in any .cpfont: emoji and pictographs (astral planes), variation
@@ -302,6 +306,30 @@ inline bool formatTimeForOffset(char* out, const size_t cap, const int64_t epoch
   const int64_t localSec = localEpochSeconds(epochMs, utcOffsetQuarterHoursBiased);
   const int64_t secsOfDay = ((localSec % 86400) + 86400) % 86400;
   snprintf(out, cap, "%02d:%02d", static_cast<int>(secsOfDay / 3600), static_cast<int>((secsOfDay / 60) % 60));
+  return true;
+}
+
+// "YYYY-MM-DD/HH:MM" (needs cap >= STAMP_SIZE) — the full wall-clock stamp of
+// `epochMs` under the user's offset, for record rows that must be traceable
+// across days (voice-note list, note detail). Built from the same
+// localEpochSeconds()/civilFromDays() pair as dayPath() and
+// formatTimeForOffset(), so the stamp and the day file the record lives in can
+// never disagree. Fails below the sane-epoch floor like its siblings: an
+// unsynced clock has no meaningful wall time, and the caller then drops the
+// prefix instead of printing 1970-01-20.
+inline bool formatStampForOffset(char* out, const size_t cap, const int64_t epochMs,
+                                 const int utcOffsetQuarterHoursBiased) {
+  if (out == nullptr || cap < STAMP_SIZE) return false;
+  if (epochMs < MIN_SANE_EPOCH_MS) return false;
+  const int64_t localSec = localEpochSeconds(epochMs, utcOffsetQuarterHoursBiased);
+  const int64_t days = localSec >= 0 ? localSec / 86400 : (localSec - 86399) / 86400;
+  int year = 0;
+  int month = 0;
+  int day = 0;
+  civilFromDays(days, year, month, day);
+  const int64_t secsOfDay = ((localSec % 86400) + 86400) % 86400;
+  snprintf(out, cap, "%04d-%02d-%02d/%02d:%02d", year, month, day, static_cast<int>(secsOfDay / 3600),
+           static_cast<int>((secsOfDay / 60) % 60));
   return true;
 }
 

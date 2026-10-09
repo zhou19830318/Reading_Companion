@@ -1,5 +1,7 @@
 #include "OpenClawChat.h"
 
+#include <Utf8.h>
+
 #include <cstdio>
 #include <cstring>
 
@@ -16,64 +18,91 @@ bool tokenEq(const char* value, size_t len, const char* expected) {
 
 // JSON string escaping for the outbound frame. Only the characters JSON
 // requires are touched: quote, backslash, \n \r \t get their short form and
-// the remaining control characters get \u00XX. Bytes >= 0x20 pass through
-// untouched, so UTF-8 stays intact — the gateway decodes the body as UTF-8 and
-// never has to see these bytes as escapes.
+// the remaining control characters get \u00XX. Everything else passes through
+// byte for byte — but only when it belongs to a well-formed UTF-8 sequence.
+// A text frame that is not valid UTF-8 makes the gateway drop the socket with
+// no reply and no close frame (RFC 6455 §8.1), which takes the whole round
+// trip down instead of merely garbling this message, so an ill-formed byte is
+// dropped here rather than put on the wire.
 bool appendEscaped(char* out, size_t cap, size_t& pos, const char* s) {
   static constexpr char HEX[] = "0123456789abcdef";
-  for (const unsigned char* p = reinterpret_cast<const unsigned char*>(s); *p != '\0'; ++p) {
-    const unsigned char c = *p;
+  const unsigned char* p = reinterpret_cast<const unsigned char*>(s);
+  while (*p != '\0') {
+    const size_t seqLen = utf8ValidSequenceLen(p);
+    if (seqLen == 0) {
+      ++p;
+      continue;
+    }
     char tmp[6];
-    size_t n = 1;
-    switch (c) {
-      case '"':
-        tmp[0] = '\\';
-        tmp[1] = '"';
-        n = 2;
-        break;
-      case '\\':
-        tmp[0] = '\\';
-        tmp[1] = '\\';
-        n = 2;
-        break;
-      case '\n':
-        tmp[0] = '\\';
-        tmp[1] = 'n';
-        n = 2;
-        break;
-      case '\r':
-        tmp[0] = '\\';
-        tmp[1] = 'r';
-        n = 2;
-        break;
-      case '\t':
-        tmp[0] = '\\';
-        tmp[1] = 't';
-        n = 2;
-        break;
-      default:
-        if (c < 0x20) {
+    size_t n = seqLen;
+    if (seqLen == 1) {
+      const unsigned char c = *p;
+      switch (c) {
+        case '"':
           tmp[0] = '\\';
-          tmp[1] = 'u';
-          tmp[2] = '0';
-          tmp[3] = '0';
-          tmp[4] = HEX[c >> 4];
-          tmp[5] = HEX[c & 0x0F];
-          n = 6;
-        } else {
-          tmp[0] = static_cast<char>(c);
-          n = 1;
-        }
-        break;
+          tmp[1] = '"';
+          n = 2;
+          break;
+        case '\\':
+          tmp[0] = '\\';
+          tmp[1] = '\\';
+          n = 2;
+          break;
+        case '\n':
+          tmp[0] = '\\';
+          tmp[1] = 'n';
+          n = 2;
+          break;
+        case '\r':
+          tmp[0] = '\\';
+          tmp[1] = 'r';
+          n = 2;
+          break;
+        case '\t':
+          tmp[0] = '\\';
+          tmp[1] = 't';
+          n = 2;
+          break;
+        default:
+          if (c < 0x20) {
+            tmp[0] = '\\';
+            tmp[1] = 'u';
+            tmp[2] = '0';
+            tmp[3] = '0';
+            tmp[4] = HEX[c >> 4];
+            tmp[5] = HEX[c & 0x0F];
+            n = 6;
+          } else {
+            tmp[0] = static_cast<char>(c);
+            n = 1;
+          }
+          break;
+      }
+    } else {
+      std::memcpy(tmp, p, seqLen);
     }
     if (pos + n > cap) return false;
     std::memcpy(out + pos, tmp, n);
     pos += n;
+    p += seqLen;
   }
   return true;
 }
 
 }  // namespace
+
+int firstIllFormedUtf8(const char* message) {
+  if (message == nullptr) return -1;
+  const unsigned char* p = reinterpret_cast<const unsigned char*>(message);
+  int offset = 0;
+  while (*p != '\0') {
+    const size_t seqLen = utf8ValidSequenceLen(p);
+    if (seqLen == 0) return offset;
+    p += seqLen;
+    offset += static_cast<int>(seqLen);
+  }
+  return -1;
+}
 
 size_t buildChatSendFrame(char* out, size_t cap, uint32_t msgId, const char* message, const char* idempotencyKey) {
   if (out == nullptr || cap == 0 || message == nullptr || message[0] == '\0' || idempotencyKey == nullptr) {

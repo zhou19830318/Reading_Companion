@@ -617,6 +617,14 @@ uint32_t Session::awaitingMs() const { return awaitingReply_ ? (millis() - sentA
 
 Session::SendOutcome Session::sendMessage(const char* message) {
   if (ws_ == nullptr || state_ != State::Connected) return SendOutcome::Failed;
+  // Callers gate on state() alone, but state_ stays Connected the moment the
+  // socket drops and only the reconnect flag moves. A write here reaches a
+  // closed socket and fails as a socket-write error, which the UI reads as a
+  // send failure rather than a lost link.
+  if (reconnecting_) {
+    LOG_ERR("OCS", "chat.send skipped: link is reconnecting");
+    return SendOutcome::Failed;
+  }
   if (chatBuf_ == nullptr) return SendOutcome::Failed;
   if (message != nullptr) {
     snprintf(lastMessage_, sizeof(lastMessage_), "%s", message);
@@ -629,6 +637,17 @@ Session::SendOutcome Session::sendMessage(const char* message) {
   snprintf(key, sizeof(key), "cp-%08lx-%lu", static_cast<unsigned long>(esp_random()),
            static_cast<unsigned long>(nextMsgId_));
   const uint32_t sentId = nextMsgId_;
+
+  // buildChatSendFrame drops ill-formed bytes so the frame stays valid, which
+  // hides where they came from — surface the offset here, where the send can
+  // be logged. A message that trips this would otherwise only be visible as a
+  // link the gateway closes for no apparent reason.
+  if (message != nullptr) {
+    const int illFormedAt = firstIllFormedUtf8(message);
+    if (illFormedAt >= 0) {
+      LOG_ERR("OCS", "chat.send message has ill-formed UTF-8 at byte %d; dropped from the frame", illFormedAt);
+    }
+  }
 
   const size_t n = buildChatSendFrame(chatBuf_, CHAT_BUF_CAP, nextMsgId_, message, key);
   nextMsgId_ = nextMsgId_ % MAX_MSG_ID + 1;

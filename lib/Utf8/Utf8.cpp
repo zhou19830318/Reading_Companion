@@ -162,6 +162,35 @@ int utf8SafeTruncateBuffer(const char* buf, int len) {
   return len;
 }
 
+size_t utf8ValidSequenceLen(const unsigned char* s) {
+  const unsigned char lead = s[0];
+  if (lead == 0) return 0;  // end of string: no sequence here
+  if (lead < 0x80) return 1;
+
+  int bytes;
+  if (lead >= 0xC2 && lead <= 0xDF) {
+    bytes = 2;
+  } else if (lead >= 0xE0 && lead <= 0xEF) {
+    bytes = 3;
+  } else if (lead >= 0xF0 && lead <= 0xF4) {
+    bytes = 4;
+  } else {
+    // Stray continuation byte (0x80-0xBF), an overlong 2-byte lead (0xC0-0xC1)
+    // or a byte beyond U+10FFFF's range (0xF5-0xFF).
+    return 0;
+  }
+  for (int i = 1; i < bytes; i++) {
+    if ((s[i] & 0xC0) != 0x80) return 0;  // NUL terminator counts as a miss
+  }
+  if ((lead == 0xE0 && s[1] < 0xA0) ||  // overlong 3-byte form
+      (lead == 0xED && s[1] > 0x9F) ||  // UTF-16 surrogate half
+      (lead == 0xF0 && s[1] < 0x90) ||  // overlong 4-byte form
+      (lead == 0xF4 && s[1] > 0x8F)) {  // above U+10FFFF
+    return 0;
+  }
+  return static_cast<size_t>(bytes);
+}
+
 size_t utf8RemoveLastChar(std::string& str) {
   if (str.empty()) return 0;
   size_t pos = str.size() - 1;

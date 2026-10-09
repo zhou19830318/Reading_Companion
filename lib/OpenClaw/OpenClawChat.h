@@ -77,6 +77,14 @@ static constexpr size_t CHAT_BUF_CAP = 4096;
 // second message.
 size_t buildChatSendFrame(char* out, size_t cap, uint32_t msgId, const char* message, const char* idempotencyKey);
 
+// Byte offset of the first ill-formed UTF-8 sequence in `message`, or -1 when
+// the whole string is well formed (nullptr counts as well formed).
+// buildChatSendFrame drops those bytes — the gateway closes the socket on a
+// text frame that is not valid UTF-8, so the frame has to go out clean no
+// matter what the source carried. This only says where the corruption entered,
+// for the sender to log.
+int firstIllFormedUtf8(const char* message);
+
 // True when a reply carries no usable content — only the gateway's own
 // "[assistant turn failed before producing content]" line (possibly repeated)
 // and whitespace, or nothing at all. A real answer anywhere in the text makes

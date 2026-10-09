@@ -1,5 +1,6 @@
 #include <OpenClawChat.h>
 #include <StreamingJsonParser.h>
+#include <Utf8.h>
 #include <gtest/gtest.h>
 
 #include <cstring>
@@ -463,6 +464,53 @@ TEST(StripSymbols, EmptyReplyIsUntouched) {
   OpenClaw::ChatReply reply(storage, sizeof(storage));
   EXPECT_EQ(reply.stripStrippableSymbols(), 0u);
   EXPECT_STREQ(reply.text(), "");
+}
+
+// ---- ill-formed UTF-8 in the outbound message -----------------------------
+//
+// RFC 6455 §8.1: a text frame that is not valid UTF-8 makes the gateway drop
+// the socket outright — no reply, no close frame. On device that showed up as
+// AI智能解惑 failing 4/4 times with "网关无回复" while every well-formed
+// message (up to 1392 bytes) went through.
+
+TEST(FirstIllFormedUtf8, ReportsTheOffsetOfTheFirstBadByte) {
+  EXPECT_EQ(OpenClaw::firstIllFormedUtf8("clean 读本 text"), -1);
+  EXPECT_EQ(OpenClaw::firstIllFormedUtf8(""), -1);
+  EXPECT_EQ(OpenClaw::firstIllFormedUtf8("ab"
+                                         "\xE4"
+                                         "cd"),
+            2);  // lead byte with no continuations
+  EXPECT_EQ(OpenClaw::firstIllFormedUtf8("\x84"
+                                         "x"),
+            0);  // stray continuation byte
+}
+
+TEST(BuildChatSendFrame, FrameIsWellFormedUtf8EvenWhenTheMessageIsNot) {
+  // "Book: " + 历史 + the cut lead byte a byte-sized title snprintf leaves,
+  // then the rest of the prompt header.
+  const std::string message =
+      "Book: "
+      "\xE5\x8E\x86\xE5\x8F\xB2"
+      "\xE4"
+      "\nQuestion: x";
+  ASSERT_EQ(OpenClaw::firstIllFormedUtf8(message.c_str()), 12);
+
+  char buf[OpenClaw::CHAT_BUF_CAP];
+  const size_t n = OpenClaw::buildChatSendFrame(buf, sizeof(buf), 1, message.c_str(), "k");
+  ASSERT_GT(n, 0u);
+  const std::string frame(buf, n);
+  ASSERT_TRUE(isValidJson(frame));
+
+  const unsigned char* p = reinterpret_cast<const unsigned char*>(frame.c_str());
+  size_t at = 0;
+  while (*p != '\0') {
+    const size_t seqLen = utf8ValidSequenceLen(p);
+    ASSERT_GT(seqLen, 0u) << "frame is ill-formed UTF-8 at byte " << at;
+    p += seqLen;
+    at += seqLen;
+  }
+  EXPECT_EQ(frame.find('\xE4'), std::string::npos);                      // the cut lead byte is gone
+  EXPECT_NE(frame.find("\xE5\x8E\x86\xE5\x8F\xB2"), std::string::npos);  // the intact text stays
 }
 
 }  // namespace

@@ -10,6 +10,7 @@ using OpenClaw::ChatHistoryFormat::buildLine;
 using OpenClaw::ChatHistoryFormat::DATE_PATH_SIZE;
 using OpenClaw::ChatHistoryFormat::dayPath;
 using OpenClaw::ChatHistoryFormat::daysFromCivil;
+using OpenClaw::ChatHistoryFormat::formatStampForOffset;
 using OpenClaw::ChatHistoryFormat::groupDaysByName;
 using OpenClaw::ChatHistoryFormat::historyDayRowLabel;
 using OpenClaw::ChatHistoryFormat::HistoryGroup;
@@ -18,6 +19,7 @@ using OpenClaw::ChatHistoryFormat::HistoryLevel;
 using OpenClaw::ChatHistoryFormat::isoWeekdayMon1;
 using OpenClaw::ChatHistoryFormat::parseDayDate;
 using OpenClaw::ChatHistoryFormat::parseLine;
+using OpenClaw::ChatHistoryFormat::STAMP_SIZE;
 using OpenClaw::ChatHistoryFormat::weekOfMonth;
 
 namespace {
@@ -68,6 +70,43 @@ TEST(ChatHistoryDayPath, UnsancEpochRejected) {
   char path[DATE_PATH_SIZE];
   // 1970-01-20 — what an SNTP-less boot reports.
   EXPECT_FALSE(dayPath(path, 1600000, 48));
+}
+
+TEST(ChatHistoryStamp, UtcNoonMatchesDayPathDate) {
+  char stamp[STAMP_SIZE];
+  // The date half must agree with the day file dayPath() picks for the same
+  // instant, or a row could show 2026-09-27 while living in 2026-09-28.jsonl.
+  ASSERT_TRUE(formatStampForOffset(stamp, sizeof(stamp), NOON_UTC_2026_09_27, 48));
+  EXPECT_STREQ(stamp, "2026-09-27/12:00");
+}
+
+TEST(ChatHistoryStamp, PositiveOffsetShiftsBothDateAndTime) {
+  char stamp[STAMP_SIZE];
+  // 2026-09-27 23:30 UTC = 2026-09-28 07:30 in UTC+8
+  ASSERT_TRUE(formatStampForOffset(stamp, sizeof(stamp),
+                                   MIDNIGHT_UTC_2026_09_27 + 23 * 3600 * 1000LL + 30 * 60 * 1000LL, 48 + 32));
+  EXPECT_STREQ(stamp, "2026-09-28/07:30");
+}
+
+TEST(ChatHistoryStamp, NegativeOffsetCrossesBack) {
+  char stamp[STAMP_SIZE];
+  // 2026-09-27 02:00 UTC = 2026-09-26 18:00 in UTC-8
+  ASSERT_TRUE(formatStampForOffset(stamp, sizeof(stamp), MIDNIGHT_UTC_2026_09_27 + 2 * 3600 * 1000LL, 48 - 32));
+  EXPECT_STREQ(stamp, "2026-09-26/18:00");
+}
+
+TEST(ChatHistoryStamp, UnsancEpochRejected) {
+  char stamp[STAMP_SIZE];
+  // No timestamp beats a confidently wrong one: the caller then renders the
+  // row without a prefix instead of stamping 1970-01-20.
+  EXPECT_FALSE(formatStampForOffset(stamp, sizeof(stamp), 1600000, 48));
+}
+
+TEST(ChatHistoryStamp, TinyCapRejected) {
+  char small[STAMP_SIZE - 1] = {};
+  char nullOut[STAMP_SIZE] = {};
+  EXPECT_FALSE(formatStampForOffset(small, sizeof(small), NOON_UTC_2026_09_27, 48));
+  EXPECT_FALSE(formatStampForOffset(nullptr, sizeof(nullOut), NOON_UTC_2026_09_27, 48));
 }
 
 TEST(ChatHistoryLine, AsciiRoundTrip) { EXPECT_EQ(roundTrip("Hello, world!"), "Hello, world!"); }
