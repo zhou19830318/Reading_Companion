@@ -25,6 +25,12 @@ class Epub {
   std::string cachePath;
   // Spine and TOC cache
   std::unique_ptr<BookMetadataCache> bookMetadataCache;
+  // Persistent ZIP handle. Constructing a temporary ZipFile per item read
+  // re-ran loadZipDetails() (~130 ms EOCD scan) and reset the central
+  // directory cursor on every single lookup — measured at ~340 ms per comic
+  // image, which is most of the fixed cost of extracting one.
+  mutable std::unique_ptr<ZipFile> zipHandle;
+  ZipFile& zip() const;
   // CSS parser for styling
   std::unique_ptr<CssParser> cssParser;
   // CSS files
@@ -38,11 +44,10 @@ class Epub {
   void parseCssFiles() const;
 
  public:
-  explicit Epub(std::string filepath, const std::string& cacheDir) : filepath(std::move(filepath)) {
-    // create a cache key based on the filepath
-    cachePath = cacheDir + "/epub_" + std::to_string(std::hash<std::string>{}(this->filepath));
-  }
-  ~Epub() = default;
+  // Out of line in Epub.cpp: ZipFile is incomplete here, and unique_ptr's
+  // deleter is instantiated from the constructor's cleanup path.
+  explicit Epub(std::string filepath, const std::string& cacheDir);
+  ~Epub();
   std::string& getBasePath() { return contentBasePath; }
   bool load(bool buildIfMissing = true, bool skipLoadingCss = false);
   bool clearCache() const;

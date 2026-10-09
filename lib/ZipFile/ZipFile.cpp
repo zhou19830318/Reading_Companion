@@ -3,8 +3,10 @@
 #include <HalStorage.h>
 #include <InflateReader.h>
 #include <Logging.h>
+#include <Memory.h>
 
 #include <algorithm>
+#include <cstring>
 
 struct ZipInflateCtx {
   InflateReader reader;  // Must be first — callback casts uzlib_uncomp* to ZipInflateCtx*
@@ -17,6 +19,35 @@ struct ZipInflateCtx {
 namespace {
 constexpr uint16_t ZIP_METHOD_STORED = 0;
 constexpr uint16_t ZIP_METHOD_DEFLATED = 8;
+constexpr uint32_t ZIP_CD_SIGNATURE = 0x02014b50;
+constexpr uint32_t ZIP_EOCD_SIGNATURE = 0x06054b50;
+// Fixed-size portion of a central directory entry, before the variable
+// name/extra/comment fields. Layout: sig(4) ver(4) method(2) time/date(4)
+// crc(4) compSize(4) uncompSize(4) nameLen(2) extraLen(2) commentLen(2)
+// disk/attrs(8) localHeaderOffset(4).
+constexpr size_t ZIP_CD_FIXED = 46;
+constexpr size_t ZIP_CD_METHOD = 10;
+constexpr size_t ZIP_CD_COMP_SIZE = 20;
+constexpr size_t ZIP_CD_UNCOMP_SIZE = 24;
+constexpr size_t ZIP_CD_NAME_LEN = 28;
+constexpr size_t ZIP_CD_EXTRA_LEN = 30;
+constexpr size_t ZIP_CD_COMMENT_LEN = 32;
+constexpr size_t ZIP_CD_LOCAL_OFFSET = 42;
+constexpr size_t ZIP_CD_NAME = 46;
+
+// Unaligned little-endian readers. The central directory is walked as a raw
+// byte buffer, so field offsets are rarely 4-byte aligned and the C3/C6 RISC-V
+// cores fault on misaligned multi-byte loads.
+inline uint16_t readLe16(const uint8_t* p) {
+  uint16_t v;
+  memcpy(&v, p, sizeof(v));
+  return v;
+}
+inline uint32_t readLe32(const uint8_t* p) {
+  uint32_t v;
+  memcpy(&v, p, sizeof(v));
+  return v;
+}
 
 // RAII zip: opens the zip if not already open, closes on destruction only if
 // it performed the open.  Removes the wasOpen/close boilerplate from every method.
@@ -107,6 +138,81 @@ bool ZipFile::loadAllFileStatSlims() {
   return true;
 }
 
+ZipFile::~ZipFile() {
+  if (cdMem) {
+    heap_caps_free(cdMem);
+    cdMem = nullptr;
+  }
+}
+
+// Mirror the whole central directory into PSRAM once. The previous per-entry
+// SD walk issued ~11 small reads per archive entry; a 622-entry comic EPUB
+// cost 140-290 ms per lookup, i.e. most of the fixed cost of extracting an
+// image. One contiguous 39 KB read replaces all of it.
+bool ZipFile::ensureCentralDirMem() {
+  if (cdMemTried) return cdMem != nullptr;
+  cdMemTried = true;
+
+  const ScopedOpenClose zip{*this};
+  if (!zip) return false;
+  if (!loadZipDetails()) return false;
+
+  const uint32_t offset = zipDetails.centralDirOffset;
+  const uint32_t size = zipDetails.centralDirSize;
+  const uint32_t fileSize = static_cast<uint32_t>(file.size());
+  if (size < ZIP_CD_FIXED || offset > fileSize || size > fileSize - offset || size > MAX_CENTRAL_DIR_MEM) {
+    LOG_DBG("ZIP", "Central directory not cacheable (offset=%lu size=%lu file=%lu)", static_cast<unsigned long>(offset),
+            static_cast<unsigned long>(size), static_cast<unsigned long>(fileSize));
+    return false;
+  }
+
+  // PSRAM only: internal DRAM is down to ~24 KB free and this buffer is 39 KB
+  // on a typical comic. MALLOC_CAP_SPIRAM keeps it off the internal heap.
+  auto* buf = static_cast<uint8_t*>(heap_caps_malloc(size, MALLOC_CAP_SPIRAM));
+  if (!buf) {
+    LOG_ERR("ZIP", "OOM: central directory mirror (%lu bytes)", static_cast<unsigned long>(size));
+    return false;
+  }
+
+  const int64_t start = esp_timer_get_time();
+  file.seek(offset);
+  if (file.read(buf, size) != size) {
+    LOG_ERR("ZIP", "Failed to read central directory into memory");
+    heap_caps_free(buf);
+    return false;
+  }
+
+  cdMem = buf;
+  cdMemSize = size;
+  LOG_INF("ZIP", "Central directory cached: %lu B in %ldms (%u entries)", static_cast<unsigned long>(size),
+          static_cast<long>((esp_timer_get_time() - start) / 1000), zipDetails.totalEntries);
+  return true;
+}
+
+bool ZipFile::lookupInCentralDirMem(const char* filename, FileStatSlim* fileStat) {
+  const size_t nameLen = strlen(filename);
+  uint32_t pos = 0;
+
+  while (pos + ZIP_CD_FIXED <= cdMemSize) {
+    const uint8_t* entry = cdMem + pos;
+    if (readLe32(entry) != ZIP_CD_SIGNATURE) break;
+
+    const uint32_t next = pos + ZIP_CD_FIXED + readLe16(entry + ZIP_CD_NAME_LEN) + readLe16(entry + ZIP_CD_EXTRA_LEN) +
+                          readLe16(entry + ZIP_CD_COMMENT_LEN);
+    if (next > cdMemSize || next <= pos) break;
+
+    if (readLe16(entry + ZIP_CD_NAME_LEN) == nameLen && memcmp(entry + ZIP_CD_NAME, filename, nameLen) == 0) {
+      fileStat->method = readLe16(entry + ZIP_CD_METHOD);
+      fileStat->compressedSize = readLe32(entry + ZIP_CD_COMP_SIZE);
+      fileStat->uncompressedSize = readLe32(entry + ZIP_CD_UNCOMP_SIZE);
+      fileStat->localHeaderOffset = readLe32(entry + ZIP_CD_LOCAL_OFFSET);
+      return true;
+    }
+    pos = next;
+  }
+  return false;
+}
+
 bool ZipFile::loadFileStatSlim(const char* filename, FileStatSlim* fileStat) {
   if (!fileStatSlimCache.empty()) {
     const auto it = fileStatSlimCache.find(filename);
@@ -115,6 +221,10 @@ bool ZipFile::loadFileStatSlim(const char* filename, FileStatSlim* fileStat) {
       return true;
     }
     return false;
+  }
+
+  if (ensureCentralDirMem()) {
+    return lookupInCentralDirMem(filename, fileStat);
   }
 
   const ScopedOpenClose zip{*this};
@@ -244,8 +354,7 @@ bool ZipFile::loadZipDetails() {
   // Scan backwards for the signature
   int foundOffset = -1;
   for (int i = scanRange - 22; i >= 0; i--) {
-    constexpr uint32_t signature = 0x06054b50;
-    if (*reinterpret_cast<uint32_t*>(&buffer[i]) == signature) {
+    if (readLe32(buffer + i) == ZIP_EOCD_SIGNATURE) {
       foundOffset = i;
       break;
     }
@@ -260,9 +369,12 @@ bool ZipFile::loadZipDetails() {
   // Now extract the values we need from the EOCD record
   // Relative positions within EOCD:
   // Offset 10: Total number of entries (2 bytes)
+  // Offset 12: Size of the central directory (4 bytes)
   // Offset 16: Offset of start of central directory with respect to the starting disk number (4 bytes)
-  zipDetails.totalEntries = *reinterpret_cast<uint16_t*>(&buffer[foundOffset + 10]);
-  zipDetails.centralDirOffset = *reinterpret_cast<uint32_t*>(&buffer[foundOffset + 16]);
+  const uint8_t* eocd = buffer + foundOffset;
+  zipDetails.totalEntries = readLe16(eocd + 10);
+  zipDetails.centralDirSize = readLe32(eocd + 12);
+  zipDetails.centralDirOffset = readLe32(eocd + 16);
   zipDetails.isSet = true;
 
   free(buffer);

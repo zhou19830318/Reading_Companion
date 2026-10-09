@@ -3,6 +3,7 @@
 #include <HalStorage.h>
 #include <Logging.h>
 #include <Serialization.h>
+#include <esp_timer.h>
 
 #include "Epub/css/CssParser.h"
 #include "Page.h"
@@ -181,9 +182,18 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
     if (!Storage.openFileForWrite("SCT", tmpHtmlPath, tmpHtml)) {
       continue;
     }
-    success = epub->readItemContentsToStream(localPath, tmpHtml, 1024);
+    // Measured on this card: each 1 KB read-from-EPUB + write-to-temp cycle
+    // costs ~150 ms — that is SD write-command programming latency, not wire
+    // time (SPI runs at 20 MHz). At 1024 B a 30 KB spine item became ~60 SD
+    // commands = 4-6 s per page, which is what froze the reader during
+    // silent chapter indexing. 8192 B keeps the transient buffers at 16 KB
+    // (two per call, freed on return) against ~56 KB free internal heap.
+    const int64_t streamT0 = esp_timer_get_time();
+    success = epub->readItemContentsToStream(localPath, tmpHtml, 8192);
     fileSize = tmpHtml.size();
-    // Explicitly close() file before calling Storage.remove()
+    LOG_DBG("SCT", "streamed item: %ldms (%u bytes, chunk 8192)",
+            static_cast<long>((esp_timer_get_time() - streamT0) / 1000), static_cast<unsigned>(fileSize));
+    // Explicit close() file before calling Storage.remove()
     tmpHtml.close();
 
     // If streaming failed, remove the incomplete file immediately

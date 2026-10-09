@@ -17,6 +17,7 @@ class ZipFile {
 
   struct ZipDetails {
     uint32_t centralDirOffset;
+    uint32_t centralDirSize;
     uint16_t totalEntries;
     bool isSet;
   };
@@ -48,13 +49,24 @@ class ZipFile {
   uint32_t lastCentralDirPos = 0;
   bool lastCentralDirPosValid = false;
 
+  // Whole central directory mirrored into PSRAM so lookups stop doing one SD
+  // read per field per entry. Built once per ZipFile, then every lookup is a
+  // pure RAM walk. Upper bound guards against malformed archives; a 28 MB
+  // comic EPUB is ~39 KB for 622 entries.
+  static constexpr uint32_t MAX_CENTRAL_DIR_MEM = 512 * 1024;
+  uint8_t* cdMem = nullptr;
+  uint32_t cdMemSize = 0;
+  bool cdMemTried = false;
+
+  bool ensureCentralDirMem();
+  bool lookupInCentralDirMem(const char* filename, FileStatSlim* fileStat);
   bool loadFileStatSlim(const char* filename, FileStatSlim* fileStat);
   long getDataOffset(const FileStatSlim& fileStat);
   bool loadZipDetails();
 
  public:
   explicit ZipFile(const std::string& filePath) : filePath(filePath) {}
-  ~ZipFile() = default;
+  ~ZipFile();
   // Zip file can be opened and closed by hand in order to allow for quick calculation of inflated file size
   // It is NOT recommended to pre-open it for any kind of inflation due to memory constraints
   bool isOpen() const { return !!file; }

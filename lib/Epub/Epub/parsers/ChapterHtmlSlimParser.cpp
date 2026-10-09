@@ -6,6 +6,7 @@
 #include <Logging.h>
 #include <Utf8.h>
 #include <XmlParserUtils.h>
+#include <esp_timer.h>
 #include <expat.h>
 
 #include <algorithm>
@@ -20,7 +21,11 @@
 
 // Minimum file size (in bytes) to show indexing popup - smaller chapters don't benefit from it
 constexpr size_t MIN_SIZE_FOR_POPUP = 10 * 1024;  // 10KB
-constexpr size_t PARSE_BUFFER_SIZE = 1024;
+// expat reads the temp HTML through this buffer. Each 1 KB read costs ~65 ms on
+// this card (SD command latency, not wire time), so a 30 KB chapter spent ~2 s
+// here alone during silent indexing. 4 KB cuts the call count 4x for 3 KB more
+// heap, which XML_GetBuffer frees on parser teardown.
+constexpr size_t PARSE_BUFFER_SIZE = 4096;
 
 // Hard cap on the number of anchor IDs recorded per chapter. Legitimate navigation
 // anchors (TOC entries, footnotes, cross-references) rarely exceed a few hundred per
@@ -493,9 +498,16 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
             HalFile cachedImageFile;
             bool extractSuccess = false;
             if (Storage.openFileForWrite("EHP", cachedImagePath, cachedImageFile)) {
-              extractSuccess = self->epub->readItemContentsToStream(resolvedPath, cachedImageFile, 4096);
+              // Same SD command-latency story as PARSE_BUFFER_SIZE: the old
+              // 4 KB chunks made every comic panel cost ~10 read+write pairs.
+              // 8 KB halves that for one 8 KB transient buffer.
+              const int64_t extractT0 = esp_timer_get_time();
+              extractSuccess = self->epub->readItemContentsToStream(resolvedPath, cachedImageFile, 8192);
               cachedImageFile.flush();
+              const uint32_t extractBytes = static_cast<uint32_t>(cachedImageFile.size());
               cachedImageFile.close();
+              LOG_DBG("EHP", "extract image: %ldms (%u bytes, chunk 8192)",
+                      static_cast<long>((esp_timer_get_time() - extractT0) / 1000), extractBytes);
               delay(50);  // Give SD card time to sync
             }
 

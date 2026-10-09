@@ -6,12 +6,12 @@
 #include <JPEGDEC.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <esp_heap_caps.h>
+#include <esp_timer.h>
 
 #include <cstdlib>
 #include <memory>
 #include <new>
-
-#include <esp_heap_caps.h>
 
 #include "DirectPixelWriter.h"
 #include "DitherUtils.h"
@@ -50,6 +50,23 @@ struct JpegContext {
   bool caching{false};
 };
 
+// One decode at a time: decodeToFramebuffer() blocks the loop task for the whole
+// jpeg->decode() and nothing else in the firmware decodes an image, so file-scope
+// counters are safe. They split the decode into file I/O, our draw callback and
+// JPEGDEC's own VLC + IDCT work — the only way to tell "the library is slow" from
+// "the buffers it works on are in the wrong RAM".
+struct DecodeTiming {
+  uint32_t readUs = 0;
+  uint32_t readCalls = 0;
+  uint32_t readBytes = 0;
+  uint32_t drawUs = 0;
+  uint32_t drawCalls = 0;
+  uint32_t advanceUs = 0;  // cache band flush to SD, inside the draw callback
+  uint32_t advanceCalls = 0;
+  uint32_t loopPixels = 0;  // output pixels covered by the callback's loops
+};
+DecodeTiming decodeTiming{};
+
 // File I/O callbacks use pFile->fHandle to access the HalFile*,
 // avoiding the need for global file state.
 void* jpegOpen(const char* filename, int32_t* size) {
@@ -77,8 +94,12 @@ void jpegClose(void* handle) {
 int32_t jpegRead(JPEGFILE* pFile, uint8_t* pBuf, int32_t len) {
   HalFile* f = reinterpret_cast<HalFile*>(pFile->fHandle);
   if (!f) return 0;
+  const int64_t t0 = esp_timer_get_time();
   int32_t bytesRead = f->read(pBuf, len);
+  decodeTiming.readUs += static_cast<uint32_t>(esp_timer_get_time() - t0);
+  decodeTiming.readCalls++;
   if (bytesRead < 0) return 0;
+  decodeTiming.readBytes += static_cast<uint32_t>(bytesRead);
   pFile->iPos += bytesRead;
   return bytesRead;
 }
@@ -95,6 +116,36 @@ int32_t jpegSeek(JPEGFILE* pFile, int32_t pos) {
 // Heap-allocate on demand so memory is only used during active decode.
 constexpr size_t JPEG_DECODER_APPROX_SIZE = 20 * 1024;
 constexpr size_t MIN_FREE_HEAP_FOR_JPEG = JPEG_DECODER_APPROX_SIZE + 16 * 1024;
+
+// JPEGDEC keeps every decode-hot buffer as a struct member: the Huffman tables
+// (10 KB), the 2 KB VLC buffer, the MCU coefficient block and the pixel output
+// buffer, so sizeof(JPEGDEC) is ~18 KB. CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL is
+// 4096 (sdkconfig.onepage), which routes a plain new of that size to PSRAM; on
+// the C61 PSRAM runs at 40 MHz behind a write-through cache, and the IDCT plus
+// the VLC refill issue hundreds of thousands of stores per panel. Measured cost
+// on this build: 4.3-10.7 s per comic image (~30 us/pixel), ~300x JPEGDEC's own
+// ESP32 figure. Ask for internal DRAM first and keep the default heap only as a
+// fallback, so a fragmented DRAM heap still decodes (slowly) instead of failing.
+struct JpegDecoderDeleter {
+  void operator()(JPEGDEC* jpeg) const {
+    if (jpeg == nullptr) return;
+    jpeg->~JPEGDEC();      // trivial: JPEGDEC declares no destructor
+    heap_caps_free(jpeg);  // accepts either capability-tagged block
+  }
+};
+using JpegDecoderPtr = std::unique_ptr<JPEGDEC, JpegDecoderDeleter>;
+
+JpegDecoderPtr allocJpegDecoder() {
+  void* mem = heap_caps_malloc(sizeof(JPEGDEC), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  if (mem == nullptr) {
+    LOG_DBG("JPG", "internal DRAM full (%u free, need %u); JPEGDEC falls back to PSRAM",
+            static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
+            static_cast<unsigned>(sizeof(JPEGDEC)));
+    mem = heap_caps_malloc(sizeof(JPEGDEC), MALLOC_CAP_8BIT);
+  }
+  if (mem == nullptr) return JpegDecoderPtr(nullptr);
+  return JpegDecoderPtr(new (mem) JPEGDEC());
+}
 
 // Choose JPEGDEC's built-in scale factor for coarse downscaling.
 // Returns the scale denominator (1, 2, 4, or 8) and sets jpegScaleOption.
@@ -123,6 +174,13 @@ constexpr int32_t FP_MASK = FP_ONE - 1;
 int jpegDrawCallback(JPEGDRAW* pDraw) {
   JpegContext* ctx = reinterpret_cast<JpegContext*>(pDraw->pUser);
   if (!ctx || !ctx->config || !ctx->renderer) return 0;
+
+  // Per-block, not per-pixel: JPEGDEC calls this once per MCU output block.
+  const int64_t drawT0 = esp_timer_get_time();
+  ScopedCleanup drawTiming{[drawT0]() {
+    decodeTiming.drawUs += static_cast<uint32_t>(esp_timer_get_time() - drawT0);
+    decodeTiming.drawCalls++;
+  }};
 
   // In EIGHT_BIT_GRAYSCALE mode, pPixels contains 8-bit grayscale values
   // Buffer is densely packed: stride = pDraw->iWidth, valid columns = pDraw->iWidthUsed
@@ -166,6 +224,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
   if (dstXEnd > clampXMax) dstXEnd = clampXMax;
 
   if (dstYStart >= dstYEnd || dstXStart >= dstXEnd) return 1;
+  decodeTiming.loopPixels += static_cast<uint32_t>(dstYEnd - dstYStart) * static_cast<uint32_t>(dstXEnd - dstXStart);
 
   // Pre-compute orientation and render-mode state once per callback invocation
   DirectPixelWriter pw;
@@ -179,7 +238,11 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
   DirectCacheWriter cw;
   int cacheOriginY = 0;
   if (caching) {
-    if (!ctx->cache.advanceTo(dstYStart)) {
+    const int64_t advT0 = esp_timer_get_time();
+    const bool advOk = ctx->cache.advanceTo(dstYStart);
+    decodeTiming.advanceUs += static_cast<uint32_t>(esp_timer_get_time() - advT0);
+    decodeTiming.advanceCalls++;
+    if (!advOk) {
       caching = false;
       ctx->caching = false;
     } else {
@@ -357,18 +420,18 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
 }  // namespace
 
 bool JpegToFramebufferConverter::getDimensionsStatic(const std::string& imagePath, ImageDimensions& out) {
-  // Total 8-bit-accessible free heap (internal + PSRAM when pooled). The JPEGDEC
-  // object and PixelCache are >4KB so they land in PSRAM on the C61; gating on
+  // Total 8-bit-accessible free heap (internal + PSRAM when pooled). Gating on
   // internal-only free (ESP.getFreeHeap) wrongly bailed once BLE consumed
   // internal SRAM even though PSRAM had plenty. On the C3 (no PSRAM) this equals
-  // internal, preserving the original behavior.
+  // internal, preserving the original behavior. allocJpegDecoder() takes DRAM
+  // first, so this check only has to prove *somewhere* will hold it.
   size_t freeHeap = heap_caps_get_free_size(MALLOC_CAP_8BIT);
   if (freeHeap < MIN_FREE_HEAP_FOR_JPEG) {
     LOG_ERR("JPG", "Not enough heap for JPEG decoder (%u free, need %u)", freeHeap, MIN_FREE_HEAP_FOR_JPEG);
     return false;
   }
 
-  std::unique_ptr<JPEGDEC> jpeg(new (std::nothrow) JPEGDEC());
+  JpegDecoderPtr jpeg = allocJpegDecoder();
   if (!jpeg) {
     LOG_ERR("JPG", "Failed to allocate JPEG decoder for dimensions");
     return false;
@@ -392,22 +455,29 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
                                                      const RenderConfig& config) {
   LOG_DBG("JPG", "Decoding JPEG: %s", imagePath.c_str());
 
-  // Total 8-bit-accessible free heap (internal + PSRAM when pooled). The JPEGDEC
-  // object and PixelCache are >4KB so they land in PSRAM on the C61; gating on
+  // Total 8-bit-accessible free heap (internal + PSRAM when pooled). Gating on
   // internal-only free (ESP.getFreeHeap) wrongly bailed once BLE consumed
   // internal SRAM even though PSRAM had plenty. On the C3 (no PSRAM) this equals
-  // internal, preserving the original behavior.
+  // internal, preserving the original behavior. allocJpegDecoder() takes DRAM
+  // first, so this check only has to prove *somewhere* will hold it.
   size_t freeHeap = heap_caps_get_free_size(MALLOC_CAP_8BIT);
   if (freeHeap < MIN_FREE_HEAP_FOR_JPEG) {
     LOG_ERR("JPG", "Not enough heap for JPEG decoder (%u free, need %u)", freeHeap, MIN_FREE_HEAP_FOR_JPEG);
     return false;
   }
 
-  std::unique_ptr<JPEGDEC> jpeg(new (std::nothrow) JPEGDEC());
+  const size_t internalBefore = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  JpegDecoderPtr jpeg = allocJpegDecoder();
   if (!jpeg) {
     LOG_ERR("JPG", "Failed to allocate JPEG decoder");
     return false;
   }
+  // Prove where the decoder landed: if the internal free pool shrank, the hot
+  // buffers are in single-cycle SRAM and the fallback path was not taken.
+  const size_t internalAfter = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  LOG_DBG("JPG", "JPEGDEC sizeof=%u in %s (internal free %u -> %u)", static_cast<unsigned>(sizeof(JPEGDEC)),
+          internalBefore > internalAfter ? "DRAM" : "PSRAM", static_cast<unsigned>(internalBefore),
+          static_cast<unsigned>(internalAfter));
 
   JpegContext ctx;
   ctx.renderer = &renderer;
@@ -505,22 +575,39 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     }
   }
 
+  decodeTiming = DecodeTiming{};
+  const int64_t decodeStartUs = esp_timer_get_time();
   unsigned long decodeStart = millis();
   rc = jpeg->decode(0, 0, jpegScaleOption);
   unsigned long decodeTime = millis() - decodeStart;
+  const uint32_t decodeUs = static_cast<uint32_t>(esp_timer_get_time() - decodeStartUs);
 
   if (rc != 1) {
     LOG_ERR("JPG", "Decode failed (rc=%d, lastError=%d)", rc, jpeg->getLastError());
     if (ctx.caching) ctx.cache.abort();
     return false;
   }
-
-  LOG_DBG("JPG", "JPEG decoding complete - render time: %lu ms", decodeTime);
+  // Everything not in readUs/drawUs is JPEGDEC itself (Huffman decode + IDCT),
+  // which is the part a DRAM-resident decoder is supposed to speed up.
+  const uint32_t attributedUs = decodeTiming.readUs + decodeTiming.drawUs;
+  const uint32_t libraryUs = decodeUs > attributedUs ? decodeUs - attributedUs : 0;
+  const uint32_t loopUs =
+      decodeTiming.drawUs > decodeTiming.advanceUs ? decodeTiming.drawUs - decodeTiming.advanceUs : 0;
+  LOG_DBG("JPG",
+          "JPEG decode %lums = read %ums (%u calls, %u B) + draw cb %ums (%u calls: cache flush %ums, "
+          "pixel loop %ums/%u px) + library %ums",
+          decodeTime, static_cast<unsigned>(decodeTiming.readUs / 1000), decodeTiming.readCalls, decodeTiming.readBytes,
+          static_cast<unsigned>(decodeTiming.drawUs / 1000), decodeTiming.drawCalls,
+          static_cast<unsigned>(decodeTiming.advanceUs / 1000), static_cast<unsigned>(loopUs / 1000),
+          decodeTiming.loopPixels, static_cast<unsigned>(libraryUs / 1000));
 
   // Finalize the streamed cache file. Note: a flush failure mid-decode clears
   // ctx.caching (the partial file is dropped), so re-read the flag here.
   if (ctx.caching) {
+    const int64_t finT0 = esp_timer_get_time();
     ctx.cache.finalize();
+    LOG_DBG("JPG", "cache finalize (tail band + close): %ldms",
+            static_cast<long>((esp_timer_get_time() - finT0) / 1000));
   }
 
   return true;

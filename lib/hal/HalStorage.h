@@ -86,6 +86,9 @@ class HalFile : public Print {
   int read(void* buf, size_t count);
   int read();  // read a single byte
   size_t write(const void* buf, size_t count);
+  // Print's bulk write is virtual and falls back to per-byte write(uint8_t) if
+  // left unoverridden — one mutex + one SdFat call per byte through a Print&.
+  size_t write(const uint8_t* buffer, size_t size) override;
   size_t write(uint8_t b) override;
   bool rename(const char* newPath);
   bool isDirectory() const;

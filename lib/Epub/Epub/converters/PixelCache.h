@@ -8,23 +8,35 @@
 #include <cstring>
 #include <string>
 
-// Streaming cache writer for 2-bit pixels (4 levels). Packs 4 pixels per byte,
-// MSB first.
+#include "ImageRamCache.h"
+
+// Cache writer for 2-bit pixels (4 levels). Packs 4 pixels per byte, MSB first.
 //
-// The .pxc file is written incrementally in small row bands rather than holding
-// the whole decoded image in one heap buffer. A full-page image (e.g. 482x728)
-// needs ~88KB packed, which will not fit alongside the ~20KB JPEG decoder on a
-// fragmented 380KB heap (free heap is routinely ~55KB on an image page). When
-// the cache cannot be written, every render pass re-decodes the JPEG from
-// scratch; an anti-aliased image page renders ~14 times (BW + AA restore + two
-// grayscale planes x ~6 strips), so a 2s decode becomes a ~30s freeze / watchdog
-// reset. Streaming keeps the working set to a single MCU-row band, so caching
-// succeeds and the image is decoded exactly once.
+// Two backing stores, tried in order:
 //
-// Correctness relies on JPEGDEC delivering blocks in raster MCU order (outer
-// loop over y, inner over x: see jpeg.inl DecodeJPEG). Consecutive MCU rows map
-// to contiguous, non-overlapping destination row ranges, so once a block whose
-// top row is Y arrives, every output row < Y is final and is flushed to disk.
+// 1. PSRAM (ImageRamCache). The whole packed image (34-84 KB for a full-page
+//    panel) is allocated from PSRAM, every row is written straight into it and
+//    nothing touches the SD card. The render passes then read the same buffer
+//    instead of re-streaming the .pxc — this removes the SD round trip that was
+//    measured at 96% of a cold decode and ~275 ms per warm strip pass.
+//
+// 2. A .pxc file, used when PSRAM cannot hold the image. It is written
+//    incrementally in small row bands rather than holding the whole decoded
+//    image in one heap buffer: a full-page image needs ~88KB packed, which will
+//    not fit alongside the ~20KB JPEG decoder on a fragmented 380KB heap (free
+//    heap is routinely ~55KB on an image page). When the cache cannot be
+//    written, every render pass re-decodes the JPEG from scratch; an
+//    anti-aliased image page renders ~14 times (BW + AA restore + two grayscale
+//    planes x ~6 strips), so a 2s decode becomes a ~30s freeze / watchdog
+//    reset. Streaming keeps the working set to a single MCU-row band, so
+//    caching succeeds and the image is decoded exactly once.
+//
+// Band-mode correctness relies on JPEGDEC delivering blocks in raster MCU order
+// (outer loop over y, inner over x: see jpeg.inl DecodeJPEG). Consecutive MCU
+// rows map to contiguous, non-overlapping destination row ranges, so once a
+// block whose top row is Y arrives, every output row < Y is final and is
+// flushed to disk. In PSRAM mode the band is the whole image (bandStart stays
+// 0), so rows never go stale and nothing needs flushing.
 struct PixelCache {
   uint8_t* buffer;   // band buffer: (bandRows + 1) rows; last row kept zeroed
   uint8_t* zeroRow;  // points at the spare zeroed row, for gap/clip fill
@@ -38,6 +50,9 @@ struct PixelCache {
   int flushedRows;  // image-local rows already written to file
   HalFile file;
   std::string cachePathStr;
+  // Non-null while this cache owns a PSRAM slot; buffer then aliases
+  // ramEntry->pixels and the whole image fits in the band (bandRows == height).
+  ImageRamCache::Entry* ramEntry;
   bool ok;
 
   PixelCache()
@@ -51,6 +66,7 @@ struct PixelCache {
         bandRows(0),
         bandStart(0),
         flushedRows(0),
+        ramEntry(nullptr),
         ok(false) {}
   PixelCache(const PixelCache&) = delete;
   PixelCache& operator=(const PixelCache&) = delete;
@@ -68,7 +84,29 @@ struct PixelCache {
     bytesPerRow = (w + 3) / 4;  // 2 bits per pixel, 4 pixels per byte
     bandStart = 0;
     flushedRows = 0;
+    ramEntry = nullptr;
     ok = false;
+    cachePathStr = cachePath;
+
+    // PSRAM first: the whole packed image lives in one buffer, so the decode
+    // writes memory instead of the SD card and the render passes read it back
+    // with no I/O at all. Only when the image is too big (or PSRAM is short)
+    // do we fall through to the streaming .pxc path below.
+    if (!cachePath.empty()) {
+      ImageRamCache::Entry* ram = ImageRamCache::reserve(cachePath, w, h, bytesPerRow);
+      if (ram) {
+        ramEntry = ram;
+        buffer = ram->pixels;
+        bandRows = h;  // the band is the whole image; bandStart stays 0
+        bandStart = 0;
+        zeroRow = nullptr;  // gaps are already zero from the reservation memset
+        ok = true;
+        LOG_DBG("IMG", "Cache in PSRAM: %s (%dx%d, %u bytes)", cachePath.c_str(), w, h, (unsigned)ram->size);
+        return true;
+      }
+      LOG_DBG("IMG", "PSRAM cache unavailable, streaming to SD: %s (%dx%d, %u bytes)", cachePath.c_str(), w, h,
+              (unsigned)((size_t)bytesPerRow * (size_t)h));
+    }
 
     int wantRows = maxBlockDstRows + 2;
     if (wantRows < MIN_BAND_ROWS) wantRows = MIN_BAND_ROWS;
@@ -122,13 +160,27 @@ struct PixelCache {
   // in which case the caller must stop caching for the rest of the decode.
   bool advanceTo(int newTopRow) {
     if (!ok) return false;
+    if (ramEntry) return true;  // whole image already in PSRAM: nothing to flush
     if (newTopRow <= bandStart) return true;
     if (newTopRow > height) newTopRow = height;
 
-    for (int r = bandStart; r < newTopRow; ++r) {
-      const int idx = r - bandStart;
-      const uint8_t* rowPtr = (idx < bandRows) ? (buffer + (size_t)idx * bytesPerRow) : zeroRow;
-      if (file.write(rowPtr, (size_t)bytesPerRow) != (size_t)bytesPerRow) {
+    // Rows [bandStart, newTopRow) that fall inside the band are contiguous in
+    // `buffer`, so one write covers them all. Writing them row by row cost
+    // ~8.5 ms per SD write command (116 B rows for a 464 px image) — 314 rows
+    // = 2.7 s, measured at 55-60% of every cold JPEG decode. One 2 KB write
+    // replaces ~18 of those commands.
+    const int runEnd = newTopRow - bandStart < bandRows ? newTopRow : bandStart + bandRows;
+    if (runEnd > bandStart) {
+      const size_t nBytes = (size_t)(runEnd - bandStart) * (size_t)bytesPerRow;
+      if (file.write(buffer, nBytes) != nBytes) {
+        LOG_ERR("IMG", "Cache write error at row %d", bandStart);
+        ok = false;
+        return false;
+      }
+    }
+    // Only reachable if a block outruns the band; the spare zero row stands in.
+    for (int r = runEnd; r < newTopRow; ++r) {
+      if (file.write(zeroRow, (size_t)bytesPerRow) != (size_t)bytesPerRow) {
         LOG_ERR("IMG", "Cache write error at row %d", r);
         ok = false;
         return false;
@@ -147,10 +199,33 @@ struct PixelCache {
       abort();
       return false;
     }
-    for (int r = flushedRows; r < height; ++r) {
-      const int idx = r - bandStart;
-      const uint8_t* rowPtr = (idx >= 0 && idx < bandRows) ? (buffer + (size_t)idx * bytesPerRow) : zeroRow;
-      if (file.write(rowPtr, (size_t)bytesPerRow) != (size_t)bytesPerRow) {
+    if (ramEntry) {
+      // Rows the decode never covered (image clipped by the screen, gaps
+      // between blocks) stay zero from the reservation memset — the same
+      // semantics as the zero-row fill used by the file path.
+      ImageRamCache::setReady(ramEntry);
+      LOG_DBG("IMG", "Cache in PSRAM ready: %s (%dx%d, %u bytes)", cachePathStr.c_str(), width, height,
+              (unsigned)((size_t)bytesPerRow * (size_t)height));
+      ramEntry = nullptr;
+      buffer = nullptr;
+      ok = false;  // handed off to ImageRamCache; nothing left to clean up
+      return true;
+    }
+    // Same coalescing as advanceTo: buffered rows are contiguous, so flush the
+    // whole in-band run in one write and only fall back to the zero row past it.
+    const int bandEnd = bandStart + bandRows;
+    const int runEnd = height < bandEnd ? height : bandEnd;
+    if (flushedRows < runEnd) {
+      const size_t nBytes = (size_t)(runEnd - flushedRows) * (size_t)bytesPerRow;
+      const uint8_t* rowPtr = buffer + (size_t)(flushedRows - bandStart) * (size_t)bytesPerRow;
+      if (file.write(rowPtr, nBytes) != nBytes) {
+        LOG_ERR("IMG", "Cache write error at row %d", flushedRows);
+        abort();
+        return false;
+      }
+    }
+    for (int r = runEnd; r < height; ++r) {
+      if (file.write(zeroRow, (size_t)bytesPerRow) != (size_t)bytesPerRow) {
         LOG_ERR("IMG", "Cache write error at row %d", r);
         abort();
         return false;
@@ -165,6 +240,15 @@ struct PixelCache {
 
   // Drop a partial/failed cache so a later decode re-creates it cleanly.
   void abort() {
+    if (ramEntry) {
+      // Nothing was written to disk, and the PSRAM slot must not be published:
+      // release it so the next render decodes again instead of drawing garbage.
+      ImageRamCache::release(ramEntry);
+      ramEntry = nullptr;
+      buffer = nullptr;
+      ok = false;
+      return;
+    }
     if (file.isOpen()) file.close();
     if (!cachePathStr.empty()) {
       Storage.remove(cachePathStr.c_str());
@@ -179,7 +263,13 @@ struct PixelCache {
       // Drop the partial cache so we leave no corrupt file behind.
       abort();
     }
-    if (buffer) {
+    if (ramEntry) {
+      // Decode never reached finalize()/abort(): the PSRAM slot is unpublished,
+      // so hand it back here rather than leaving a dead reservation behind.
+      ImageRamCache::release(ramEntry);
+      ramEntry = nullptr;
+      buffer = nullptr;
+    } else if (buffer) {
       free(buffer);
       buffer = nullptr;
     }
