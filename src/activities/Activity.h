@@ -43,6 +43,10 @@ class Activity {
 
   virtual bool skipLoopDelay() { return false; }
   virtual bool preventAutoSleep() { return false; }
+  // True while the power key is held as a capture control (PTT dictation):
+  // the main loop skips the power-hold deep sleep for the duration, or a
+  // hold-to-talk utterance would put the device to sleep mid-speech.
+  virtual bool suppressPowerSleep() const { return false; }
   virtual bool isReaderActivity() const { return false; }
   virtual ScreenshotInfo getScreenshotInfo() const { return {}; }
 

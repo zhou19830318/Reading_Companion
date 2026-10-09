@@ -51,6 +51,12 @@ struct NetworkModeResult {
   NetworkMode mode;
 };
 
+// Which row of the reader's short-Power quick-action chooser was picked
+// (PowerMenuActivity): AI question screen or voice bookmark.
+struct PowerMenuResult {
+  int index = 0;
+};
+
 struct FootnoteResult {
   std::string href;
 };
@@ -61,7 +67,7 @@ struct FilePathResult {
 
 using ResultVariant =
     std::variant<std::monostate, WifiResult, KeyboardResult, MenuResult, ChapterResult, PercentResult, IntervalResult,
-                 PageResult, ProgressChangeResult, NetworkModeResult, FootnoteResult, FilePathResult>;
+                 PageResult, ProgressChangeResult, NetworkModeResult, PowerMenuResult, FootnoteResult, FilePathResult>;
 
 struct ActivityResult {
   bool isCancelled = false;

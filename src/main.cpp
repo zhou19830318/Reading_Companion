@@ -16,6 +16,7 @@
 #include <WiFi.h>
 #include <builtinFonts/all.h>
 #include <esp32-hal-psram.h>
+#include <esp_timer.h>
 
 #include <cstring>
 
@@ -630,6 +631,128 @@ void loop() {
         }
         logSerial.printf("SCREENSHOT_SENT:%u\n", static_cast<unsigned>(sent));
         logSerial.printf("SCREENSHOT_END\n");
+      } else if (cmd == "SDTEST") {
+        // SD throughput vs CPU frequency. SdFat polls the wire byte by byte, so
+        // the transfer rate may track the CPU rather than the SPI clock — and
+        // main() drops the CPU to 10 MHz after IDLE_POWER_SAVING_MS (2 s) of
+        // no *button* activity, which a serial command is not. Every earlier
+        // probe therefore ran at 10 MHz. Run the same benchmark twice with the
+        // frequency clamped by hand: if the full-speed pass is many times
+        // faster, power management is what starves the card. Internal-DRAM
+        // buffer so the source of the bytes cannot be a variable.
+        constexpr size_t kPayload = 16 * 1024;
+        uint8_t* raw = static_cast<uint8_t*>(heap_caps_malloc(kPayload, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+        if (!raw) {
+          logSerial.println("SDTEST OOM");
+        } else {
+          for (size_t i = 0; i < kPayload; i++) raw[i] = static_cast<uint8_t>(i * 31 + 7);
+          const char* path = "/.crosspoint/_sdtest.bin";
+          struct Shape {
+            const char* name;
+            size_t call;
+          };
+          static const Shape shapes[] = {{"1 x 16K", kPayload}, {"4 x 4K", 4096}, {"32 x 512", 512}};
+          auto ms = [](int64_t us) { return static_cast<double>(us) / 1000.0; };
+          auto kbs = [](size_t n, int64_t us) {
+            return us > 0 ? static_cast<double>(n) / static_cast<double>(us) * 1e6 / 1024.0 : 0.0;
+          };
+
+          auto run = [&](const char* tag) {
+            logSerial.printf("SDTEST [%s] cpu=%d MHz\n", tag, getCpuFrequencyMhz());
+            // Bus ceiling with the card deselected (SdFat leaves CS high
+            // between transactions, so the card ignores these clocks). Only the
+            // SPI driver and the wire are in the path.
+            {
+              constexpr uint32_t kChunk = 1024;
+              constexpr uint32_t kIters = 64;
+              SPI.beginTransaction(SPISettings(20000000, MSBFIRST, SPI_MODE0));
+              const int64_t t0 = esp_timer_get_time();
+              for (uint32_t i = 0; i < kIters; i++) SPI.transferBytes(raw, raw + kChunk, kChunk);
+              const int64_t t1 = esp_timer_get_time();
+              SPI.endTransaction();
+              const size_t n = kChunk * kIters;
+              logSerial.printf("SDTEST [%s] spi-bulk CS-high %u B  %.1f ms (%.1f KB/s)\n", tag,
+                               static_cast<unsigned>(n), ms(t1 - t0), kbs(n, t1 - t0));
+              delay(1);
+            }
+            for (const Shape& s : shapes) {
+              int64_t t0 = 0, t1 = 0, t2 = 0;
+              size_t done = 0;
+              bool opened = false;
+              {
+                HalFile f;
+                opened = Storage.openFileForWrite("SDTEST", path, f);
+                if (opened) {
+                  t0 = esp_timer_get_time();
+                  while (done < kPayload) {
+                    const size_t n = (s.call < kPayload - done) ? s.call : kPayload - done;
+                    if (f.write(raw, n) != n) break;
+                    done += n;
+                  }
+                  t1 = esp_timer_get_time();
+                  f.flush();
+                  t2 = esp_timer_get_time();
+                }
+              }
+              if (!opened) {
+                logSerial.printf("SDTEST [%s] open failed\n", tag);
+                return;
+              }
+              logSerial.printf("SDTEST [%s] write %-9s %u B  %.1f ms (%.1f KB/s)  flush %.1f ms\n", tag, s.name,
+                               static_cast<unsigned>(done), ms(t1 - t0), kbs(done, t1 - t0), ms(t2 - t1));
+              delay(1);
+            }
+            HalFile f;
+            if (Storage.openFileForRead("SDTEST", path, f)) {
+              const int64_t t0 = esp_timer_get_time();
+              size_t rd = 0;
+              while (rd < kPayload) {
+                const size_t n = (4096 < kPayload - rd) ? 4096 : kPayload - rd;
+                const int r = f.read(raw, n);
+                if (r <= 0) break;
+                rd += static_cast<size_t>(r);
+              }
+              const int64_t t1 = esp_timer_get_time();
+              logSerial.printf("SDTEST [%s] read  4 x 4K    %u B  %.1f ms (%.1f KB/s)\n", tag,
+                               static_cast<unsigned>(rd), ms(t1 - t0), kbs(rd, t1 - t0));
+            } else {
+              logSerial.printf("SDTEST [%s] read open failed\n", tag);
+            }
+            // Same payload written through a Print&, which is the path ZipFile
+            // and every other Print-taking writer use. HalFile must override
+            // Print's bulk write or this falls back to per-byte write(uint8_t).
+            {
+              HalFile f;
+              if (Storage.openFileForWrite("SDTEST", path, f)) {
+                Print& out = f;
+                int64_t t0 = 0, t1 = 0;
+                size_t done = 0;
+                t0 = esp_timer_get_time();
+                while (done < kPayload) {
+                  const size_t n = (4096 < kPayload - done) ? 4096 : kPayload - done;
+                  if (out.write(raw + done, n) != n) break;
+                  done += n;
+                }
+                t1 = esp_timer_get_time();
+                f.flush();
+                logSerial.printf("SDTEST [%s] print  4 x 4K    %u B  %.1f ms (%.1f KB/s)\n", tag,
+                                 static_cast<unsigned>(done), ms(t1 - t0), kbs(done, t1 - t0));
+              } else {
+                logSerial.printf("SDTEST [%s] print open failed\n", tag);
+              }
+            }
+            delay(1);
+          };
+
+          powerManager.setPowerSaving(true);
+          run("low");
+          powerManager.setPowerSaving(false);
+          run("full");
+
+          Storage.remove(path);
+          heap_caps_free(raw);
+          logSerial.println("SDTEST_END");
+        }
       } else if (cmd == "GO_VOICE") {
         // Debug: jump straight to the voice screen (no menu navigation).
         activityManager.goToVoice();
@@ -650,7 +773,10 @@ void loop() {
         // without hands on the buttons. Same pipeline as the BLE page-turner
         // (InputManager::injectPressedEvents): pressed this frame, released on
         // the next update(), so wasReleased() consumers see a normal key.
-        // The power key is excluded — it feeds the sleep/screenshot combos.
+        // The power key injects as a short tap: long-press sleep and the
+        // POWER+DOWN screenshot combo need held frames, which one injected
+        // press never lasts through — it reaches the reader's power branch
+        // (short-press → SmartAsk menu) and nothing else.
         String key = cmd.substring(4);
         key.trim();
         int buttonIndex = -1;
@@ -666,12 +792,14 @@ void loop() {
           buttonIndex = HalGPIO::BTN_UP;
         } else if (key == "down") {
           buttonIndex = HalGPIO::BTN_DOWN;
+        } else if (key == "power") {
+          buttonIndex = HalGPIO::BTN_POWER;
         }
         if (buttonIndex >= 0) {
           gpio.injectPress(static_cast<uint8_t>(buttonIndex));
           logSerial.printf("KEY %s injected\n", key.c_str());
         } else {
-          logSerial.printf("KEY %s unknown (back|ok|left|right|up|down)\n", key.c_str());
+          logSerial.printf("KEY %s unknown (back|ok|left|right|up|down|power)\n", key.c_str());
         }
       }
     }
@@ -717,7 +845,7 @@ void loop() {
     return;
   }
 
-  if (millis() >= allowSleepAt && gpio.isPressed(HalGPIO::BTN_POWER) &&
+  if (millis() >= allowSleepAt && !activityManager.suppressPowerSleep() && gpio.isPressed(HalGPIO::BTN_POWER) &&
       gpio.getPowerButtonHeldTime() > SETTINGS.getPowerButtonDuration()) {
     // If the screenshot combination is potentially being pressed, don't sleep
     if (gpio.isPressed(HalGPIO::BTN_DOWN)) {

@@ -52,7 +52,7 @@ bool VoiceActivity::injectTranscript(const char* text) {
   snprintf(self.transcript_, sizeof(self.transcript_), "%s", text);
   self.haveTranscript_ = true;
   LOG_INF("VOICE", "serial inject: %u bytes", static_cast<unsigned>(strlen(self.transcript_)));
-  if (self.noteContext_.valid) {
+  if (self.noteContext_.valid || self.questionInput_) {
     self.openNoteEditor();
     return true;
   }
@@ -79,7 +79,7 @@ void VoiceActivity::onEnter() {
   // resort so a PSRAM-less build still renders history. The pool holds the
   // day tail including full replies; historyLine_ is the shared JSONL line
   // scratch append()/loadDays() need. Both freed in onExit().
-  if (historyPool_ == nullptr) {
+  if (!questionInput_ && historyPool_ == nullptr) {
     historyPool_ = static_cast<char*>(heap_caps_malloc(HISTORY_POOL_SIZE, MALLOC_CAP_SPIRAM));
     historyPoolCap_ = HISTORY_POOL_SIZE;
     if (historyPool_ == nullptr) {
@@ -96,7 +96,7 @@ void VoiceActivity::onEnter() {
       LOG_ERR("VOICE", "OOM: history pool %u bytes", static_cast<unsigned>(HISTORY_POOL_SIZE));
     }
   }
-  if (historyLine_ == nullptr) {
+  if (!questionInput_ && historyLine_ == nullptr) {
     historyLine_ = static_cast<char*>(heap_caps_malloc(HISTORY_LINE_SIZE, MALLOC_CAP_SPIRAM));
     if (historyLine_ == nullptr) {
       historyLine_ = static_cast<char*>(heap_caps_malloc(HISTORY_LINE_SIZE, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
@@ -108,7 +108,7 @@ void VoiceActivity::onEnter() {
   // Note-mode line scratch: same size class and allocation order as the
   // history line (an escaped NTF1 line is at most NoteStore::LINE_CAP bytes).
   // Shared across entries; freed in onExit().
-  if (noteLine_ == nullptr) {
+  if (!questionInput_ && noteLine_ == nullptr) {
     noteLineCap_ = NoteStore::LINE_CAP;
     noteLine_ = static_cast<char*>(heap_caps_malloc(noteLineCap_, MALLOC_CAP_SPIRAM));
     if (noteLine_ == nullptr) {
@@ -130,8 +130,12 @@ void VoiceActivity::onEnter() {
   // edit keyboard's dictation does the same, so the mark picker and the note
   // list stay one key away. The session is never dialled in note mode either
   // way, so the Idle panel needs no status line.
-  if (noteContext_.valid) {
-    LOG_INF("VOICE", "note mode: no Wi-Fi bring-up (status=%d)", static_cast<int>(WiFi.status()));
+  if (noteContext_.valid || questionInput_) {
+    // Note mode and question mode both stay offline on entry: no radio, no
+    // gateway dial. STT is the only network user and it detours on its own
+    // (startRecording() / dictation), so both screens paint immediately.
+    LOG_INF("VOICE", "%s: no Wi-Fi bring-up (status=%d)", noteContext_.valid ? "note mode" : "question mode",
+            static_cast<int>(WiFi.status()));
     requestUpdate();
     return;
   }
@@ -260,8 +264,8 @@ int64_t todayHistoryDays() {
 // costs an SD append instead of an STT upload plus an agent turn. The page the
 // mark was made on and its opening text are stored with it, which is what makes
 // a two-character tag findable a week later.
-constexpr StrId QUICK_TAGS[] = {StrId::STR_MARK_REVISIT, StrId::STR_MARK_LIKED,  StrId::STR_MARK_DOUBT,
-                                StrId::STR_MARK_QUOTE,  StrId::STR_MARK_PERSONAL, StrId::STR_MARK_VERIFY};
+constexpr StrId QUICK_TAGS[] = {StrId::STR_MARK_REVISIT, StrId::STR_MARK_LIKED,    StrId::STR_MARK_DOUBT,
+                                StrId::STR_MARK_QUOTE,   StrId::STR_MARK_PERSONAL, StrId::STR_MARK_VERIFY};
 constexpr size_t QUICK_TAG_COUNT = sizeof(QUICK_TAGS) / sizeof(QUICK_TAGS[0]);
 }  // namespace
 
@@ -392,8 +396,8 @@ void VoiceActivity::startRecording() {
     // instead of on the recording frame — the mic would come up before the
     // screen showed it. Here the frame is requested first; the repaint
     // ActivityManager then queues is the same frame, drawn once more.
-    if (noteContext_.valid) {
-      LOG_INF("VOICE", "note capture offline, opening Wi-Fi selection");
+    if (noteContext_.valid || questionInput_) {
+      LOG_INF("VOICE", "%s capture offline, opening Wi-Fi selection", noteContext_.valid ? "note" : "question");
       startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
                              [this](const ActivityResult& result) {
                                if (result.isCancelled || WiFi.status() != WL_CONNECTED) {
@@ -466,7 +470,7 @@ void VoiceActivity::finishTranscription(SttClient::Result result) {
   // Manual mode parks the transcript in Review; the user sends with Confirm
   // (§8.6). Auto sends immediately, as before. Note mode parks the transcript
   // in the keyboard instead of saving it outright (语音书签 shortcut).
-  if (noteContext_.valid) {
+  if (noteContext_.valid || questionInput_) {
     openNoteEditor();
     return;
   }
@@ -603,8 +607,9 @@ void VoiceActivity::openNoteEditor() {
   hooks.text = &VoiceActivity::dictationTextTrampoline;
   hooks.error = &VoiceActivity::dictationErrorTrampoline;
   startActivityForResult(
-      std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_VOICE_BOOKMARK_EDIT), transcript_,
-                                              sizeof(transcript_) - 1, InputType::Text, hooks),
+      std::make_unique<KeyboardEntryActivity>(renderer, mappedInput,
+                                              questionInput_ ? tr(STR_Q_CUSTOM) : tr(STR_VOICE_BOOKMARK_EDIT),
+                                              transcript_, sizeof(transcript_) - 1, InputType::Text, hooks),
       [this](const ActivityResult& result) {
         if (result.isCancelled) {
           LOG_INF("VOICE", "note edit cancelled; nothing saved");
@@ -615,6 +620,13 @@ void VoiceActivity::openNoteEditor() {
           return;
         }
         snprintf(transcript_, sizeof(transcript_), "%s", std::get<KeyboardResult>(result.data).text.c_str());
+        if (questionInput_) {
+          // Question mode: the text is the deliverable — hand it back to
+          // AskAiActivity instead of writing a note.
+          setResult(KeyboardResult{transcript_});
+          finish();
+          return;
+        }
         saveNoteFromTranscript();
       });
 }
@@ -647,6 +659,7 @@ bool VoiceActivity::dictationStart() {
   // keyboard (it inserts the text or shows the message) and starts fresh here.
   if (dictationState_ == DictationState::Recording) return false;
   if (WiFi.status() != WL_CONNECTED) {
+    LOG_INF("VOICE", "dictation: no network");  // the on-screen hint alone hides this from serial debugging
     dictationError_ = tr(STR_STT_NO_NETWORK);
     dictationState_ = DictationState::Failed;
     return false;
@@ -770,7 +783,7 @@ void VoiceActivity::sendToOpenClaw() {
   // puts the frame on the wire the moment the link is up (oweSend_).
   state_ = State::Sending;
   oweSend_ = true;
-  lastWaitTickMs_ = millis();
+  lastWaitShownSec_ = session_.awaitingMs() / 1000;
   requestUpdate();
 }
 
@@ -783,7 +796,7 @@ void VoiceActivity::sendPending() {
     fail(tr(STR_OPENCLAW_SEND_FAILED));
     return;
   }
-  lastWaitTickMs_ = millis();
+  lastWaitShownSec_ = session_.awaitingMs() / 1000;
   requestUpdate();  // "Waiting for reply…" before the first streamed delta
 }
 
@@ -806,7 +819,7 @@ void VoiceActivity::loop() {
   // unless the round trip already failed for its own reason. Note mode never
   // opened a session: skip the state machine entirely (it would only report
   // stale/idle states), while Back, capture and save handling below still run.
-  if (!noteContext_.valid && state_ != State::Failed) {
+  if (!noteContext_.valid && !questionInput_ && state_ != State::Failed) {
     if (session_.state() == OpenClaw::Session::State::Failed) {
       fail(session_.reason() != nullptr ? session_.reason() : tr(STR_OPENCLAW_DISCONNECTED));
       // fall through: Back still works below
@@ -816,6 +829,12 @@ void VoiceActivity::loop() {
     }
   }
 
+  // Back: every state above unwinds one level on the press edge; only the
+  // final "leave the activity" step is deferred to the release edge — the
+  // reader underneath also reads a Back release as "go home"
+  // (EpubReaderActivity.cpp, GO_HOME_MS), so finishing on the press edge
+  // would hand it the orphaned release and close the book (EpubReaderMenu's
+  // rule, same pattern as AskAiActivity::backArmed_).
   if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
     // An armed delete backs out without leaving the list first.
     if (state_ == State::NoteList && noteDeleteArmed_) {
@@ -873,6 +892,11 @@ void VoiceActivity::loop() {
       requestUpdate();
       return;
     }
+    backArmed_ = true;
+    return;
+  }
+  if (backArmed_ && mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+    backArmed_ = false;
     finish();
     return;
   }
@@ -921,15 +945,17 @@ void VoiceActivity::loop() {
     return;
   }
   if (state_ == State::HistoryDay) {
-    // Side Up/Down slide the window over the selected turn's text — an
-    // assistant reply is several screens long. Front Left/Right step to the
+    // Side Up/Down page the window over the selected turn's text — an
+    // assistant reply is several screens long and line-stepping buried the
+    // rest behind dozens of presses. Front Left/Right step to the
     // previous/next turn and start from the top again. The hints in render()
     // split the same way.
+    const size_t page = historyPageLines_ > 0 ? historyPageLines_ : 1;
     if (mappedInput.wasPressed(MappedInputManager::Button::Up)) {
-      if (historyScroll_ > 0) historyScroll_--;
+      historyScroll_ = historyScroll_ > page ? historyScroll_ - page : 0;
       requestUpdate();
     } else if (mappedInput.wasPressed(MappedInputManager::Button::Down)) {
-      historyScroll_++;  // clamped by drawTextWindow() when the panel renders
+      historyScroll_ += page;  // clamped by drawTextWindow() when the panel renders
       requestUpdate();
     } else if (mappedInput.wasPressed(prevKey) && historySelected_ > 0) {
       historySelected_--;
@@ -963,14 +989,14 @@ void VoiceActivity::loop() {
   // is passed as the next label, so it belongs to nextKey.  Opens from any
   // quiet state (Idle / Answer / Failed). Chat-only: note mode advertises no
   // such key.
-  if (!noteContext_.valid && mappedInput.wasPressed(nextKey) &&
+  if (!noteContext_.valid && !questionInput_ && mappedInput.wasPressed(nextKey) &&
       (state_ == State::Idle || state_ == State::Answer || state_ == State::Failed)) {
     openHistory();
     return;
   }
 
   // The send mode toggles wherever its hint chip is shown. Chat-only as well.
-  if (!noteContext_.valid && mappedInput.wasPressed(prevKey) &&
+  if (!noteContext_.valid && !questionInput_ && mappedInput.wasPressed(prevKey) &&
       (state_ == State::Idle || state_ == State::Answer || state_ == State::Failed || state_ == State::Review)) {
     const bool turningAuto = SETTINGS.voiceAutoSend == 0;
     SETTINGS.voiceAutoSend = turningAuto ? 1 : 0;
@@ -978,6 +1004,14 @@ void VoiceActivity::loop() {
     // accepted pattern for an explicit toggle (same as the BLE switch).
     SETTINGS.saveToFile();
     requestUpdate();
+    return;
+  }
+
+  // Question mode: the front-Left slot (painted with STR_Q_CUSTOM below) opens
+  // the keyboard — type the question instead of speaking it. Idle/Failed only,
+  // mirroring the note mode quick-entry keys.
+  if (questionInput_ && mappedInput.wasPressed(prevKey) && (state_ == State::Idle || state_ == State::Failed)) {
+    openNoteEditor();
     return;
   }
 
@@ -1018,14 +1052,19 @@ void VoiceActivity::loop() {
     // session_.outcome(), which still reports the previous round and would
     // leave this one waiting on a send that never goes out.
     if (oweSend_) {
-      if (session_.state() == OpenClaw::Session::State::Connected) sendPending();
+      // Same guard as AskAiActivity's Connecting branch: Connected is stale
+      // while the reconnect runs, and writing to the closed socket fails the
+      // send instead of queueing it for when the link returns.
+      if (session_.state() == OpenClaw::Session::State::Connected && !session_.reconnecting()) sendPending();
       return;
     }
     if (session_.awaitingReply()) {
-      // Keep the waiting line alive: one refresh per WAIT_TICK_MS so the
-      // elapsed seconds show the round trip is moving, not stuck.
-      if (millis() - lastWaitTickMs_ >= WAIT_TICK_MS) {
-        lastWaitTickMs_ = millis();
+      // Keep the waiting line alive: refresh exactly when the number the
+      // screen would print changes, so the counter steps 0 → 1 → 2 … and
+      // never repaints the same second twice.
+      const uint32_t shownSec = session_.awaitingMs() / 1000;
+      if (shownSec != lastWaitShownSec_) {
+        lastWaitShownSec_ = shownSec;
         requestUpdate();
       }
       return;
@@ -1045,8 +1084,16 @@ void VoiceActivity::loop() {
       }
       requestUpdate();
     } else if (session_.state() == OpenClaw::Session::State::Connected) {
-      // Settled without a usable reply; the reason is in the session.
-      fail(session_.lastError() != nullptr ? tr(STR_OPENCLAW_AGENT_FAILED) : tr(STR_OPENCLAW_NO_REPLY));
+      // A dropped socket leaves state_ at Connected and only arms the
+      // reconnect, so "the link is gone" has to be read from reconnecting()
+      // and not from the state — otherwise a closed socket is reported as a
+      // gateway that never answered.
+      if (session_.reconnecting()) {
+        fail(tr(STR_OPENCLAW_DISCONNECTED));
+      } else {
+        // Settled without a usable reply; the reason is in the session.
+        fail(session_.lastError() != nullptr ? tr(STR_OPENCLAW_AGENT_FAILED) : tr(STR_OPENCLAW_NO_REPLY));
+      }
     }
     // Otherwise the link dropped mid-round trip: the reconnect / session-
     // Failed handling at the top of loop() decides, and the gateway line on
@@ -1081,14 +1128,15 @@ void VoiceActivity::loop() {
 
   // ── Quick mark picker ───────────────────────────────────────────
   if (state_ == State::NoteQuick) {
-    // Side Up/Down move the highlight, Confirm writes the selected mark, Back
-    // returns to the idle screen (handled above). Confirm commits here as it
-    // does everywhere else; the talk key is deliberately not bound on this
-    // screen, so a mark can never start a capture by accident.
-    if (mappedInput.wasPressed(MappedInputManager::Button::Up)) {
+    // Side Up/Down and front Left/Right all move the highlight, Confirm writes
+    // the selected mark, Back returns to the idle screen (handled above).
+    // Confirm commits here as it does everywhere else; the talk key is
+    // deliberately not bound on this screen, so a mark can never start a
+    // capture by accident.
+    if (mappedInput.wasPressed(MappedInputManager::Button::Up) || mappedInput.wasPressed(prevKey)) {
       if (quickSelected_ > 0) quickSelected_--;
       requestUpdate();
-    } else if (mappedInput.wasPressed(MappedInputManager::Button::Down)) {
+    } else if (mappedInput.wasPressed(MappedInputManager::Button::Down) || mappedInput.wasPressed(nextKey)) {
       if (quickSelected_ + 1 < QUICK_TAG_COUNT) quickSelected_++;
       requestUpdate();
     } else if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
@@ -1171,7 +1219,7 @@ void VoiceActivity::render(RenderLock&&) {
   const int left = metrics.contentSidePadding;
 
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight},
-                 noteContext_.valid ? tr(STR_VOICE_BOOKMARK) : tr(STR_VOICE));
+                 noteContext_.valid ? tr(STR_VOICE_BOOKMARK) : (questionInput_ ? tr(STR_ASK_AI) : tr(STR_VOICE)));
 
   int y = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
@@ -1186,6 +1234,8 @@ void VoiceActivity::render(RenderLock&&) {
       // reconnect) happen.
       if (noteContext_.valid) {
         snprintf(buf, sizeof(buf), "%s", tr(STR_VOICE_BOOKMARK));
+      } else if (questionInput_) {
+        snprintf(buf, sizeof(buf), "%s", tr(STR_ASK_AI));
       } else if (session_.state() == OpenClaw::Session::State::Connected && !session_.reconnecting()) {
         snprintf(buf, sizeof(buf), "%s · %s", tr(STR_OPENCLAW_CONNECTED), session_.status());
       } else {
@@ -1195,8 +1245,8 @@ void VoiceActivity::render(RenderLock&&) {
         renderer.drawText(UI_10_FONT_ID, left, y, line.c_str());
         y += lineHeight;
       }
-      if (noteContext_.valid) {
-        break;  // no session line in note mode — nothing is dialling
+      if (noteContext_.valid || questionInput_) {
+        break;  // no session line: nothing is dialling in note/question mode
       }
       if (session_.reconnecting()) {
         renderer.drawText(UI_10_FONT_ID, left, y + metrics.verticalSpacing, tr(STR_OPENCLAW_DISCONNECTED));
@@ -1219,7 +1269,7 @@ void VoiceActivity::render(RenderLock&&) {
         renderer.drawText(UI_10_FONT_ID, left, y, line.c_str());
         y += lineHeight;
       }
-      if (const char* gw = noteContext_.valid ? nullptr : gatewayStatus()) {
+      if (const char* gw = (noteContext_.valid || questionInput_) ? nullptr : gatewayStatus()) {
         const int gwY = renderer.getScreenHeight() - metrics.buttonHintsHeight - lineHeight - metrics.verticalSpacing;
         renderer.drawText(UI_10_FONT_ID, left, gwY, gw, true, EpdFontFamily::BOLD);
       }
@@ -1231,7 +1281,7 @@ void VoiceActivity::render(RenderLock&&) {
       y += lineHeight + metrics.verticalSpacing;
       renderer.drawText(UI_10_FONT_ID, left, y, tr(STR_STT_TRANSCRIBING), true, EpdFontFamily::BOLD);
       y += metrics.verticalSpacing;
-      if (const char* gw = noteContext_.valid ? nullptr : gatewayStatus()) {
+      if (const char* gw = (noteContext_.valid || questionInput_) ? nullptr : gatewayStatus()) {
         renderer.drawText(UI_10_FONT_ID, left, y + lineHeight, gw);
       }
       break;
@@ -1241,9 +1291,9 @@ void VoiceActivity::render(RenderLock&&) {
       drawPipeline(left, y);
       y += lineHeight + metrics.verticalSpacing;
       // Elapsed / deadline read-out — the one thing that changes between the
-      // WAIT_TICK_MS repaints, so a multi-minute agent turn reads as progress
-      // instead of a frozen screen. Nothing to count while the frame is still
-      // waiting for the link, so that case shows the plain line.
+      // per-second repaints, so a slow agent turn reads as progress instead
+      // of a frozen screen. Nothing to count while the frame is still waiting
+      // for the link, so that case shows the plain line.
       char waiting[72];
       if (session_.awaitingReply()) {
         snprintf(waiting, sizeof(waiting), "%s %u/%us", tr(STR_OPENCLAW_WAITING),
@@ -1377,15 +1427,25 @@ void VoiceActivity::render(RenderLock&&) {
                static_cast<unsigned>(historyTurnCount_));
       renderer.drawText(UI_10_FONT_ID, pageWidth - left - renderer.getTextWidth(UI_10_FONT_ID, pos), dayRowY, pos);
       const int labelY = y;
-      // Tags lead each half inline. transcript (≤ CHAT_MESSAGE_CAP) + reply
-      // (≤ CHAT_BUF_CAP) + tags always fit HISTORY_LINE_SIZE, so the compose
-      // never truncates in practice; the raw fallback keeps a mid-codepoint
-      // cut away from drawText() if a corrupted entry ever breaks that bound.
+      // Tags lead each half inline, each prefixed with that entry's HH:MM so
+      // the turn reads as a full "YYYY-MM-DD/HH:MM" against the day label
+      // above (dayLabel() -> "2026-10-08"). transcript (≤ CHAT_MESSAGE_CAP) +
+      // reply (≤ CHAT_BUF_CAP) + tags always fit HISTORY_LINE_SIZE with room
+      // for two six-byte stamps; the raw fallback keeps a mid-codepoint cut
+      // away from drawText() if a corrupted entry ever breaks that bound.
       const char* tag1 = first.isUser ? tr(STR_VOICE_YOU) : tr(STR_VOICE_ASSISTANT);
       const char* tag2 = second.isUser ? tr(STR_VOICE_YOU) : tr(STR_VOICE_ASSISTANT);
-      const int n = hasReply ? snprintf(historyLine_, HISTORY_LINE_SIZE, "%s %s\n%s %s", tag1,
-                                        historyPool_ + first.textOff, tag2, historyPool_ + second.textOff)
-                             : snprintf(historyLine_, HISTORY_LINE_SIZE, "%s %s", tag1, historyPool_ + first.textOff);
+      char time1[6] = "";
+      char time2[6] = "";
+      const bool haveTime1 = ChatHistoryFormat::formatTimeForOffset(
+          time1, sizeof(time1), static_cast<int64_t>(first.tsMs), SETTINGS.clockUtcOffsetQ);
+      const bool haveTime2 = ChatHistoryFormat::formatTimeForOffset(
+          time2, sizeof(time2), static_cast<int64_t>(second.tsMs), SETTINGS.clockUtcOffsetQ);
+      const int n =
+          hasReply ? snprintf(historyLine_, HISTORY_LINE_SIZE, "%s%s %s\n%s%s %s", haveTime1 ? time1 : "", tag1,
+                              historyPool_ + first.textOff, haveTime2 ? time2 : "", tag2, historyPool_ + second.textOff)
+                   : snprintf(historyLine_, HISTORY_LINE_SIZE, "%s%s %s", haveTime1 ? time1 : "", tag1,
+                              historyPool_ + first.textOff);
       bool composed = n > 0 && static_cast<size_t>(n) < HISTORY_LINE_SIZE;
       if (!composed) {
         LOG_ERR("VOICE", "turn compose overflow (%d bytes), raw fallback", n);
@@ -1394,6 +1454,7 @@ void VoiceActivity::render(RenderLock&&) {
       const int bottom = renderer.getScreenHeight() - metrics.buttonHintsHeight - metrics.verticalSpacing;
       int maxLines = lineHeight > 0 ? (bottom - y) / lineHeight : 5;
       if (maxLines < 1) maxLines = 1;
+      historyPageLines_ = static_cast<size_t>(maxLines);  // page step for loop()'s Up/Down
       const int bodyWidth = textWidth - metrics.sideButtonHintsWidth;
       const size_t total = drawTextWindow(UI_10_FONT_ID, body, left, y, bodyWidth, maxLines, historyScroll_);
       if (total > static_cast<size_t>(maxLines)) {
@@ -1438,10 +1499,22 @@ void VoiceActivity::render(RenderLock&&) {
       const size_t window = static_cast<size_t>(rows);
       const size_t first = (noteSelected_ / window) * window;
       for (size_t i = first; i < noteEntryCount_ && i < first + window; i++) {
-        // One line per note: timestamp + text head (entry text starts at
-        // textOff in the pool, NUL-terminated by load()).
+        // One line per note: wall-clock stamp + text head (entry text starts
+        // at textOff in the pool, NUL-terminated by load()). The old ordinal
+        // prefix is gone — the stamp is what makes a row traceable and the
+        // row is addressed by highlight anyway. An unsynced clock keeps the
+        // plain prefix instead of printing 1970-01-20.
         const char* text = historyPool_ + noteEntries_[i].textOff;
-        std::string row = std::to_string(static_cast<unsigned>(i + 1)) + ". " + text;
+        char stamp[ChatHistoryFormat::STAMP_SIZE];
+        std::string row;
+        if (ChatHistoryFormat::formatStampForOffset(stamp, sizeof(stamp), static_cast<int64_t>(noteEntries_[i].tsMs),
+                                                    SETTINGS.clockUtcOffsetQ)) {
+          row.assign(stamp);
+          row += ' ';
+          row += text;
+        } else {
+          row = std::to_string(static_cast<unsigned>(i + 1)) + ". " + text;
+        }
         // Cut to the panel width, not to a byte count: a fixed byte slice can
         // end inside a multi-byte character and draw a missing-glyph box.
         if (renderer.getTextWidth(UI_10_FONT_ID, row.c_str()) > textWidth) {
@@ -1507,6 +1580,14 @@ void VoiceActivity::render(RenderLock&&) {
 
     case State::NoteView: {
       const auto& entry = noteEntries_[noteSelected_];
+      // Wall-clock stamp first: the list row shows the same one, and both
+      // come from the NTF1 tsMs stored with the note. Costs one body line.
+      char stamp[ChatHistoryFormat::STAMP_SIZE];
+      if (ChatHistoryFormat::formatStampForOffset(stamp, sizeof(stamp), static_cast<int64_t>(entry.tsMs),
+                                                  SETTINGS.clockUtcOffsetQ)) {
+        renderer.drawText(UI_10_FONT_ID, left, y, stamp, true, EpdFontFamily::BOLD);
+        y += lineHeight;
+      }
       // Position line: where in the book this note was spoken.
       char pos[48];
       snprintf(pos, sizeof(pos), "ch %u · p %u/%u", static_cast<unsigned>(entry.spineIndex),
@@ -1557,6 +1638,10 @@ void VoiceActivity::render(RenderLock&&) {
   char modeHint[48];
   if (noteContext_.valid) {
     snprintf(modeHint, sizeof(modeHint), "%s", tr(STR_NOTE_HINT));
+  } else if (questionInput_) {
+    // Question mode has no mode chip: the front-Left slot is the keyboard
+    // key, painted below from STR_Q_CUSTOM.
+    modeHint[0] = '\0';
   } else {
     // Bare value, not "Mode: %s": the prefix pushed the chip past the button
     // edge on a narrow portrait panel, and the mode it names is obvious from
@@ -1595,18 +1680,25 @@ void VoiceActivity::render(RenderLock&&) {
       break;
     case State::NoteQuick:
       // Confirm writes the highlighted mark and Back returns to the idle note
-      // screen; the two side keys move the highlight and get their own Up/Down
-      // labels, so the remaining front slots stay blank rather than advertise
-      // keys this screen does not bind.
+      // screen; side Up/Down and front Left/Right all move the highlight, so
+      // all four get the Up/Down labels (bottom bar mirrors the side ones).
       confirmLabel = tr(STR_NOTE_QUICK_SAVE);
+      previousLabel = tr(STR_DIR_UP);
+      nextLabel = tr(STR_DIR_DOWN);
       break;
     default:
       if (quiet) {
         confirmLabel = tr(STR_VOICE_TALK);
-        previousLabel = noteContext_.valid ? tr(STR_NOTE_LIST) : modeHint;
-        // The front-Right slot: history for the chat screen, the mark picker
-        // for note mode — both are the "keys that browse instead of speak" slot.
-        nextLabel = noteContext_.valid ? tr(STR_NOTE_QUICK) : tr(STR_VOICE_HISTORY);
+        if (questionInput_) {
+          // Left = keyboard, Right unused: question mode has no browser slot.
+          previousLabel = tr(STR_Q_CUSTOM);
+          nextLabel = "";
+        } else {
+          previousLabel = noteContext_.valid ? tr(STR_NOTE_LIST) : modeHint;
+          // The front-Right slot: history for the chat screen, the mark picker
+          // for note mode — both are the "keys that browse instead of speak" slot.
+          nextLabel = noteContext_.valid ? tr(STR_NOTE_QUICK) : tr(STR_VOICE_HISTORY);
+        }
       }
       break;
   }

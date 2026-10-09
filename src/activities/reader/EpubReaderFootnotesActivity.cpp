@@ -104,7 +104,9 @@ void EpubReaderFootnotesActivity::render(RenderLock&&) {
     renderer.drawText(UI_10_FONT_ID, marginLeft, y + 4, label.c_str(), !isSelected);
   }
 
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), "", "");
+  // Side Up/Down and front Left/Right both step the list (buttonNavigator
+  // binds NavPrevious/NavNext), so both pairs get their 上/下 labels.
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   renderer.displayBuffer();

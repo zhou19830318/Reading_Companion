@@ -61,13 +61,17 @@ uint8_t InputManager::getState() {
   // plus 3 side GPIO keys (active-low) -> UP(PREV)/DOWN(NEXT)/POWER(WAKE).
   // Use calibrated mV directly (rest ~3100 = no key; ENTER is a 0-ohm short ~0 mV).
   const int mv = analogReadMilliVolts(BUTTON_ADC_PIN);
-  if (mv >= 2400 && mv <= 2800)      state |= (1 << BTN_BACK);    // ~2592
-  else if (mv >= 1780 && mv <= 2140) state |= (1 << BTN_LEFT);    // ~1956
-  else if (mv >= 1140 && mv <= 1500) state |= (1 << BTN_RIGHT);   // ~1316
-  else if (mv >= 0 && mv <= 250)     state |= (1 << BTN_CONFIRM); // ~0 (ENTER)
+  if (mv >= 2400 && mv <= 2800)
+    state |= (1 << BTN_BACK);  // ~2592
+  else if (mv >= 1780 && mv <= 2140)
+    state |= (1 << BTN_LEFT);  // ~1956
+  else if (mv >= 1140 && mv <= 1500)
+    state |= (1 << BTN_RIGHT);  // ~1316
+  else if (mv >= 0 && mv <= 250)
+    state |= (1 << BTN_CONFIRM);  // ~0 (ENTER)
 
-  if (digitalRead(BTN_UP_PIN) == LOW)       state |= (1 << BTN_UP);
-  if (digitalRead(BTN_DOWN_PIN) == LOW)     state |= (1 << BTN_DOWN);
+  if (digitalRead(BTN_UP_PIN) == LOW) state |= (1 << BTN_UP);
+  if (digitalRead(BTN_DOWN_PIN) == LOW) state |= (1 << BTN_DOWN);
   if (digitalRead(POWER_BUTTON_PIN) == LOW) state |= (1 << BTN_POWER);
   return state;
 #else
@@ -139,13 +143,9 @@ void InputManager::update() {
   }
 }
 
-bool InputManager::isPressed(const uint8_t buttonIndex) const {
-  return currentState & (1 << buttonIndex);
-}
+bool InputManager::isPressed(const uint8_t buttonIndex) const { return currentState & (1 << buttonIndex); }
 
-bool InputManager::wasPressed(const uint8_t buttonIndex) const {
-  return pressedEvents & (1 << buttonIndex);
-}
+bool InputManager::wasPressed(const uint8_t buttonIndex) const { return pressedEvents & (1 << buttonIndex); }
 
 void InputManager::injectPressedEvents(const uint8_t buttonMask) {
   // OR into this frame's events; also set currentState so isPressed() agrees for
@@ -161,19 +161,23 @@ void InputManager::injectPressedEvents(const uint8_t buttonMask) {
   if (wasIdle) {
     buttonPressStart = millis();
   }
+  // The power button has its own edge timestamp (update() sets it separately),
+  // and getPowerButtonHeldTime() reads it whenever isPressed(BTN_POWER) is
+  // true. Leaving it stale turns an injected power press into "held since
+  // boot/last real press" — main.cpp's long-press sleep guard then fires on
+  // the very frame of the injection. Stamp it like a hardware edge too; the
+  // matching powerButtonPressFinish comes from the next update(), which sees
+  // the released hardware state and clears currentState (release path above).
+  if ((buttonMask & (1u << BTN_POWER)) != 0) {
+    powerButtonPressStart = millis();
+  }
 }
 
-bool InputManager::wasAnyPressed() const {
-  return pressedEvents > 0;
-}
+bool InputManager::wasAnyPressed() const { return pressedEvents > 0; }
 
-bool InputManager::wasReleased(const uint8_t buttonIndex) const {
-  return releasedEvents & (1 << buttonIndex);
-}
+bool InputManager::wasReleased(const uint8_t buttonIndex) const { return releasedEvents & (1 << buttonIndex); }
 
-bool InputManager::wasAnyReleased() const {
-  return releasedEvents > 0;
-}
+bool InputManager::wasAnyReleased() const { return releasedEvents > 0; }
 
 unsigned long InputManager::getHeldTime() const {
   // Still hold a button
@@ -201,6 +205,4 @@ const char* InputManager::getButtonName(const uint8_t buttonIndex) {
   return "Unknown";
 }
 
-bool InputManager::isPowerButtonPressed() const {
-  return isPressed(BTN_POWER);
-}
+bool InputManager::isPowerButtonPressed() const { return isPressed(BTN_POWER); }

@@ -249,11 +249,16 @@ void KeyboardEntryActivity::loop() {
       dictationMsg = nullptr;
       requestUpdate();
     }
-    // Power short-press = talk key. The Down check mirrors the reader's
-    // shortcut so the POWER+DOWN screenshot combo never starts a capture;
-    // long presses never arrive here (main.cpp sleeps at 400 ms).
-    if (mappedInput.wasReleased(MappedInputManager::Button::Power) &&
-        !mappedInput.wasReleased(MappedInputManager::Button::Down)) {
+    // Power press = talk key (PTT): capture starts on PRESS, so speech said
+    // while the key is held lands in the recording — starting on release
+    // recorded only what followed it, and the natural hold-to-talk gesture
+    // spoke into a mic that was not yet on (silence or a breath in → empty or
+    // hallucinated transcript). Release leaves the capture running; VAD
+    // (1.5 s silence) or the 8 s cap ends it. suppressPowerSleep() keeps the
+    // 400 ms power-hold deep sleep from firing mid-hold; POWER+DOWN is the
+    // screenshot chord, so Down held at press never starts a capture.
+    if (mappedInput.wasPressed(MappedInputManager::Button::Power) &&
+        !mappedInput.isPressed(MappedInputManager::Button::Down)) {
       dictating = true;
       dictationMsg = nullptr;
       requestUpdateAndWait();  // "listening" hint settled before the mic powers

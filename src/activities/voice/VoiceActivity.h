@@ -67,6 +67,13 @@ class VoiceActivity final : public Activity {
   void render(RenderLock&&) override;
   bool preventAutoSleep() override;
 
+  // Question-input mode (AI-01): this screen is only a capture/keyboard
+  // front-end for AskAiActivity. onEnter behaves like note mode (no radio, no
+  // gateway), the history/note browsers and the note save are unreachable, and
+  // the transcript leaves through openNoteEditor() as KeyboardResult{...}
+  // instead of being written to NoteStore.
+  void setQuestionInput() { questionInput_ = true; }
+
   // Serial-console debug hook (CMD:VOICE_TX, main.cpp): stands in for the STT
   // step so one chat round trip — and whatever the gateway answers it — can be
   // reproduced without speaking. False when this is not the current Voice
@@ -137,11 +144,13 @@ class VoiceActivity final : public Activity {
   // limit.
   static constexpr int WRAP_MAX_LINES = 512;
 
-  // One repaint per WAIT_TICK_MS while the reply is outstanding. A screen that
-  // never moves while the gateway thinks reads as frozen (the alarm report),
-  // and e-ink cannot animate: the tick only refreshes the elapsed-seconds
-  // read-out, so a full 120 s wait costs at most 8 refreshes.
-  static constexpr uint32_t WAIT_TICK_MS = 15000;
+  // The waiting read-out repaints once per whole displayed second, driven by
+  // comparing awaitingMs()/1000 against the value last shown rather than by a
+  // time constant: a millis() threshold drifts, so it can reprint one second
+  // and skip the next. A screen that never moves while the gateway thinks
+  // reads as frozen (the alarm report) and e-ink cannot animate; the price of
+  // a truthful counter is one FAST_REFRESH per second of the wait — 120 for a
+  // full 120 s round, against 8 at the old 15 s step.
 
   void startRecording();
   void startTranscribing();
@@ -219,8 +228,16 @@ class VoiceActivity final : public Activity {
   // PREVIOUS round there — keying the send off it made a second round issued
   // during a reconnect inherit "already sent" and never transmit.
   bool oweSend_ = false;
-  // Last elapsed-seconds repaint (see WAIT_TICK_MS); reset on every send.
-  uint32_t lastWaitTickMs_ = 0;
+  // Elapsed-seconds value the waiting read-out last showed (see above);
+  // re-seeded on every send so the first repaint lands on a real change.
+  uint32_t lastWaitShownSec_ = 0;
+
+  // Back arms on the press edge and leaves on the release edge. The reader
+  // underneath also reads a Back release as "go home" (EpubReaderActivity's
+  // GO_HOME_MS check), so finishing on the press edge hands it the orphaned
+  // release and closes the book behind this screen — the same rule
+  // EpubReaderMenuActivity and AskAiActivity::backArmed_ already follow.
+  bool backArmed_ = false;
 
   Voice::Recorder recorder_;
   // STT state. The parser owns the transcript buffer (~6 KB PSRAM); the url
@@ -255,6 +272,10 @@ class VoiceActivity final : public Activity {
     bool valid = false;
   };
   NoteContext noteContext_;
+  // Question-input mode: set before onEnter() by AskAiActivity; mutually
+  // exclusive with noteContext_.valid in practice (the reader arms one or the
+  // other, never both).
+  bool questionInput_ = false;
   // NoteStore::append line scratch, same rationale as historyLine_ (an
   // escaped NTF1 line is at most LINE_CAP bytes; caller-owned PSRAM).
   char* noteLine_ = nullptr;
@@ -317,6 +338,10 @@ class VoiceActivity final : public Activity {
   // visible window slides instead of ending in an ellipsis).
   size_t historySelected_ = 0;
   size_t historyScroll_ = 0;
+  // Lines visible in the HistoryDay scroll window, captured during render
+  // (the only place the layout is known) so loop() can page-jump with Up/Down
+  // instead of stepping one line at a time. 1 = render hasn't run yet.
+  size_t historyPageLines_ = 1;
   size_t answerScroll_ = 0;
   // List key map (one action per front key, side Up/Down picks the day):
   // Back leaves, front-Left deletes the highlighted day, front-Right asks the

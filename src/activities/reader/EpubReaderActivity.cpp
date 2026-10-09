@@ -18,6 +18,7 @@
 #include <iterator>
 #include <limits>
 
+#include "AskAiActivity.h"
 #include "BookmarkEntry.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
@@ -29,6 +30,7 @@
 #include "KOReaderCredentialStore.h"
 #include "KOReaderSyncActivity.h"
 #include "MappedInputManager.h"
+#include "PowerMenuActivity.h"
 #include "ProgressMapper.h"
 #include "QrDisplayActivity.h"
 #include "ReaderUtils.h"
@@ -336,6 +338,35 @@ void EpubReaderActivity::launchVoiceNote() {
   });
 }
 
+// Short power press opens the quick-action chooser: the AI question screen or
+// the voice bookmark. The chooser returns PowerMenuResult{index}; Back cancels
+// and only repaints the page. Both children are pushed from this handler, so
+// no explicit requestUpdate() is needed — ActivityManager runs one after the
+// handler returns (Activity::startActivityForResult).
+void EpubReaderActivity::launchPowerMenu() {
+  startActivityForResult(std::make_unique<PowerMenuActivity>(renderer, mappedInput),
+                         [this](const ActivityResult& result) {
+                           if (result.isCancelled) return;
+                           const auto* pick = std::get_if<PowerMenuResult>(&result.data);
+                           if (pick != nullptr && pick->index == PowerMenuActivity::PICK_ASK_AI) {
+                             launchAskAi();
+                           } else {
+                             launchVoiceNote();
+                           }
+                         });
+}
+
+// AI-01: capture the position now, then open the question picker.
+// startActivityForResult keeps this reader alive on the stack, so the page the
+// question refers to survives the round trip; the shared_ptr copy of the book
+// lets AskAiActivity extract context on its own after the link is up.
+void EpubReaderActivity::launchAskAi() {
+  armNoteMode();  // one-shot capture of book base + spine/page (same fields as voice)
+  auto ask = std::make_unique<AskAiActivity>(renderer, mappedInput);
+  ask->setBookContext(epub, noteBookBase_, noteSpine_, notePage_, notePageCount_);
+  startActivityForResult(std::move(ask), [this](const ActivityResult&) { noteArmed_ = false; });
+}
+
 void EpubReaderActivity::loop() {
   if (!epub) {
     // Should never happen
@@ -505,14 +536,15 @@ void EpubReaderActivity::loop() {
     return;
   }
 
-  // Short power press = voice bookmark shortcut (SETTINGS.shortPwrBtn ==
-  // VOICE_NOTE, appended after FOOTNOTES so stored enum indices keep their
-  // meaning). The Down check mirrors the footnote binding so the POWER+DOWN
-  // screenshot combo in main.cpp never triggers it.
+  // Short power press = quick-action chooser: AI智能解惑 (AI-01) or the voice
+  // bookmark, whichever of the two the reader was last used for
+  // (SETTINGS.shortPwrBtn == VOICE_NOTE, appended after FOOTNOTES so stored
+  // enum indices keep their meaning). The Down check mirrors the footnote
+  // binding so the POWER+DOWN screenshot combo in main.cpp never triggers it.
   if (SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::VOICE_NOTE &&
       mappedInput.wasReleased(MappedInputManager::Button::Power) &&
       !mappedInput.wasReleased(MappedInputManager::Button::Down)) {
-    launchVoiceNote();
+    launchPowerMenu();
     return;
   }
 
@@ -724,6 +756,10 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       }
       // If no text or page loading failed, just close menu
       requestUpdate();
+      break;
+    }
+    case EpubReaderMenuActivity::MenuAction::ASK_AI: {
+      launchAskAi();
       break;
     }
     case EpubReaderMenuActivity::MenuAction::VOICE_NOTE: {

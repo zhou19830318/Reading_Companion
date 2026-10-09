@@ -48,6 +48,9 @@ class KeyboardEntryActivity : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
+  // While a power-key capture is live the key is held (hold-to-talk); the
+  // main loop must not treat that hold as the deep-sleep gesture.
+  bool suppressPowerSleep() const override { return dictating; }
 
  private:
   std::string title;

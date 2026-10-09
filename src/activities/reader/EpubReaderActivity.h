@@ -184,6 +184,12 @@ class EpubReaderActivity final : public Activity {
   // Launches VoiceActivity in note mode from the menu entry or the short
   // power-press shortcut (SETTINGS.shortPwrBtn == SHORT_PWRBTN::VOICE_NOTE).
   void launchVoiceNote();
+  // Short power press: quick-action chooser between the AI question screen
+  // and the voice bookmark (PowerMenuActivity).
+  void launchPowerMenu();
+  // AI-01 (阅读中快捷键 → 上下文提问): arm the reading position and open the
+  // question picker.
+  void launchAskAi();
   // Quick marks ("快捷书签") attach the page they were made on, and the section
   // is only reachable from here, so the page text is snapshotted next to the
   // position it points back to.

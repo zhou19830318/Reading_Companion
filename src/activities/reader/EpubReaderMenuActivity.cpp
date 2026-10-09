@@ -24,7 +24,7 @@ std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuI
                                                                                      bool hasBookmarks,
                                                                                      bool hasVoiceNote) {
   std::vector<MenuItem> items;
-  items.reserve(16);
+  items.reserve(17);
   items.push_back({MenuAction::SELECT_CHAPTER, StrId::STR_SELECT_CHAPTER});
   if (hasFootnotes) {
     items.push_back({MenuAction::FOOTNOTES, StrId::STR_FOOTNOTES});
@@ -33,6 +33,11 @@ std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuI
     items.push_back({MenuAction::BOOKMARKS, StrId::STR_BOOKMARKS});
   }
   items.push_back({MenuAction::TOGGLE_BOOKMARK, StrId::STR_TOGGLE_BOOKMARK});
+  // Ask AI sits next to the voice bookmark — both are "ask the gateway about
+  // this page" entries, one spoken through the presets, one a bookmark. Ask AI
+  // is unconditional: it needs no book-side data beyond the position capture
+  // launchAskAi() arms itself.
+  items.push_back({MenuAction::ASK_AI, StrId::STR_ASK_AI});
   if (hasVoiceNote) {
     items.push_back({MenuAction::VOICE_NOTE, StrId::STR_VOICE_BOOKMARK});
   }
