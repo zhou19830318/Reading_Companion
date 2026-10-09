@@ -23,6 +23,16 @@ struct TabInfo {
   bool selected;
 };
 
+// One pictorial choice for BaseTheme::drawChoiceCards. Plain pointers rather
+// than std::function: the strings come from tr() (a const char* into the
+// generated table) and the icons are static const bitmaps, so a closure would
+// only heap-allocate a context that the caller already owns.
+struct ChoiceCard {
+  const char* label;
+  const char* hint;     // optional caption under the divider, nullptr for none
+  const uint8_t* icon;  // optional 1-bit bitmap for GfxRenderer::drawIcon()
+};
+
 struct ThemeMetrics {
   int batteryWidth;
   int batteryHeight;
@@ -244,11 +254,9 @@ class BaseTheme {
   // centred label, selected card filled. drawButtonMenu's rows are pinned to
   // menuRowHeight, which leaves a 2-choice screen as two thin bars above an
   // empty column; these split the whole area between the cards instead.
-  // `cardIcon` returns a 1-bit bitmap for GfxRenderer::drawIcon(), or nullptr
-  // to draw the card text only.
+  // A card with a hint gets a short centred rule between label and hint.
   virtual void drawChoiceCards(GfxRenderer& renderer, Rect rect, int cardCount, int selectedIndex,
-                               const std::function<std::string(int index)>& cardLabel,
-                               const std::function<const uint8_t*(int index)>& cardIcon) const;
+                               const ChoiceCard* cards) const;
   virtual Rect drawPopup(const GfxRenderer& renderer, const char* message) const;
   virtual void fillPopupProgress(const GfxRenderer& renderer, const Rect& layout, const int progress) const;
   void drawStatusBar(GfxRenderer& renderer, const float bookProgress, const int currentPage, const int pageCount,

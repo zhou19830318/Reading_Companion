@@ -755,9 +755,8 @@ void BaseTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
 }
 
 void BaseTheme::drawChoiceCards(GfxRenderer& renderer, Rect rect, int cardCount, int selectedIndex,
-                                const std::function<std::string(int index)>& cardLabel,
-                                const std::function<const uint8_t*(int index)>& cardIcon) const {
-  if (cardCount <= 0) {
+                                const ChoiceCard* cards) const {
+  if (cardCount <= 0 || cards == nullptr) {
     return;
   }
 
@@ -774,11 +773,42 @@ void BaseTheme::drawChoiceCards(GfxRenderer& renderer, Rect rect, int cardCount,
   constexpr int cardRadius = 6;
   constexpr int iconSize = 64;
   constexpr int iconLabelGap = 8;
+  // Label / rule / hint stack, centred as one block inside the card.
+  constexpr int ruleGap = 10;
+  constexpr int ruleWidth = 120;
+  constexpr int textPad = 8;    // text lines and rule stay this far off the border
+  constexpr int innerPad = 12;  // breathing room above/below the centred block
+  constexpr int maxLabelLines = 2;
 
   const int labelLineHeight = renderer.getLineHeight(UI_12_FONT_ID);
-  const int blockHeight = iconSize + iconLabelGap + labelLineHeight;
+  const int hintLineHeight = renderer.getLineHeight(SMALL_FONT_ID);
+  const int textWidth = std::max(1, width - textPad * 2);
+  const int rulePixels = std::min(ruleWidth, textWidth);
+
+  const auto drawCentered = [&](const int fontId, const int lineY, const std::string& line) {
+    const int lineWidth = renderer.getTextWidth(fontId, line.c_str());
+    renderer.drawText(fontId, x + std::max(0, (width - lineWidth) / 2), lineY, line.c_str(), true);
+  };
 
   for (int i = 0; i < cardCount; ++i) {
+    const ChoiceCard& card = cards[i];
+    // Card text wraps onto further lines rather than being trimmed: a reader
+    // needs the whole sentence, and the card has vertical room to spare.
+    const int labelCapacity = std::max(1, (cardHeight - iconSize - iconLabelGap - innerPad * 2) / labelLineHeight);
+    const std::vector<std::string> labelLines =
+        renderer.wrappedText(UI_12_FONT_ID, card.label, textWidth, std::min(labelCapacity, maxLabelLines));
+
+    std::vector<std::string> hintLines;
+    if (card.hint != nullptr && card.hint[0] != '\0') {
+      const int labelBlock = labelLineHeight * static_cast<int>(labelLines.size());
+      const int fixedBeforeHint = iconSize + iconLabelGap + labelBlock + ruleGap * 2 + 1;
+      const int hintCapacity = std::max(1, (cardHeight - fixedBeforeHint - innerPad * 2) / hintLineHeight);
+      hintLines = renderer.wrappedText(SMALL_FONT_ID, card.hint, textWidth, hintCapacity);
+    }
+    const int ruleBlock = hintLines.empty() ? 0 : ruleGap * 2 + 1;
+    const int blockHeight = iconSize + iconLabelGap + labelLineHeight * static_cast<int>(labelLines.size()) +
+                            ruleBlock + hintLineHeight * static_cast<int>(hintLines.size());
+
     const int cardY = rect.y + i * (cardHeight + gap);
     if (selectedIndex == i) {
       renderer.fillRoundedRect(x, cardY, width, cardHeight, cardRadius, Color::LightGray);
@@ -786,17 +816,26 @@ void BaseTheme::drawChoiceCards(GfxRenderer& renderer, Rect rect, int cardCount,
       renderer.drawRect(x, cardY, width, cardHeight);
     }
 
-    const int blockY = cardY + (cardHeight - blockHeight) / 2;
-    const uint8_t* icon = cardIcon != nullptr ? cardIcon(i) : nullptr;
-    if (icon != nullptr) {
-      renderer.drawIcon(icon, x + (width - iconSize) / 2, blockY, iconSize, iconSize);
+    int lineY = cardY + (cardHeight - blockHeight) / 2;
+    if (card.icon != nullptr) {
+      renderer.drawIcon(card.icon, x + (width - iconSize) / 2, lineY, iconSize, iconSize);
     }
+    lineY += iconSize + iconLabelGap;
 
-    const std::string label = cardLabel(i);
-    const int labelY = blockY + iconSize + iconLabelGap;
-    const int labelWidth = renderer.getTextWidth(UI_12_FONT_ID, label.c_str());
-    const int labelX = x + std::max(0, (width - labelWidth) / 2);
-    renderer.drawText(UI_12_FONT_ID, labelX, labelY, label.c_str(), true);
+    for (const std::string& line : labelLines) {
+      drawCentered(UI_12_FONT_ID, lineY, line);
+      lineY += labelLineHeight;
+    }
+    if (hintLines.empty()) {
+      continue;
+    }
+    lineY += ruleGap;
+    renderer.drawLine(x + (width - rulePixels) / 2, lineY, x + (width + rulePixels) / 2 - 1, lineY, true);
+    lineY += 1 + ruleGap;
+    for (const std::string& line : hintLines) {
+      drawCentered(SMALL_FONT_ID, lineY, line);
+      lineY += hintLineHeight;
+    }
   }
 }
 

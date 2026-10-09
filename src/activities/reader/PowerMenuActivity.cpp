@@ -82,11 +82,13 @@ void PowerMenuActivity::render(RenderLock&&) {
   const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   const Rect content{safe.x, contentTop, safe.width, safe.y + safe.height - metrics.verticalSpacing - contentTop};
 
-  static constexpr StrId items[PICK_COUNT] = {StrId::STR_ASK_AI, StrId::STR_VOICE_BOOKMARK};
-  static constexpr const uint8_t* iconPtrs[PICK_COUNT] = {Scholar64Icon, Mic64Icon};
-  GUI.drawChoiceCards(
-      renderer, content, PICK_COUNT, selectedIndex, [](int index) { return std::string(I18N.get(items[index])); },
-      [](int index) { return iconPtrs[index]; });
+  // tr() takes literal keys, so the cards are spelled out rather than indexed.
+  static_assert(PICK_COUNT == 2, "PowerMenuActivity cards below must match PICK_COUNT");
+  const ChoiceCard cards[PICK_COUNT] = {
+      {tr(STR_ASK_AI), tr(STR_ASK_AI_HINT), Scholar64Icon},
+      {tr(STR_VOICE_BOOKMARK), tr(STR_VOICE_BOOKMARK_HINT), Mic64Icon},
+  };
+  GUI.drawChoiceCards(renderer, content, PICK_COUNT, selectedIndex, cards);
 
   GUI.drawSideButtonHints(renderer, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
