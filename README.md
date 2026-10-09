@@ -7,7 +7,7 @@
 
 CrossPoint is open-source e-reader firmware — community-built, fully hackable, free forever. This port keeps that engine and adapts it to the OnePage device.
 
-**Runs on:** the self-designed **OnePage** reader (ESP32-C61). Part of the OnePage open-hardware project — firmware · board (PCB) · 3D case · web. See the [OnePage main repo](https://github.com/MoveCall/onepage-reader) *(link TBD)* for hardware and 3D files.
+**Runs on:** the self-designed **OnePage** reader (ESP32-C61). Part of the OnePage open-hardware project — firmware · board (PCB) · 3D case · web; hardware and 3D files live alongside the firmware in that project.
 
 ## What this port adds / changes (vs upstream CrossPoint)
 
@@ -68,7 +68,10 @@ The reader-engine features listed below are inherited from CrossPoint.
 
 > **Not applicable to OnePage.** This section describes Xteink-branded units. The
 > OnePage board is open hardware with no factory USB lock — flash it directly
-> with `esptool` or `pio run -e onepage -t upload`.
+> with `esptool` or `pio run -e onepage -t upload`. Kept here for reference only.
+
+<details>
+<summary>Xteink USB-lock background (upstream X3/X4 hardware)</summary>
 
 Some Xteink units purchased from third-party stores (e.g. AliExpress) ship with USB flashing locked from the factory.
 If your device is locked, you will need to use the **Xteink Unlocker** tool available at
@@ -91,6 +94,8 @@ USB port or browser before assuming the device is locked. Only reach for the unl
 > **The Papyrix fork has removed OTA update support from its code.** If you flash Papyrix onto a
 > USB-locked unit, you will have **zero update or recovery path** and will be stuck on it forever. **Do not flash
 > Papyrix (or any other unsupported firmware) on a locked device.**
+
+</details>
 
 ## Install firmware
 
@@ -182,15 +187,33 @@ Conversion runs the firmware repo's `lib/EpdFont/scripts/fontconvert_sdcard.py` 
 
 Full index: [docs/README.md](./docs/README.md).
 
+**使用 / Using**
+
 - [User Guide](./USER_GUIDE.md)
 - [Web server usage](./docs/webserver.md)
 - [Web server endpoints](./docs/webserver-endpoints.md)
 - [SD-card fonts](./docs/sd-card-fonts.md)
 - [Troubleshooting](./docs/troubleshooting.md)
-- [Voice assistant / OpenClaw port plan](./docs/voice-openclaw-port-plan.md)
+
+**架构与模块 / Architecture**
+
+- [Activity manager](./docs/activity-manager.md) — page stack and lifecycle
+- [File formats](./docs/file-formats.md) — book / cache on-disk layouts
+- [i18n](./docs/i18n.md) — translations and CJK font coverage
+- [Focus reading](./docs/focus-reading.md)
+- [Page-turn performance baseline](./docs/reading-page-turn-baseline.md)
+
+**计划与需求 / Plans & requirements**
+
+- [v4.0 development plan](./docs/v4.0-development-plan.md)
 - [Product requirements (PRD)](<./docs/OnePage_additional%20_PRD.md>)
+- [Voice assistant / OpenClaw port plan](./docs/voice-openclaw-port-plan.md)
 - [Project scope](./SCOPE.md)
+
+**贡献 / Contributing**
+
 - [Contributing docs](./docs/contributing/README.md)
+- [Translation guide](./docs/translators.md)
 
 ---
 
@@ -272,6 +295,27 @@ python3 scripts/debugging_monitor.py /dev/cu.usbmodem2101
 ```
 
 Minor adjustments may be required for Windows.
+
+---
+
+## Repository layout
+
+| Path | What lives there |
+|------|------------------|
+| `src/` | Firmware entry point (`main.cpp`), settings / state stores, logical→physical button mapping, web server, OPDS store |
+| `src/activities/` | One sub-package per screen, driven by the activity lifecycle (`onEnter` → `loop` → `onExit`); activities are heap-allocated and deleted on exit |
+| `lib/Epub`, `lib/GfxRenderer`, `lib/ZipFile`, `lib/InflateReader`, `lib/uzlib` | Reader engine: EPUB parsing, layout cache, e-ink rendering, archive/inflate |
+| `lib/hal` | Hardware abstraction — `HalDisplay` / `HalGPIO` / `HalStorage`; **all** SD access goes through `HalStorage` (SdFat is not thread-safe) |
+| `lib/EpdFont`, `lib/I18n`, `lib/Logging`, `lib/Memory` | Fonts, translations, logging, allocation helpers (`makeUniqueNoThrow`, PSRAM allocator) |
+| `lib/OpenClaw`, `lib/voice`, `lib/NetBootstrap`, `lib/OpdsParser` | Voice assistant, gateway client, networking helpers |
+| `open-onepage-sdk/` | Vendored OnePage C61 board SDK (EInkDisplay, InputManager, BatteryMonitor, SDCardManager) — no submodule, wired in via the `symlink://` entries in `platformio.ini` |
+| `boards/`, `partitions.csv`, `sdkconfig.onepage` | PlatformIO board definition and flash/PSRAM configuration for the C61 target |
+| `scripts/` | Build helpers — `build_html.py`, `sync_web_core.py`, `gen_i18n.py`, `debugging_monitor.py` |
+| `src/network/html/` | Web UI source pages; `*.generated.h` outputs are gitignored and rebuilt on every build |
+| `docs/` | Full documentation index ([docs/README.md](./docs/README.md)) |
+| `test/`, `simulator/` | Host-runnable unit tests and the WASM/Arduino host simulator |
+
+Cloning and building needs no extra steps: `.pio/`, `*.generated.h`, the generated i18n headers and the raw fonts under `lib/EpdFont/fontsrc` are all gitignored and regenerated by the build.
 
 ---
 
