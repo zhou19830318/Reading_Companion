@@ -470,8 +470,8 @@ TEST(StripSymbols, EmptyReplyIsUntouched) {
 //
 // RFC 6455 §8.1: a text frame that is not valid UTF-8 makes the gateway drop
 // the socket outright — no reply, no close frame. On device that showed up as
-// AI智能解惑 failing 4/4 times with "网关无回复" while every well-formed
-// message (up to 1392 bytes) went through.
+// the AI书童 question screen failing 4/4 times with "网关无回复" while every
+// well-formed message (up to 1392 bytes) went through.
 
 TEST(FirstIllFormedUtf8, ReportsTheOffsetOfTheFirstBadByte) {
   EXPECT_EQ(OpenClaw::firstIllFormedUtf8("clean 读本 text"), -1);

@@ -536,7 +536,7 @@ void EpubReaderActivity::loop() {
     return;
   }
 
-  // Short power press = quick-action chooser: AI智能解惑 (AI-01) or the voice
+  // Short power press = quick-action chooser: AI书童 (AI-01) or the voice
   // bookmark, whichever of the two the reader was last used for
   // (SETTINGS.shortPwrBtn == VOICE_NOTE, appended after FOOTNOTES so stored
   // enum indices keep their meaning). The Down check mirrors the footnote

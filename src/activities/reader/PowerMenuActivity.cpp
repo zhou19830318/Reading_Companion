@@ -6,6 +6,8 @@
 #include "MappedInputManager.h"
 #include "activities/ActivityResult.h"
 #include "components/UITheme.h"
+#include "components/icons/mic64.h"
+#include "components/icons/scholar64.h"
 
 namespace {
 // Last picked row for this power-up (see the header note).
@@ -69,17 +71,22 @@ void PowerMenuActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
   const auto& metrics = UITheme::getInstance().getMetrics();
+  const Rect safe = UITheme::getInstance().getScreenSafeArea(renderer, true, true);
   const int pageWidth = renderer.getScreenWidth();
-  const int pageHeight = renderer.getScreenHeight();
 
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_POWER_MENU));
 
+  // Top of the content and bottom of the safe area, inset by the header above
+  // and the side hints to the right — a full-width card ran under the Up/Down
+  // hint boxes, which the old two-row list never reached.
   const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int contentHeight = pageHeight - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing * 2;
+  const Rect content{safe.x, contentTop, safe.width, safe.y + safe.height - metrics.verticalSpacing - contentTop};
 
   static constexpr StrId items[PICK_COUNT] = {StrId::STR_ASK_AI, StrId::STR_VOICE_BOOKMARK};
-  GUI.drawList(renderer, Rect{0, contentTop, pageWidth, contentHeight}, PICK_COUNT, selectedIndex,
-               [](int index) { return std::string(I18N.get(items[index])); });
+  static constexpr const uint8_t* iconPtrs[PICK_COUNT] = {Scholar64Icon, Mic64Icon};
+  GUI.drawChoiceCards(
+      renderer, content, PICK_COUNT, selectedIndex, [](int index) { return std::string(I18N.get(items[index])); },
+      [](int index) { return iconPtrs[index]; });
 
   GUI.drawSideButtonHints(renderer, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));

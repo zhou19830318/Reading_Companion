@@ -172,9 +172,7 @@ void BaseTheme::layoutHintBoxes(const GfxRenderer& renderer, const int fontId, c
   for (int i = 0; i < count; i++) {
     pos[i] = anchors[i];
     len[i] = anchorLength;
-    need[i] = (labels[i] != nullptr && labels[i][0] != '\0')
-                  ? renderer.getTextWidth(fontId, labels[i]) + kPad * 2
-                  : 0;
+    need[i] = (labels[i] != nullptr && labels[i][0] != '\0') ? renderer.getTextWidth(fontId, labels[i]) + kPad * 2 : 0;
   }
   for (int pass = 0; pass < count; pass++) {
     bool moved = false;
@@ -753,6 +751,52 @@ void BaseTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
         tileY + (BaseMetrics::values.menuRowHeight - lineHeight) / 2;  // vertically centered assuming y is top of text
     // Invert text when the tile is selected, to contrast with the filled background
     renderer.drawText(UI_10_FONT_ID, textX, textY, label, selectedIndex != i);
+  }
+}
+
+void BaseTheme::drawChoiceCards(GfxRenderer& renderer, Rect rect, int cardCount, int selectedIndex,
+                                const std::function<std::string(int index)>& cardLabel,
+                                const std::function<const uint8_t*(int index)>& cardIcon) const {
+  if (cardCount <= 0) {
+    return;
+  }
+
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int sidePad = metrics.contentSidePadding;
+  const int gap = metrics.verticalSpacing;
+  const int x = rect.x + sidePad;
+  const int width = rect.width - sidePad * 2;
+  const int cardHeight = (rect.height - gap * (cardCount - 1)) / cardCount;
+  if (width <= 0 || cardHeight <= 0) {
+    return;
+  }
+
+  constexpr int cardRadius = 6;
+  constexpr int iconSize = 64;
+  constexpr int iconLabelGap = 8;
+
+  const int labelLineHeight = renderer.getLineHeight(UI_12_FONT_ID);
+  const int blockHeight = iconSize + iconLabelGap + labelLineHeight;
+
+  for (int i = 0; i < cardCount; ++i) {
+    const int cardY = rect.y + i * (cardHeight + gap);
+    if (selectedIndex == i) {
+      renderer.fillRoundedRect(x, cardY, width, cardHeight, cardRadius, Color::LightGray);
+    } else {
+      renderer.drawRect(x, cardY, width, cardHeight);
+    }
+
+    const int blockY = cardY + (cardHeight - blockHeight) / 2;
+    const uint8_t* icon = cardIcon != nullptr ? cardIcon(i) : nullptr;
+    if (icon != nullptr) {
+      renderer.drawIcon(icon, x + (width - iconSize) / 2, blockY, iconSize, iconSize);
+    }
+
+    const std::string label = cardLabel(i);
+    const int labelY = blockY + iconSize + iconLabelGap;
+    const int labelWidth = renderer.getTextWidth(UI_12_FONT_ID, label.c_str());
+    const int labelX = x + std::max(0, (width - labelWidth) / 2);
+    renderer.drawText(UI_12_FONT_ID, labelX, labelY, label.c_str(), true);
   }
 }
 

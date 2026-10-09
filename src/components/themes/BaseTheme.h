@@ -240,6 +240,15 @@ class BaseTheme {
   virtual void drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
                               const std::function<std::string(int index)>& buttonLabel,
                               const std::function<UIIcon(int index)>& rowIcon) const;
+  // Large pictorial choices filling `rect` — one card per choice, icon over a
+  // centred label, selected card filled. drawButtonMenu's rows are pinned to
+  // menuRowHeight, which leaves a 2-choice screen as two thin bars above an
+  // empty column; these split the whole area between the cards instead.
+  // `cardIcon` returns a 1-bit bitmap for GfxRenderer::drawIcon(), or nullptr
+  // to draw the card text only.
+  virtual void drawChoiceCards(GfxRenderer& renderer, Rect rect, int cardCount, int selectedIndex,
+                               const std::function<std::string(int index)>& cardLabel,
+                               const std::function<const uint8_t*(int index)>& cardIcon) const;
   virtual Rect drawPopup(const GfxRenderer& renderer, const char* message) const;
   virtual void fillPopupProgress(const GfxRenderer& renderer, const Rect& layout, const int progress) const;
   void drawStatusBar(GfxRenderer& renderer, const float bookProgress, const int currentPage, const int pageCount,

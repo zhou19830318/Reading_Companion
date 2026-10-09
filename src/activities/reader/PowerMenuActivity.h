@@ -3,11 +3,12 @@
 #include "activities/Activity.h"
 
 // Short-Power quick-action chooser (SETTINGS.shortPwrBtn == VOICE_NOTE): two
-// rows — AI question (AI-01) or voice bookmark — returned as
-// PowerMenuResult{index}; Back cancels. The highlight starts on the row picked
-// last time: a file-scope counter, not a stored setting, because a settings
-// write per press would spend SPIFFS erase cycles on one lost keypress
-// (Resource Protocol 8) and the choice is only a navigation detail.
+// pictorial cards — the AI study-buddy question screen or the voice bookmark
+// (see drawChoiceCards) — returned as PowerMenuResult{index}; Back cancels.
+// The highlight starts on the card picked last time: a file-scope counter, not
+// a stored setting, because a settings write per press would spend SPIFFS
+// erase cycles on one lost keypress (Resource Protocol 8) and the choice is
+// only a navigation detail.
 class PowerMenuActivity final : public Activity {
  public:
   static constexpr int PICK_ASK_AI = 0;

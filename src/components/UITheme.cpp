@@ -100,6 +100,12 @@ Rect UITheme::getScreenSafeArea(const GfxRenderer& renderer, bool hasFrontButton
       }
       break;
   }
+  // The side hints are anchored to the right edge of the oriented viewport in
+  // every orientation (see LyraTheme::drawSideButtonHints), so the inset is the
+  // same one regardless of which way the panel is turned.
+  if (hasSideButtonHints) {
+    safeArea.width -= currentMetrics->sideButtonHintsWidth;
+  }
   return safeArea;
 }
 
