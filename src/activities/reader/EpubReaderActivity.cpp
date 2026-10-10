@@ -1155,10 +1155,16 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     }
   }
 
-  renderer.clearScreen();
+  // NB: the framebuffer is deliberately NOT cleared here. Two paths can still
+  // bail out without pushing — the section rebuild above and the SD page load
+  // below — and both show GUI.drawPopup(), which pushes whatever the
+  // framebuffer holds. Clearing first meant a failed load pushed a blank white
+  // screen plus the popup; the previous page is still in the buffer, so popups
+  // now draw over it. Each path that really renders clears first instead.
 
   if (section->pageCount == 0) {
     LOG_DBG("ERS", "No pages to render");
+    renderer.clearScreen();
     renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_EMPTY_CHAPTER), true, EpdFontFamily::BOLD);
     renderStatusBar();
     renderer.displayBuffer();
@@ -1169,6 +1175,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
 
   if (section->currentPage < 0 || section->currentPage >= section->pageCount) {
     LOG_DBG("ERS", "Page out of bounds: %d (max %d)", section->currentPage, section->pageCount);
+    renderer.clearScreen();
     renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_OUT_OF_BOUNDS), true, EpdFontFamily::BOLD);
     renderStatusBar();
     renderer.displayBuffer();
@@ -1212,6 +1219,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     currentPageFootnotes = std::move(p->footnotes);
 
     const auto start = millis();
+    renderer.clearScreen();
     renderContents(std::move(p), orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft);
     LOG_DBG("ERS", "Rendered page in %dms", millis() - start);
   }
