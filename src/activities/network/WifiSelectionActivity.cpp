@@ -48,6 +48,9 @@ void WifiSelectionActivity::onEnter() {
   savePromptSelection = 0;
   forgetPromptSelection = 0;
   autoConnecting = false;
+  autoCandidateMode = false;
+  autoCandidateCursor = 0;
+  connectionTimeoutMs = CONNECTION_TIMEOUT_MS;
 
   // Cache MAC address for display
   uint8_t mac[6];
@@ -60,7 +63,10 @@ void WifiSelectionActivity::onEnter() {
   // Trigger first update to show scanning message
   requestUpdate();
 
-  // Attempt to auto-connect to the last network
+  // Attempt to auto-connect to the last network. `autoCandidateMode` stays set
+  // through the attempt: if this one SSID does not answer, checkConnectionStatus()
+  // falls back to a scan and walks the remaining saved credentials instead of
+  // giving up (previously this was the only network ever tried).
   if (allowAutoConnect) {
     const std::string lastSsid = WIFI_STORE.getLastConnectedSsid();
     if (!lastSsid.empty()) {
@@ -72,6 +78,7 @@ void WifiSelectionActivity::onEnter() {
         selectedRequiresPassword = !cred->password.empty();
         usedSavedPassword = true;
         autoConnecting = true;
+        autoCandidateMode = true;
         attemptConnection();
         requestUpdate();
         return;
@@ -132,6 +139,14 @@ void WifiSelectionActivity::processWifiScanResults() {
 
   if (scanResult == WIFI_SCAN_FAILED) {
     LOG_ERR("WIFI", "WiFi scan failed");
+    // Fallback walk has no scan data to walk; surface the original error
+    // rather than an empty list the user can do nothing with.
+    if (autoCandidateMode) {
+      autoCandidateMode = false;
+      state = WifiSelectionState::CONNECTION_FAILED;
+      requestUpdate();
+      return;
+    }
     state = WifiSelectionState::NETWORK_LIST;
     requestUpdate();
     return;
@@ -177,6 +192,25 @@ void WifiSelectionActivity::processWifiScanResults() {
   WiFi.scanDelete();
   state = WifiSelectionState::NETWORK_LIST;
   selectedNetworkIndex = 0;
+
+  // Keep the walk flag set while a candidate is in flight so a failure on that
+  // candidate keeps walking this same list (one scan serves every attempt). It
+  // is cleared the moment the walk ends — either exhausted or handed over to
+  // the manual list — so a later manual rescan can never re-enter the walk.
+  if (autoCandidateMode) {
+    if (tryNextAutoCandidate()) {
+      return;
+    }
+    autoCandidateMode = false;
+    // Nothing further to try - the earlier failure reason is still the most
+    // useful message (attemptConnection() cleared it only at the start of each
+    // attempt, and this scan never began one).
+    LOG_DBG("WIFI", "Auto-connect fallback: no other saved network reachable");
+    state = WifiSelectionState::CONNECTION_FAILED;
+    requestUpdate();
+    return;
+  }
+
   requestUpdate();
 }
 
@@ -225,7 +259,7 @@ void WifiSelectionActivity::selectNetwork(const int index) {
   }
 }
 
-void WifiSelectionActivity::attemptConnection() {
+void WifiSelectionActivity::attemptConnection(const unsigned long timeoutMs) {
   // See startWifiScan(): the SDK bring-up below runs PHY RF calibration inline
   // in this task, which needs full CPU clock. Do this before any WiFi call so
   // the calibration never sees LOW_POWER_FREQ.
@@ -233,6 +267,7 @@ void WifiSelectionActivity::attemptConnection() {
 
   state = autoConnecting ? WifiSelectionState::AUTO_CONNECTING : WifiSelectionState::CONNECTING;
   connectionStartTime = millis();
+  connectionTimeoutMs = timeoutMs;
   connectedIP.clear();
   connectionError.clear();
   requestUpdate();
@@ -302,6 +337,39 @@ void WifiSelectionActivity::attemptConnection() {
           static_cast<unsigned long>(millis() - attemptStart));
 }
 
+// Walks forward through the just-sorted scan results and connects to the next
+// network we hold a password for. Only reached from the auto-connect fallback,
+// so `networks` is guaranteed populated and sorted saved-first / strongest-first
+// by processWifiScanResults(). Returns false once every candidate is exhausted.
+bool WifiSelectionActivity::tryNextAutoCandidate() {
+  while (autoCandidateCursor < networks.size()) {
+    const WifiNetworkInfo& candidate = networks[autoCandidateCursor++];
+    // selectedSSID still holds the SSID that just failed — nothing between the
+    // failure and here rewrites it — so this is the one network to skip. The
+    // forward-only cursor keeps every other entry single-try.
+    if (!candidate.hasSavedPassword || candidate.ssid == selectedSSID) {
+      continue;
+    }
+    const auto* cred = WIFI_STORE.findCredential(candidate.ssid);
+    if (!cred || cred->password.empty()) {
+      continue;
+    }
+
+    LOG_DBG("WIFI", "Auto-connect fallback: trying saved network %s (%d dBm)", candidate.ssid.c_str(),
+            static_cast<int>(candidate.rssi));
+    selectedSSID = cred->ssid;
+    enteredPassword = cred->password;
+    selectedRequiresPassword = !cred->password.empty();
+    usedSavedPassword = true;
+    autoConnecting = false;
+    attemptConnection(FALLBACK_TIMEOUT_MS);
+    return true;
+  }
+
+  LOG_DBG("WIFI", "Auto-connect fallback exhausted after %u candidate(s)", static_cast<unsigned>(autoCandidateCursor));
+  return false;
+}
+
 void WifiSelectionActivity::checkConnectionStatus() {
   if (state != WifiSelectionState::CONNECTING && state != WifiSelectionState::AUTO_CONNECTING) {
     return;
@@ -316,6 +384,7 @@ void WifiSelectionActivity::checkConnectionStatus() {
     snprintf(ipStr, sizeof(ipStr), "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
     connectedIP = ipStr;
     autoConnecting = false;
+    autoCandidateMode = false;
 
     // Sync RTC from NTP on the first successful WiFi connection only. The DS3231
     // drifts ~2 ppm so one sync is enough; users can force a re-sync from
@@ -350,24 +419,44 @@ void WifiSelectionActivity::checkConnectionStatus() {
     return;
   }
 
+  bool failed = false;
   if (status == WL_CONNECT_FAILED || status == WL_NO_SSID_AVAIL) {
     connectionError = tr(STR_ERROR_GENERAL_FAILURE);
     if (status == WL_NO_SSID_AVAIL) {
       connectionError = tr(STR_ERROR_NETWORK_NOT_FOUND);
     }
-    state = WifiSelectionState::CONNECTION_FAILED;
-    requestUpdate();
+    failed = true;
+  } else if (millis() - connectionStartTime > connectionTimeoutMs) {
+    WiFi.disconnect();
+    connectionError = tr(STR_ERROR_CONNECTION_TIMEOUT);
+    failed = true;
+  }
+
+  if (!failed) {
     return;
   }
 
-  // Check for timeout
-  if (millis() - connectionStartTime > CONNECTION_TIMEOUT_MS) {
-    WiFi.disconnect();
-    connectionError = tr(STR_ERROR_CONNECTION_TIMEOUT);
-    state = WifiSelectionState::CONNECTION_FAILED;
-    requestUpdate();
-    return;
+  // Only the last-used SSID has been tried so far. Scan once and walk the
+  // remaining saved credentials (strongest first) before reporting failure.
+  // After that first scan `networks` still holds the results, so every further
+  // failure walks the existing list and costs no additional scan.
+  if (autoCandidateMode) {
+    if (!networks.empty()) {
+      if (tryNextAutoCandidate()) {
+        return;
+      }
+      autoCandidateMode = false;
+      LOG_DBG("WIFI", "Auto-connect fallback: all saved candidates failed");
+    } else {
+      LOG_DBG("WIFI", "Auto-connect to %s failed (%s) - scanning for other saved networks", selectedSSID.c_str(),
+              connectionError.c_str());
+      startWifiScan();
+      return;
+    }
   }
+
+  state = WifiSelectionState::CONNECTION_FAILED;
+  requestUpdate();
 }
 
 void WifiSelectionActivity::loop() {

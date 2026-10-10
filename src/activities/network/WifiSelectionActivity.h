@@ -80,7 +80,21 @@ class WifiSelectionActivity final : public Activity {
 
   // Connection timeout
   static constexpr unsigned long CONNECTION_TIMEOUT_MS = 15000;
+  // Fallback candidates get a shorter leash: the first attempt is the network
+  // the user actually used last, while these are "maybe it is in range" guesses,
+  // and waiting 15 s x 8 stored credentials would look like a hang.
+  static constexpr unsigned long FALLBACK_TIMEOUT_MS = 8000;
   unsigned long connectionStartTime = 0;
+  unsigned long connectionTimeoutMs = CONNECTION_TIMEOUT_MS;
+
+  // Fallback walk over the other saved networks. The initial auto-connect only
+  // ever tries the last-used SSID; when that fails we scan once, then step
+  // forward through the sorted list (saved first, strongest signal first)
+  // instead of reporting failure while a usable credential sits in the store.
+  // The cursor only ever moves forward, so no network is tried twice and the
+  // scan runs once for the whole walk — no per-candidate rescan cost.
+  bool autoCandidateMode = false;
+  size_t autoCandidateCursor = 0;
 
   void renderNetworkList(const Rect* screen, const ThemeMetrics* metrics) const;
   void renderPasswordEntry(const Rect* screen, const ThemeMetrics* metrics) const;
@@ -93,8 +107,9 @@ class WifiSelectionActivity final : public Activity {
   void startWifiScan();
   void processWifiScanResults();
   void selectNetwork(int index);
-  void attemptConnection();
+  void attemptConnection(unsigned long timeoutMs = CONNECTION_TIMEOUT_MS);
   void checkConnectionStatus();
+  bool tryNextAutoCandidate();
   std::string getSignalStrengthIndicator(int32_t rssi) const;
 
   void onComplete(bool connected);
