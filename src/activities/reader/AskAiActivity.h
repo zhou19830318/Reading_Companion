@@ -1,11 +1,14 @@
 #pragma once
 
 #include <Epub.h>
+#include <Epub/Page.h>
+#include <FontCacheManager.h>
 #include <I18n.h>
 #include <NoteStore.h>
 #include <OpenClawSession.h>
 
 #include <memory>
+#include <optional>
 
 #include "activities/Activity.h"
 
@@ -102,6 +105,8 @@ class AskAiActivity final : public Activity {
   void beginAsk(const char* question, Scope scope);
   bool extractPageLines();
   void enterSelecting();
+  void exitSelectionView();
+  void renderSelectionView(int viewTop, int viewHeight);
   void ensureConnected();
   void composeAndSend();
   bool buildPrompt();
@@ -151,6 +156,21 @@ class AskAiActivity final : public Activity {
   int selStart_ = 0;       // inclusive, valid once a range was confirmed
   int selEnd_ = 0;
   LineRef lineRefs_[MAX_PAGE_LINES] = {};
+  // The page the selection view draws. Owned here from extraction until
+  // exitSelectionView() — which runs on every path out of State::Selecting —
+  // so it is never resident across the TLS dial (the class comment's rule) nor
+  // while the preset list is up.
+  std::unique_ptr<Page> page_;
+  // Sliding window over the page's viewport-relative Y coordinates: the view
+  // scrolls only to keep selectCursor_'s line whole inside it.
+  int scrollY_ = 0;
+  // Font prewarm for the selection view, held for as long as the view is up.
+  // The reader's PrewarmScope clears the glyph cache in BOTH its constructor
+  // and its destructor, so a scope per repaint would clear and re-prewarm the
+  // whole page on every key press. Held instead: one scan + prewarm, then every
+  // repaint is a page-buffer hit and nothing touches the SD font path.
+  std::optional<FontCacheManager::PrewarmScope> prewarmScope_;
+  bool prewarmed_ = false;
   // Process-wide gateway link: borrowed, never closed here (VoiceActivity's
   // rule — the workbench status cards read it).
   OpenClaw::Session& session_ = OpenClaw::Session::instance();

@@ -22,6 +22,7 @@
 #include <string>
 #include <vector>
 
+#include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "activities/ActivityResult.h"
 #include "activities/network/WifiSelectionActivity.h"
@@ -30,6 +31,24 @@
 #include "fontIds.h"
 
 using Notes::NoteStore;
+
+namespace {
+// Triangle-wave rule under a picked line: 3 px half-periods drawn as 1 px
+// Bresenham diagonals, so a 440 px line costs ~147 drawLine calls instead of
+// one per pixel. Amplitude 2 px reads as a wave without crowding the next
+// line, and the full-line width comes from the page's own margins — no copy of
+// the line's text is needed to know where it ends.
+void drawSelectionRule(GfxRenderer& renderer, const int x, const int y, const int width) {
+  constexpr int half = 3;  // period 6 px
+  constexpr int amp = 2;
+  if (width <= 0) return;
+  for (int px = 0; px < width; px += half) {
+    const int end = std::min(px + half, width);
+    const bool down = ((px / half) % 2) == 0;
+    renderer.drawLine(x + px, y + (down ? 0 : amp), x + end - 1, y + (down ? amp : 0), true);
+  }
+}
+}  // namespace
 
 void AskAiActivity::setBookContext(const std::shared_ptr<Epub>& book, const char* bookBase, uint16_t spineIndex,
                                    uint16_t pageNumber, uint16_t pageCount) {
@@ -57,6 +76,7 @@ void AskAiActivity::onExit() {
   // The session is process-wide: drop the notifier — it points at this object —
   // and never close the socket. Same rule as VoiceActivity::onExit.
   session_.setNotifier(nullptr, nullptr);
+  exitSelectionView();
   if (linePool_ != nullptr) {
     heap_caps_free(linePool_);
     linePool_ = nullptr;
@@ -85,6 +105,10 @@ void AskAiActivity::beginAsk(const char* question, Scope scope) {
   saved_ = false;
   answerScroll_ = 0;
   failReason_ = nullptr;
+  // Drop everything the selection view held before any radio work: the page
+  // and its glyph prewarm are the only internal-heap residents here, and the
+  // class rule is that neither may meet the TLS handshake's dip.
+  exitSelectionView();
 
   if (scope_ == Scope::Range && lineCount_ == 0) {
     // Retry path after a pick-time extraction failure: the normal flow
@@ -135,62 +159,86 @@ bool AskAiActivity::extractPageLines() {
       return false;
     }
   }
-  auto section = makeUniqueNoThrow<Section>(book_, spineIndex_, renderer);
-  if (!section) {
-    LOG_ERR("ASK", "OOM: Section");
-    return false;
-  }
-  section->currentPage = static_cast<int>(pageNumber_);
-  auto page = section->loadPageFromSectionFile();
-  if (!page) {
-    LOG_ERR("ASK", "no cached page %u/%u", spineIndex_, pageNumber_);
-    return false;
-  }
 
-  // Copy each PageLine's words into the pool as one line, word-separated.
-  // A word that does not fit ends the line early (never a codepoint: words
-  // are whole UTF-8 sequences), and a full pool or MAX_PAGE_LINES just stops
-  // the walk — a truncated tail still yields a usable selection.
+  const uint32_t heapBefore = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
   size_t used = 0;
   int count = 0;
   bool full = false;
-  for (const auto& el : page->elements) {
-    if (count >= MAX_PAGE_LINES || used >= linePoolCap_) {
-      full = true;
-      break;
+  {
+    auto section = makeUniqueNoThrow<Section>(book_, spineIndex_, renderer);
+    if (!section) {
+      LOG_ERR("ASK", "OOM: Section");
+      return false;
     }
-    if (el->getTag() != TAG_PageLine) continue;
-    const auto& line = static_cast<const PageLine&>(*el);
-    const size_t start = used;
-    if (line.getBlock() != nullptr) {
-      for (const auto& word : line.getBlock()->getWords()) {
-        const size_t sep = used > start ? 1 : 0;
-        if (used + sep + word.size() > linePoolCap_) {
-          full = true;
-          break;
-        }
-        if (sep != 0) linePool_[used++] = ' ';
-        memcpy(linePool_ + used, word.data(), word.size());
-        used += word.size();
+    section->currentPage = static_cast<int>(pageNumber_);
+    page_ = section->loadPageFromSectionFile();
+    if (!page_) {
+      LOG_ERR("ASK", "no cached page %u/%u", spineIndex_, pageNumber_);
+      return false;
+    }
+
+    // Copy each PageLine's words into the pool as one line, word-separated.
+    // A word that does not fit ends the line early (never a codepoint: words
+    // are whole UTF-8 sequences), and a full pool or MAX_PAGE_LINES just stops
+    // the walk — a truncated tail still yields a usable selection.
+    for (const auto& el : page_->elements) {
+      if (count >= MAX_PAGE_LINES || used >= linePoolCap_) {
+        full = true;
+        break;
       }
+      if (el->getTag() != TAG_PageLine) continue;
+      const auto& line = static_cast<const PageLine&>(*el);
+      const size_t start = used;
+      if (line.getBlock() != nullptr) {
+        for (const auto& word : line.getBlock()->getWords()) {
+          const size_t sep = used > start ? 1 : 0;
+          if (used + sep + word.size() > linePoolCap_) {
+            full = true;
+            break;
+          }
+          if (sep != 0) linePool_[used++] = ' ';
+          memcpy(linePool_ + used, word.data(), word.size());
+          used += word.size();
+        }
+      }
+      const size_t len = used - start;
+      if (len == 0) {
+        // A blank layout line has no entry to select — but a line whose FIRST
+        // word did not fit the pool is not blank, it is the truncation point.
+        // Stopping there keeps lineRefs_ a gapless prefix of the page's
+        // non-blank lines, which is the invariant the selection view's element
+        // walk relies on to index it 1:1.
+        if (full) break;
+        continue;
+      }
+      lineRefs_[count].off = static_cast<uint16_t>(start);
+      lineRefs_[count].len = static_cast<uint16_t>(len);
+      count++;
+      if (full) break;
     }
-    const size_t len = used - start;
-    if (len == 0) continue;  // blank layout line: no entry to select
-    lineRefs_[count].off = static_cast<uint16_t>(start);
-    lineRefs_[count].len = static_cast<uint16_t>(len);
-    count++;
-    if (full) break;
-  }
+  }  // Section released here: the retained delta below is the page alone
   lineCount_ = count;
-  LOG_INF("ASK", "page lines: %d (%u bytes%s)", count, static_cast<unsigned>(used), full ? ", pool full" : "");
+  LOG_INF("ASK", "page lines: %d (%u bytes%s), selection page costs %d bytes internal", count,
+          static_cast<unsigned>(used), full ? ", pool full" : "",
+          static_cast<int>(heapBefore - heap_caps_get_free_size(MALLOC_CAP_INTERNAL)));
   return count > 0;
 }
 
 void AskAiActivity::enterSelecting() {
   selectCursor_ = 0;
   selectAnchor_ = -1;
+  scrollY_ = 0;
   state_ = State::Selecting;
   requestUpdate();
+}
+
+void AskAiActivity::exitSelectionView() {
+  // Order matters only for the glyph cache: the scope's destructor clears it,
+  // which is the reader's own convention at the end of a page render.
+  prewarmScope_.reset();
+  prewarmed_ = false;
+  page_.reset();
+  scrollY_ = 0;
 }
 
 void AskAiActivity::ensureConnected() {
@@ -419,6 +467,7 @@ void AskAiActivity::loop() {
   // still false it is ignored.
   if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
     if (state_ == State::Selecting) {
+      exitSelectionView();  // the page and its glyph prewarm are per-selection
       state_ = State::Picking;
       requestUpdate();
       return;
@@ -620,6 +669,90 @@ size_t AskAiActivity::drawWindow(const int fontId, const char* text, const int x
   return total;
 }
 
+// Draws the page into the selection window at [viewTop, viewTop+viewHeight).
+// Called twice for the first paint (scan, then real) and once per repaint
+// afterwards — see the prewarm block in render().
+void AskAiActivity::renderSelectionView(const int viewTop, const int viewHeight) {
+  const int fontId = SETTINGS.getReaderFontId();
+  const int lineH = renderer.getLineHeight(fontId);
+  // Same horizontal margins the reader laid this page out with: the cached
+  // elements are viewport-relative, so reproducing them is exactly what puts
+  // every line back where it was on the reading page.
+  int bezelTop = 0, bezelRight = 0, bezelBottom = 0, bezelLeft = 0;
+  renderer.getOrientedViewableTRBL(&bezelTop, &bezelRight, &bezelBottom, &bezelLeft);
+  const int marginL = bezelLeft + SETTINGS.screenMargin;
+  const int marginR = bezelRight + SETTINGS.screenMargin;
+  const int rightX = renderer.getScreenWidth() - marginR;
+  const int caretX = std::max(0, marginL - 7);
+  const int viewBottom = viewTop + viewHeight;
+
+  // Keep the cursor's line whole inside the window. The window slides over the
+  // page's viewport-relative Y coordinates; scrollY_ is never negative and
+  // never leaves the cursor less than a full line from either edge.
+  int cursorY = -1;
+  {
+    int idx = -1;
+    for (const auto& el : page_->elements) {
+      if (el->getTag() != TAG_PageLine) continue;
+      const auto& probe = static_cast<const PageLine&>(*el);
+      if (probe.getBlock() == nullptr || probe.getBlock()->getWords().empty()) continue;
+      if (++idx == selectCursor_) {
+        cursorY = probe.yPos;
+        break;
+      }
+    }
+  }
+  if (cursorY >= 0) {
+    if (cursorY < scrollY_) scrollY_ = cursorY;
+    if (cursorY + lineH > scrollY_ + viewHeight) scrollY_ = cursorY + lineH - viewHeight;
+    if (scrollY_ < 0) scrollY_ = 0;
+  }
+
+  const bool bandOn = selectAnchor_ >= 0;
+  const int lo = bandOn ? std::min(selectAnchor_, selectCursor_) : 0;
+  const int hi = bandOn ? std::max(selectAnchor_, selectCursor_) : -1;
+  const int yOffset = viewTop - scrollY_;
+  const int caretH = std::max(2, lineH - 4);
+  int idx = -1;
+  for (const auto& el : page_->elements) {
+    const int sy = el->yPos + yOffset;
+    switch (el->getTag()) {
+      case TAG_PageLine: {
+        const auto& line = static_cast<const PageLine&>(*el);
+        // The same test extractPageLines() uses to skip a line, so this index
+        // walks lineRefs_ 1:1 (the extraction loop stops rather than skipping
+        // a line once the pool runs out).
+        if (line.getBlock() == nullptr || line.getBlock()->getWords().empty()) break;
+        ++idx;
+        // There is no pixel clip path, so a line that does not fit the window
+        // entirely is dropped instead of being allowed to overpaint the header
+        // or the button hints.
+        if (sy < viewTop || sy + lineH > viewBottom) break;
+        const bool picked = bandOn && idx >= lo && idx <= hi;
+        const bool isCursor = idx == selectCursor_;
+        el->render(renderer, fontId, marginL, yOffset);
+        if (picked) {
+          drawSelectionRule(renderer, marginL + line.xPos, sy + lineH - 4, rightX - (marginL + line.xPos));
+        }
+        if (isCursor) {
+          renderer.fillRect(caretX, sy + 2, 4, caretH, true);
+        }
+        break;
+      }
+      case TAG_PageHorizontalRule:
+        if (sy >= viewTop && sy < viewBottom) el->render(renderer, fontId, marginL, yOffset);
+        break;
+      case TAG_PageImage:
+      default:
+        // Images are skipped deliberately: PageImage has no clip path (it would
+        // paint outside the window), and every pass would re-decode it from SD.
+        // The gap it leaves keeps the lines below it at their original
+        // positions, so the layout still matches the reading page.
+        break;
+    }
+  }
+}
+
 void AskAiActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
@@ -650,26 +783,36 @@ void AskAiActivity::render(RenderLock&&) {
     }
 
     case State::Selecting: {
-      // Question preview, then this page's lines. The dot column is the band
-      // being picked: empty until the first Confirm marks the start, then it
-      // stretches from the anchor to the moving highlight. Rows are 50 px
-      // tall (subtitle present) and drawList pages them around the cursor.
+      // The question that got us here, then this page drawn in its reading
+      // layout: the reader's own margins, line positions and per-word
+      // placement — not a re-typeset copy. The band being picked shows as a
+      // wavy rule under each line, and the moving end carries a caret in the
+      // left gutter.
       for (const auto& line : renderer.wrappedText(UI_10_FONT_ID, question_, textWidth, 2)) {
         renderer.drawText(UI_10_FONT_ID, left, y, line.c_str());
         y += lineHeight;
       }
       y += metrics.verticalSpacing;
-      const int listHeight = pageHeight - y - metrics.buttonHintsHeight - metrics.verticalSpacing * 2;
-      const bool bandOn = selectAnchor_ >= 0;
-      const int lo = bandOn ? std::min(selectAnchor_, selectCursor_) : 0;
-      const int hi = bandOn ? std::max(selectAnchor_, selectCursor_) : -1;
-      GUI.drawList(
-          renderer, Rect{0, y, pageWidth, std::max(listHeight, 50)}, lineCount_, selectCursor_,
-          [this](int index) {
-            const LineRef ref = lineRefs_[index];
-            return std::string(linePool_ + ref.off, ref.len);
-          },
-          [lo, hi](int index) { return std::string(index >= lo && index <= hi ? "\xe2\x97\x8f" : ""); });
+      const int viewTop = y;
+      const int viewHeight = pageHeight - y - metrics.buttonHintsHeight - metrics.verticalSpacing * 2;
+      const int minLineHeight = renderer.getLineHeight(SETTINGS.getReaderFontId());
+      if (page_ == nullptr || viewHeight < minLineHeight) {
+        LOG_ERR("ASK", "selection view unusable (page=%d, view h=%d, line h=%d)", page_ != nullptr, viewHeight,
+                minLineHeight);
+        break;
+      }
+      if (!prewarmed_) {
+        // The reader's two-pass pattern, run ONCE per selection instead of per
+        // repaint: the scope clears the glyph cache on construction and again
+        // on destruction, so a fresh scope every key press would re-prewarm the
+        // whole page each time. Held, the first pass records the glyphs, the
+        // prewarm rasterizes them, and every later pass is a cache hit.
+        prewarmScope_.emplace(renderer.getFontCacheManager()->createPrewarmScope());
+        renderSelectionView(viewTop, viewHeight);  // scan pass: records, paints nothing
+        prewarmScope_->endScanAndPrewarm();
+        prewarmed_ = true;
+      }
+      renderSelectionView(viewTop, viewHeight);
       break;
     }
 
@@ -753,7 +896,10 @@ void AskAiActivity::render(RenderLock&&) {
   // states never bind them, so their slots stay empty. The front Left/Right
   // keys mirror those two, so they carry the same labels on the same states.
   const bool navStates = state_ == State::Picking || state_ == State::Selecting || state_ == State::Answer;
-  if (navStates) {
+  if (navStates && state_ != State::Selecting) {
+    // Selecting keeps its nav labels (below) but drops the side chips: the
+    // selection view spans the reading width, so the chips would sit on top of
+    // the page text.
     GUI.drawSideButtonHints(renderer, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   }
   const char* confirmLabel = "";
