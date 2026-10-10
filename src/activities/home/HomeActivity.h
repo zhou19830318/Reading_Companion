@@ -14,7 +14,6 @@ class HomeActivity final : public Activity {
   int selectorIndex = 0;
   bool recentsLoading = false;
   bool recentsLoaded = false;
-  bool firstRenderDone = false;
   bool hasOpdsServers = false;
   bool coverRendered = false;      // Track if cover has been rendered once
   bool coverBufferStored = false;  // Track if cover buffer is stored

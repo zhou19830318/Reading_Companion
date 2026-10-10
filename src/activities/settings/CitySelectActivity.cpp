@@ -53,11 +53,11 @@ void CitySelectActivity::loop() {
   // (same split LanguageSelectActivity uses).
   const int pageItems = UITheme::getNumberOfItemsPerPage(renderer, true, false, true, false);
 
-  buttonNavigator.onNextRelease([this] {
+  buttonNavigator.onNextPress([this] {
     selectedIndex = ButtonNavigator::nextIndex(selectedIndex, totalItems);
     requestUpdate();
   });
-  buttonNavigator.onPreviousRelease([this] {
+  buttonNavigator.onPreviousPress([this] {
     selectedIndex = ButtonNavigator::previousIndex(selectedIndex, totalItems);
     requestUpdate();
   });

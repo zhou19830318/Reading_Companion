@@ -1,13 +1,18 @@
 #pragma once
 
+#include <algorithm>
+#include <array>
 #include <functional>
-#include <vector>
 
 #include "MappedInputManager.h"
 
 class ButtonNavigator final {
   using Callback = std::function<void()>;
-  using Buttons = std::vector<MappedInputManager::Button>;
+
+  // Fixed-size, not std::vector: getNextButtons()/getPreviousButtons() are called
+  // four times per activity loop(), so a vector would heap-allocate on every
+  // iteration (growth + copy + free). A constexpr std::array costs nothing.
+  using Buttons = std::array<MappedInputManager::Button, 1>;
 
   const uint16_t continuousStartMs;
   const uint16_t continuousIntervalMs;
@@ -46,6 +51,6 @@ class ButtonNavigator final {
 
   // Navigation uses the logical NavNext / NavPrevious buttons; MappedInputManager::mapButton resolves
   // them to physical buttons and applies any orientation-based direction swap, so this stays settings-free.
-  [[nodiscard]] static Buttons getNextButtons() { return {MappedInputManager::Button::NavNext}; }
-  [[nodiscard]] static Buttons getPreviousButtons() { return {MappedInputManager::Button::NavPrevious}; }
+  [[nodiscard]] static constexpr Buttons getNextButtons() { return {MappedInputManager::Button::NavNext}; }
+  [[nodiscard]] static constexpr Buttons getPreviousButtons() { return {MappedInputManager::Button::NavPrevious}; }
 };

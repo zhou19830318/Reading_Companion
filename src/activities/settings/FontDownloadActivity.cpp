@@ -436,12 +436,12 @@ void FontDownloadActivity::loop() {
     const int listSize = listItemCount();
     const int pageItems = UITheme::getNumberOfItemsPerPage(renderer, true, false, true, false);
 
-    buttonNavigator_.onNextRelease([this, listSize] {
+    buttonNavigator_.onNextPress([this, listSize] {
       selectedIndex_ = ButtonNavigator::nextIndex(selectedIndex_, listSize);
       requestUpdate();
     });
 
-    buttonNavigator_.onPreviousRelease([this, listSize] {
+    buttonNavigator_.onPreviousPress([this, listSize] {
       selectedIndex_ = ButtonNavigator::previousIndex(selectedIndex_, listSize);
       requestUpdate();
     });

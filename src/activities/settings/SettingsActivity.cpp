@@ -150,7 +150,10 @@ void SettingsActivity::loop() {
       selectedSettingIndex = 0;
       requestUpdate();
     } else {
-      SETTINGS.saveToFile();
+      if (settingsDirty) {
+        SETTINGS.saveToFile();
+        settingsDirty = false;
+      }
       // Embedded (launched from the reader menu) returns to the book; the
       // root launch keeps its long-standing go-home behaviour.
       if (embedded) {
@@ -163,12 +166,12 @@ void SettingsActivity::loop() {
   }
 
   // Handle navigation
-  buttonNavigator.onNextRelease([this] {
+  buttonNavigator.onNextPress([this] {
     selectedSettingIndex = ButtonNavigator::nextIndex(selectedSettingIndex, settingsCount + 1);
     requestUpdate();
   });
 
-  buttonNavigator.onPreviousRelease([this] {
+  buttonNavigator.onPreviousPress([this] {
     selectedSettingIndex = ButtonNavigator::previousIndex(selectedSettingIndex, settingsCount + 1);
     requestUpdate();
   });
@@ -324,6 +327,7 @@ void SettingsActivity::toggleCurrentSetting() {
 
   syncQuickResumeTimeoutForSleepScreen(sleepScreenChanged, quickResumeTimeoutChanged);
   SETTINGS.saveToFile();
+  settingsDirty = false;
   rebuildSettingsLists();
   selectedSettingIndex = std::min(selectedSettingIndex, settingsCount);
 }
@@ -338,6 +342,7 @@ void SettingsActivity::syncQuickResumeTimeoutForSleepScreen(bool sleepScreenChan
   if (SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::QUICK_RESUME) {
     if (SETTINGS.quickResumeSleepScreen != CrossPointSettings::QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_AFTER_TIMEOUT) {
       SETTINGS.quickResumeSleepScreen = CrossPointSettings::QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_AFTER_TIMEOUT;
+      settingsDirty = true;
       quickResumeTimeoutAutoEnabled = !preserveQuickResumeTimeoutOn;
     } else if (sleepScreenChanged && !preserveQuickResumeTimeoutOn) {
       quickResumeTimeoutAutoEnabled = true;
@@ -347,6 +352,7 @@ void SettingsActivity::syncQuickResumeTimeoutForSleepScreen(bool sleepScreenChan
 
   if (sleepScreenChanged && quickResumeTimeoutAutoEnabled && !preserveQuickResumeTimeoutOn) {
     SETTINGS.quickResumeSleepScreen = CrossPointSettings::QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_NEVER;
+    settingsDirty = true;
     quickResumeTimeoutAutoEnabled = false;
   }
 }

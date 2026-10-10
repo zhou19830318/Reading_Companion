@@ -137,12 +137,12 @@ void StatusBarSettingsActivity::loop() {
   }
 
   // Handle navigation
-  buttonNavigator.onNextRelease([this] {
+  buttonNavigator.onNextPress([this] {
     selectedIndex = ButtonNavigator::nextIndex(selectedIndex, visibleItemCount);
     requestUpdate();
   });
 
-  buttonNavigator.onPreviousRelease([this] {
+  buttonNavigator.onPreviousPress([this] {
     selectedIndex = ButtonNavigator::previousIndex(selectedIndex, visibleItemCount);
     requestUpdate();
   });

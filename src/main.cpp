@@ -890,9 +890,12 @@ void loop() {
     yield();                             // Give FreeRTOS a chance to run tasks, but return immediately
   } else {
     if (millis() - lastActivityTime >= HalPowerManager::IDLE_POWER_SAVING_MS) {
-      // If we've been inactive for a while, increase the delay to save power
-      powerManager.setPowerSaving(true);  // Lower CPU frequency after extended inactivity
-      delay(50);
+      // Inactive: drop the CPU frequency, which is where the power saving
+      // actually comes from. The sleep used to be 50 ms here, which put up to
+      // 50 ms between a key press and the gpio.update() that samples it — one
+      // of the more visible menu lags — so it now matches the active branch.
+      powerManager.setPowerSaving(true);
+      delay(10);
     } else {
       // Short delay to prevent tight loop while still being responsive
       delay(10);

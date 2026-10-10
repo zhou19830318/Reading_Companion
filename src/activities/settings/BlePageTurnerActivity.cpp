@@ -68,8 +68,7 @@ uint8_t BlePageTurnerActivity::displayCount() const {
   const uint8_t scanned = BLE_HID_HOST.discoveredCount();
   for (uint8_t i = 0; i < scanned; ++i) {
     BleScanEntry e;
-    if (BLE_HID_HOST.getDiscovered(i, e) &&
-        !(bound && memcmp(e.addr, SETTINGS.bleDeviceAddr, 6) == 0)) {
+    if (BLE_HID_HOST.getDiscovered(i, e) && !(bound && memcmp(e.addr, SETTINGS.bleDeviceAddr, 6) == 0)) {
       ++n;
     }
   }
@@ -149,8 +148,7 @@ void BlePageTurnerActivity::loop() {
       const uint8_t count = displayCount();
       // Redraw when the list changes: new device OR a late-arriving name. Also
       // redraw when the bound remote's cached battery changes (its pinned row).
-      if (BLE_HID_HOST.scanRevision() != shownRevision ||
-          batteryShown_ != BLE_HID_HOST.boundBatteryLevel()) {
+      if (BLE_HID_HOST.scanRevision() != shownRevision || batteryShown_ != BLE_HID_HOST.boundBatteryLevel()) {
         requestUpdate();
       }
       if (mappedInput.wasPressed(MappedInputManager::Button::Confirm) && count > 0) {
@@ -177,11 +175,11 @@ void BlePageTurnerActivity::loop() {
         // Use the shared navigator so side up/down AND front left/right both
         // move the selection (same as the language/settings lists), with
         // long-press continuous scroll.
-        buttonNavigator.onNextRelease([this, count] {
+        buttonNavigator.onNextPress([this, count] {
           selectedIndex = static_cast<uint8_t>(ButtonNavigator::nextIndex(selectedIndex, count));
           requestUpdate();
         });
-        buttonNavigator.onPreviousRelease([this, count] {
+        buttonNavigator.onPreviousPress([this, count] {
           selectedIndex = static_cast<uint8_t>(ButtonNavigator::previousIndex(selectedIndex, count));
           requestUpdate();
         });
@@ -278,8 +276,8 @@ void BlePageTurnerActivity::render(RenderLock&&) {
               // No stored name (legacy binding): show the MAC tail so the row
               // isn't blank. BLE addr is little-endian; bytes [2][1][0] are the tail.
               char tail[24];
-              snprintf(tail, sizeof(tail), "%02X:%02X:%02X", SETTINGS.bleDeviceAddr[2],
-                       SETTINGS.bleDeviceAddr[1], SETTINGS.bleDeviceAddr[0]);
+              snprintf(tail, sizeof(tail), "%02X:%02X:%02X", SETTINGS.bleDeviceAddr[2], SETTINGS.bleDeviceAddr[1],
+                       SETTINGS.bleDeviceAddr[0]);
               return std::string(tail);
             }
             return e.name[0] ? std::string(e.name) : std::string(tr(STR_UNNAMED));
@@ -355,8 +353,8 @@ void BlePageTurnerActivity::render(RenderLock&&) {
       const int totalW = iconW + nub + gap + pctW;
       const int x0 = (pageWidth - totalW) / 2;
       const int y0 = midY + 34;
-      renderer.drawRect(x0, y0, iconW, iconH);                       // body outline
-      renderer.fillRect(x0 + iconW, y0 + iconH / 2 - 3, nub, 6);     // positive nub
+      renderer.drawRect(x0, y0, iconW, iconH);                    // body outline
+      renderer.fillRect(x0 + iconW, y0 + iconH / 2 - 3, nub, 6);  // positive nub
       const int fillMax = iconW - 4;
       int fillW = bat * fillMax / 100;
       if (fillW < 1 && bat > 0) fillW = 1;
@@ -368,8 +366,7 @@ void BlePageTurnerActivity::render(RenderLock&&) {
   // Bottom button hints (front keys) + side hint (the Down side key forgets).
   if (step_ == Step::Ready) {
     const bool connected = BLE_HID_HOST.isConnected();
-    const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", connected ? tr(STR_BLE_RELEARN) : "",
-                                              tr(STR_BLE_PAIR));
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", connected ? tr(STR_BLE_RELEARN) : "", tr(STR_BLE_PAIR));
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
     GUI.drawSideButtonHints(renderer, "", tr(STR_FORGET_BUTTON));
   } else {

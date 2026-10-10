@@ -268,10 +268,16 @@ void HomeActivity::render(RenderLock&&) {
 
   renderer.displayBuffer();
 
-  if (!firstRenderDone) {
-    firstRenderDone = true;
-    requestUpdate();
-  } else if (!recentsLoaded && !recentsLoading) {
+  // Kick the cover loader as soon as this frame has been handed to the panel.
+  // It used to be deferred behind a second render of the *same* frame
+  // (firstRenderDone -> requestUpdate()), which cost a whole extra 597 ms
+  // FAST refresh — two identical pushes back to back — on every return from a
+  // top-level menu, because goHome() always builds a fresh HomeActivity and
+  // firstRenderDone therefore resets each time. The loader runs after
+  // displayBuffer() has already returned, so nothing needs that extra frame;
+  // a thumb that really gets generated still calls requestUpdate() itself and
+  // schedules the repaint that shows it.
+  if (!recentsLoaded && !recentsLoading) {
     recentsLoading = true;
     loadRecentCovers(metrics.homeCoverHeight);
   }

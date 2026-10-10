@@ -161,6 +161,12 @@ class SettingsActivity final : public Activity {
   bool preserveQuickResumeTimeoutOn = false;
   bool quickResumeTimeoutAutoEnabled = false;
 
+  // syncQuickResumeTimeoutForSleepScreen() can rewrite quickResumeSleepScreen
+  // without going through toggleCurrentSetting(); this flags that so the Back
+  // path only pays for a JSON serialize + SD write when something actually
+  // changed. Every other mutation path already calls saveToFile() itself.
+  bool settingsDirty = false;
+
   // True when launched from inside the reader. The screen then opens on the
   // Reader category and Back pops back to the book instead of going home.
   bool embedded = false;
