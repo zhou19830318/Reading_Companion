@@ -1370,7 +1370,47 @@ void GfxRenderer::invertScreen() const {
 void GfxRenderer::displayBuffer(const HalDisplay::RefreshMode refreshMode) const {
   auto elapsed = millis() - start_ms;
   LOG_DBG("GFX", "Time = %lu ms from clearScreen to displayBuffer", elapsed);
-  display.displayBuffer(refreshMode, fadingFix);
+
+  HalDisplay::RefreshMode mode = refreshMode;
+
+  // Global ghosting-cleanup cadence. FAST_REFRESH writes only BW RAM and skips
+  // any pixel whose RAM code is unchanged, so grey charge left by anti-aliased
+  // text, popups and earlier menu frames is never re-driven until an absolute
+  // waveform runs. The reader already counts down its own N pages
+  // (ReaderUtils::displayWithRefreshCycle) but the other 70+ call sites had no
+  // cadence at all, which is why menus could ghost indefinitely. One shared
+  // counter here covers them all; the reader's explicit HALF_REFRESH resets it
+  // so the two never double up.
+  if (refreshCadence > 0) {
+    static uint8_t pagesSinceCleanup = 0;  // 1 byte, function-static: one counter for the whole firmware
+    // Consume one tick of the transition guard per push, before deciding the
+    // mode. Any non-FAST request counts too: it still replaces the screen, so
+    // it should not silently eat the pending cleanup for the frames that follow.
+    const bool holdoff = cadenceHoldoffPushes > 0;
+    if (cadenceHoldoffPushes > 0) {
+      cadenceHoldoffPushes--;
+    }
+    if (mode == HalDisplay::FAST_REFRESH) {
+      if (pagesSinceCleanup + 1 >= refreshCadence) {
+        if (!holdoff) {
+          mode = HalDisplay::HALF_REFRESH;
+          pagesSinceCleanup = 0;
+        }
+        // Held off (an activity transition): leave the counter parked one
+        // short so the next ordinary push performs the cleanup, and this
+        // frame stays on the gentle FAST differential.
+      } else {
+        pagesSinceCleanup++;
+      }
+    } else {
+      // Caller already asked for an absolute waveform; it cleaned up too.
+      pagesSinceCleanup = 0;
+    }
+  } else {
+    cadenceHoldoffPushes = 0;
+  }
+
+  display.displayBuffer(mode, fadingFix);
 }
 
 std::string GfxRenderer::truncatedText(const int fontId, const char* text, const int maxWidth,

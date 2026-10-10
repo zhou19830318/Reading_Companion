@@ -573,6 +573,7 @@ void loop() {
   halTiltSensor.update(SETTINGS.tiltPageTurn, SETTINGS.orientation, activityManager.isReaderActivity());
 
   renderer.setFadingFix(SETTINGS.fadingFix);
+  renderer.setRefreshCadence(SETTINGS.getRefreshFrequency());
 
   if (Serial && millis() - lastMemPrint >= 10000) {
     // Raw heap_caps_* for the PSRAM columns, not ESP.getPsramSize()/FreePsram():

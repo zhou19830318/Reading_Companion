@@ -44,6 +44,26 @@ class GfxRenderer {
   RenderMode renderMode;
   Orientation orientation;
   bool fadingFix;
+  // Ghosting cleanup cadence, in pushes: every Nth frame is promoted from
+  // FAST_REFRESH to an absolute waveform. Mirrors SETTINGS.refreshFrequency;
+  // injected from src/ because PlatformIO libraries cannot see src/ headers.
+  int refreshCadence = 15;
+  // Guard for the promotion above: while armed (a countdown of pushes), each
+  // displayBuffer() keeps its FAST differential even if the counter is due.
+  // Activity switches arm it (Activity::onEnter / onExit) because the frames
+  // that follow a switch replace the whole screen — letting one of them become
+  // the Nth-push cleanup would flash the entire panel through an absolute
+  // waveform (~1.3 s) right at the moment the user is watching a transition.
+  // It covers the first few pushes, not just one: an activity switch reliably
+  // emits a 2nd render (async work such as cover loading or a socket callback
+  // settles right after the first), and promoting that one was still visible as
+  // a black/white scrub. Measured on device: with a 1-push guard, a menu round
+  // trip showed 1 of 5 entries promoted its 2nd frame to half (1355 ms).
+  // The cleanup counter is not reset, so the deferred cleanup simply moves to
+  // the next ordinary frame instead of being skipped. Written by the main task,
+  // read once by the render task: a uint8_t, worst case a benign stale read.
+  static constexpr uint8_t CADENCE_HOLDOFF_PUSHES = 3;
+  mutable uint8_t cadenceHoldoffPushes = 0;
   uint8_t* frameBuffer = nullptr;
   uint16_t panelWidth = HalDisplay::DISPLAY_WIDTH;
   uint16_t panelHeight = HalDisplay::DISPLAY_HEIGHT;
@@ -130,6 +150,11 @@ class GfxRenderer {
 
   // Fading fix control
   void setFadingFix(const bool enabled) { fadingFix = enabled; }
+  void setRefreshCadence(const int pushes) { refreshCadence = pushes; }
+  void holdOffCadenceForNextPush() { cadenceHoldoffPushes = CADENCE_HOLDOFF_PUSHES; }
+  // Peek only — the counter itself is decremented inside displayBuffer(), so a
+  // caller that branches on it and then pushes stays in sync with the cadence.
+  bool isCadenceHeldOff() const { return cadenceHoldoffPushes > 0; }
 
   // Screen ops
   int getScreenWidth() const;
