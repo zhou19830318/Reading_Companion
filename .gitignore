@@ -35,4 +35,7 @@ lib/EpdFont/scripts/output/
 mimo_api_key.txt
 openclaw_token.txt
 stt_api_key.txt
+Personal access tokens*.txt
+# Local firmware packaging output (built with esptool merge_bin + tar.gz).
+dist/
 
