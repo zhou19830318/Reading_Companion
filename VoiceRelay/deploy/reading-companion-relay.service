@@ -1,0 +1,32 @@
+[Unit]
+Description=Reading Companion Voice Relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=voice-relay
+Group=voice-relay
+WorkingDirectory=/opt/reading-companion-relay/current
+EnvironmentFile=/etc/reading-companion/voice-relay.env
+ExecStart=/opt/reading-companion-relay/current/.venv/bin/uvicorn \
+  relay.main:app \
+  --host 127.0.0.1 \
+  --port 8000 \
+  --workers 1
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=20
+KillSignal=SIGTERM
+
+# Hardening: the relay only writes its logs/run directories.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/reading-companion-relay/logs /opt/reading-companion-relay/run
+
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
