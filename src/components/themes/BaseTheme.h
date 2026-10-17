@@ -257,8 +257,12 @@ class BaseTheme {
   // A card with a hint gets a short centred rule between label and hint.
   virtual void drawChoiceCards(GfxRenderer& renderer, Rect rect, int cardCount, int selectedIndex,
                                const ChoiceCard* cards) const;
-  virtual Rect drawPopup(const GfxRenderer& renderer, const char* message) const;
-  virtual void fillPopupProgress(const GfxRenderer& renderer, const Rect& layout, const int progress) const;
+  // withProgressBar reserves a strip below the progress bar for the percent
+  // label drawn by fillPopupProgress(showPercentLabel=true); the two flags
+  // must be used together.
+  virtual Rect drawPopup(const GfxRenderer& renderer, const char* message, bool withProgressBar = false) const;
+  virtual void fillPopupProgress(const GfxRenderer& renderer, const Rect& layout, const int progress,
+                                 bool showPercentLabel = false) const;
   void drawStatusBar(GfxRenderer& renderer, const float bookProgress, const int currentPage, const int pageCount,
                      std::string title, const int paddingBottom = 0, const int textYOffset = 0,
                      const bool fillMargin = true, const bool isPageBookmarked = false) const;

@@ -6,6 +6,7 @@
 #include <I18n.h>
 #include <NoteStore.h>
 #include <OpenClawSession.h>
+#include <VoiceRelayChatClient.h>
 
 #include <memory>
 #include <optional>
@@ -107,6 +108,14 @@ class AskAiActivity final : public Activity {
   void enterSelecting();
   void exitSelectionView();
   void renderSelectionView(int viewTop, int viewHeight);
+  // Voice-relay chat path: blocking POST /api/v1/chat on the configured relay
+  // origin, one question per call, prompt bytes identical to the OpenClaw path.
+  // Entered instead of ensureConnected() when the relay setting is on.
+  bool relayConfigured();
+  void beginRelayAsk();
+  // Where the settled answer lives: the relay's per-activity reply buffer or
+  // the shared OpenClaw session's, per the round that produced it.
+  const char* answerText() const;
   void ensureConnected();
   void composeAndSend();
   bool buildPrompt();
@@ -147,6 +156,15 @@ class AskAiActivity final : public Activity {
   std::unique_ptr<char[]> prompt_;
   std::unique_ptr<char[]> record_;
   std::unique_ptr<char[]> lineBuf_;
+  // Relay answer scratch (CHAT_TEXT_CAP + 1), allocated on the first relay
+  // round only — an OpenClaw-only session never pays for it. Freed with the
+  // activity like the buffers above.
+  std::unique_ptr<char[]> relayReply_;
+  // Which backend produced the answer on screen: relay rounds read
+  // relayReply_, OpenClaw rounds read the shared session's buffer. Set true in
+  // beginRelayAsk(), cleared in ensureConnected() so a fallback/re-dial never
+  // shows a stale relay answer.
+  bool relayRound_ = false;
   // Range selection state (State::Selecting).
   char* linePool_ = nullptr;
   size_t linePoolCap_ = 0;

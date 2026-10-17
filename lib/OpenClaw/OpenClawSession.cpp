@@ -424,6 +424,10 @@ void Session::onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
         // full budget for the next loss.
         reconnecting_ = false;
         reconnectAttempts_ = 0;
+        // A successful auth also retires any earlier pairing prompt: without
+        // this, a later unrelated failure would still render the stale
+        // `openclaw devices approve …` line on the Failed screen.
+        approveCmd_[0] = '\0';
         paint = true;
       } else if (state_ != State::Connected && handshake_ != nullptr && handshake_->phase() == Phase::Failed) {
         const Echo msg = safeEcho(handshake_->errorMessage());

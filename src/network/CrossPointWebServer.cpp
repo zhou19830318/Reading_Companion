@@ -12,6 +12,7 @@
 #include <esp_task_wdt.h>
 
 #include <algorithm>
+#include <cstring>
 
 #include "CrossPointSettings.h"
 #include "FontInstaller.h"
@@ -1580,6 +1581,9 @@ void CrossPointWebServer::handleGetCloudConfig() const {
   doc["hasToken"] = cloud.token[0] != '\0';
   doc["sttUrl"] = cloud.sttUrl;
   doc["hasSttKey"] = cloud.sttKey[0] != '\0';
+  doc["relayUrl"] = cloud.relayUrl;
+  doc["relayDeviceId"] = cloud.relayDeviceId;
+  doc["hasRelayToken"] = cloud.relayToken[0] != '\0';
 
   String json;
   serializeJson(doc, json);
@@ -1644,6 +1648,20 @@ void CrossPointWebServer::handlePostCloudConfig() {
   if (doc["sttKey"].is<const char*>()) {
     snprintf(cloud.sttKey, sizeof(cloud.sttKey), "%s", doc["sttKey"].as<const char*>());
   }
+  if (doc["relayUrl"].is<const char*>()) {
+    const char* url = doc["relayUrl"].as<const char*>();
+    if (url[0] != '\0' && strncmp(url, "ws://", 5) != 0 && strncmp(url, "wss://", 6) != 0) {
+      server->send(400, "text/plain", "Relay URL must start with ws:// or wss://");
+      return;
+    }
+    snprintf(cloud.relayUrl, sizeof(cloud.relayUrl), "%s", url);
+  }
+  if (doc["relayDeviceId"].is<const char*>()) {
+    snprintf(cloud.relayDeviceId, sizeof(cloud.relayDeviceId), "%s", doc["relayDeviceId"].as<const char*>());
+  }
+  if (doc["relayToken"].is<const char*>()) {
+    snprintf(cloud.relayToken, sizeof(cloud.relayToken), "%s", doc["relayToken"].as<const char*>());
+  }
 
   if (!cloud.save()) {
     server->send(500, "text/plain", "Failed to write to NVS");
@@ -1651,8 +1669,10 @@ void CrossPointWebServer::handlePostCloudConfig() {
   }
 
   // Log presence only — never the values.
-  LOG_INF("WEB", "Cloud config saved (openclaw=%s:%u tls=%d sttKey=%s token=%s)", cloud.host, cloud.port,
-          cloud.tls ? 1 : 0, cloud.sttKey[0] != '\0' ? "set" : "unset", cloud.token[0] != '\0' ? "set" : "unset");
+  LOG_INF("WEB", "Cloud config saved (openclaw=%s:%u tls=%d sttKey=%s token=%s relay=%s relayToken=%s)", cloud.host,
+          cloud.port, cloud.tls ? 1 : 0, cloud.sttKey[0] != '\0' ? "set" : "unset",
+          cloud.token[0] != '\0' ? "set" : "unset", cloud.relayUrl[0] != '\0' ? "set" : "unset",
+          cloud.relayToken[0] != '\0' ? "set" : "unset");
   server->send(200, "text/plain", "OK");
 }
 

@@ -703,6 +703,10 @@ updateLang(true);
     opdsDeleted:     { en: 'OPDS server deleted', cn: 'OPDS 服务器已删除' },
     ocSaved:         { en: 'OpenClaw server saved!', cn: 'OpenClaw 服务器已保存！' },
     sttSaved:        { en: 'Speech settings saved!', cn: '语音设置已保存！' },
+    relayTitle:      { en: 'Voice Relay', cn: '语音中继' },
+    relayUrlLabel:   { en: 'Relay URL', cn: '中继地址' },
+    relayDeviceIdLabel: { en: 'Device ID', cn: '设备 ID' },
+    relaySaved:      { en: 'Voice relay settings saved!', cn: '语音中继设置已保存！' },
     errPrefix:       { en: 'Error: ', cn: '错误：' },
     // Distributed configuration help, rendered inside each panel.
     helpReader:      { en: 'Settings are grouped by category; press Save Settings to apply. Changing font, size, line spacing or margins invalidates the rendered layout cache (.crosspoint/ on the SD card), so the next open re-lays out its pages.',
@@ -715,6 +719,8 @@ updateLang(true);
                        cn: '测试连接返回 pairing pending，说明网关还没信任这台设备：复制框中的命令，在运行 openclaw 的网关主机上执行一次，然后重新测试。' },
     helpOpds:        { en: 'OPDS servers are ebook catalogues. The name is free-form, the URL must start with http:// or https://, and credentials only matter for catalogues that require login. Passwords are never shown back.',
                        cn: 'OPDS 是电子书目录服务器。名称随意；URL 必须以 http:// 或 https:// 开头；账号密码只对需要登录的目录有意义，密码保存后不回显。' },
+    helpRelay:       { en: 'The Voice Relay runs speech recognition and the reply model server-side, so a voice turn stays fast on the device. URL is the relay WebSocket, e.g. ws://host:8080/api/v1/voice/stream. Device ID identifies this reader to the relay and must be unique per device. The token is issued by the relay installer and stored in NVS — it is never shown back. Leaving the URL blank disables the relay; the reader then uses the MiMo + OpenClaw path. The server installer (deploy/install.sh) prints these three values when it finishes; once the relay is configured, the MiMo and OpenClaw settings above are not needed.',
+                       cn: '语音中继在服务器侧完成语音识别和模型回答，设备的语音交互更快。中继地址是 WebSocket 地址，例如 ws://host:8080/api/v1/voice/stream。设备 ID 用于中继识别并统计这台阅读器，每台设备应唯一。令牌由中继安装脚本签发，保存在设备 NVS，保存后不回显。中继地址留空即关闭中继功能，改用 MiMo + OpenClaw 链路。这三个值由服务端安装脚本 deploy/install.sh 在结束时打印；配置中继后，上方 MiMo 与 OpenClaw 可完全留空。' },
     // Action bar (Save / Reset Defaults / Reboot), AIWatch index.html style.
     resetting:       { en: 'Resetting...', cn: '正在恢复…' },
     resetConfirm:    { en: 'Restore all reader settings to factory defaults? Wi-Fi networks, OPDS servers and cloud credentials are kept.',
@@ -1410,7 +1416,7 @@ updateLang(true);
     const oc = '<div class="card"><h3>' + icon('chip') + '<span' + trAttr('ocTitle') + '>' + tr('ocTitle') + '</span></h3>' +
       '<div class="form-row">' +
         '<div class="form-group"><label for="oc-host"' + trAttr('host') + '>' + tr('host') + '</label>' +
-          '<input type="text" id="oc-host" value="' + escapeHtml(cfg.host || '') + '" placeholder="e.g. 118.25.20.250"></div>' +
+          '<input type="text" id="oc-host" value="' + escapeHtml(cfg.host || '') + '" placeholder="e.g. 203.0.113.10"></div>' +
         '<div class="form-group"><label for="oc-port"' + trAttr('port') + '>' + tr('port') + '</label>' +
           '<input type="number" id="oc-port" value="' + (cfg.port || 443) + '" min="1" max="65535" onchange="autoTlsFromPort()"></div>' +
       '</div>' +
@@ -1449,6 +1455,20 @@ updateLang(true);
       help('helpStt') +
       '</div>';
 
+    const relay = '<div class="card"><h3>' + icon('cloud') + '<span' + trAttr('relayTitle') + '>' + tr('relayTitle') + '</span></h3>' +
+      '<div class="form-group"><label for="relay-url"' + trAttr('relayUrlLabel') + '>' + tr('relayUrlLabel') + '</label>' +
+        '<input type="text" id="relay-url" value="' + escapeHtml(cfg.relayUrl || '') + '" placeholder="ws://host:8080/api/v1/voice/stream"></div>' +
+      '<div class="form-row">' +
+        '<div class="form-group"><label for="relay-device-id"' + trAttr('relayDeviceIdLabel') + '>' + tr('relayDeviceIdLabel') + '</label>' +
+          '<input type="text" id="relay-device-id" value="' + escapeHtml(cfg.relayDeviceId || '') + '"></div>' +
+        '<div class="form-group"><label for="relay-token"' + trAttr('token') + '>' + tr('token') + '</label>' +
+          '<input type="password" id="relay-token"' + phAttrs('unchanged', cfg.hasRelayToken) + '></div>' +
+      '</div>' +
+      btnRow('<button class="btn btn-primary" onclick="saveRelay()">' +
+        icon('save') + '<span' + trAttr('save') + '>' + tr('save') + '</span></button>') +
+      help('helpRelay') +
+      '</div>';
+
     const test = '<div class="card"><h3>' + icon('link') + '<span' + trAttr('testTitle') + '>' + tr('testTitle') + '</span></h3>' +
       '<div class="set-row"><span class="set-label"' + trAttr('endpoint') + '>' + tr('endpoint') + '</span>' +
         '<span class="mono" id="oc-endpoint"></span></div>' +
@@ -1464,7 +1484,7 @@ updateLang(true);
       help('helpApprove') +
       '</div>';
 
-    container.innerHTML = oc + stt + test;
+    container.innerHTML = oc + stt + relay + test;
     showEndpoint();
   }
 
@@ -1683,6 +1703,18 @@ updateLang(true);
     const key = document.getElementById('stt-key').value;
     if (key) data.sttKey = key;
     postCloud(data, tr('sttSaved'));
+  }
+
+  function saveRelay() {
+    // The url is always sent (blank clears it and disables the relay); the
+    // token follows the secret rule — blank keeps the stored value.
+    const data = {
+      relayUrl: document.getElementById('relay-url').value.trim(),
+      relayDeviceId: document.getElementById('relay-device-id').value.trim()
+    };
+    const token = document.getElementById('relay-token').value;
+    if (token) data.relayToken = token;
+    postCloud(data, tr('relaySaved'));
   }
 
   // --- OPDS Server Management ---

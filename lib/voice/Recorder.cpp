@@ -46,8 +46,7 @@ bool Recorder::begin(uint32_t sampleRate, uint32_t maxSeconds, uint32_t silenceM
   active_ = true;
   error_ = Error::None;
   LOG_INF("REC", "recording %u s (%u samples @ %u Hz, vad %s)", static_cast<unsigned>(maxSeconds),
-          static_cast<unsigned>(capacity_), static_cast<unsigned>(sampleRate),
-          silenceMs_ > 0 ? "on" : "off");
+          static_cast<unsigned>(capacity_), static_cast<unsigned>(sampleRate), silenceMs_ > 0 ? "on" : "off");
   return true;
 }
 
@@ -68,26 +67,41 @@ Recorder::Event Recorder::poll() {
     return Event::ReadFailed;
   }
 
+  // Per-chunk accumulator for the VAD decision (the running sumSquares_ feeds
+  // the display-level rms only).
+  int64_t chunkSquares = 0;
   for (size_t i = 0; i < got; i++) {
     const int32_t s = buffer_[samples_ + i];
     const int32_t a = s < 0 ? -s : s;
     if (a > peak_) {
       peak_ = a;
     }
-    sumSquares_ += static_cast<int64_t>(s) * s;
+    const int64_t sq = static_cast<int64_t>(s) * s;
+    sumSquares_ += sq;
+    chunkSquares += sq;
     dcSum_ += s;
   }
   samples_ += got;
   updateLevels();
 
   // VAD stop: silence after speech ends the capture early. Timed in *audio*
-  // time, not wall-clock: this chunk's own rms decides which side of the
-  // threshold it is on, and each chunk covers an exact slice of audio
-  // (CHUNK_SAMPLES at the sample rate). A 1.5 s stop is therefore exact, and
-  // a stalled read cannot inflate the counters.
-  if (silenceMs_ > 0) {
-    static constexpr uint32_t chunkMs = (CHUNK_SAMPLES * 1000UL) / 16000;  // 100 ms at 16 kHz
-    if (rms_ >= vadRms_) {
+  // time, not wall-clock: each chunk covers an exact slice of audio
+  // (CHUNK_SAMPLES at the sample rate), so a 1.5 s stop is exact and a stalled
+  // read cannot inflate the counters. Judged on this chunk's own rms — the
+  // running average that updateLevels() computes is dragged far above the
+  // threshold by a loud passage for seconds after speech stops, so using it
+  // here would never fire.
+  if (silenceMs_ > 0 && got > 0) {
+    const uint32_t chunkMs = static_cast<uint32_t>((got * 1000ULL) / 16000);
+    const int32_t chunkRms = static_cast<int32_t>(sqrtf(static_cast<float>(chunkSquares) / static_cast<float>(got)));
+    if (!haveChunkRms_ || chunkRms < minChunkRms_) {
+      minChunkRms_ = chunkRms;
+    }
+    if (!haveChunkRms_ || chunkRms > maxChunkRms_) {
+      maxChunkRms_ = chunkRms;
+    }
+    haveChunkRms_ = true;
+    if (chunkRms >= vadRms_) {
       voicedMs_ += chunkMs;
       silenceRunMs_ = 0;
     } else {
@@ -116,6 +130,11 @@ void Recorder::end() {
   if (active_) {
     MIC.end();
     active_ = false;
+    if (haveChunkRms_) {
+      LOG_INF("REC", "capture levels: chunkRms %ld..%ld (thr %ld, voiced %lu ms, silence %lu ms)",
+              static_cast<long>(minChunkRms_), static_cast<long>(maxChunkRms_), static_cast<long>(vadRms_),
+              static_cast<unsigned long>(voicedMs_), static_cast<unsigned long>(silenceRunMs_));
+    }
   }
   // Recomputed here as well as per chunk so a capture ended early still reports
   // its levels, and so end() is meaningful on an untouched Recorder.
@@ -135,6 +154,9 @@ void Recorder::close() {
   dcOffset_ = 0;
   silenceRunMs_ = 0;
   voicedMs_ = 0;
+  minChunkRms_ = 0;
+  maxChunkRms_ = 0;
+  haveChunkRms_ = false;
   endedBySilence_ = false;
   error_ = Error::None;
 }

@@ -21,6 +21,9 @@ constexpr const char* kOcDevToken = "oc_dvtok";
 constexpr const char* kOcDevKey = "oc_devkey";
 constexpr const char* kSttKey = "stt_key";
 constexpr const char* kSttUrl = "stt_url";
+constexpr const char* kRelayUrl = "relay_url";
+constexpr const char* kRelayToken = "relay_tok";
+constexpr const char* kRelayDeviceId = "relay_devid";
 
 Preferences prefs;
 
@@ -77,6 +80,9 @@ bool CloudConfig::load() {
   getStr(kOcDevKey, deviceKeyHex, sizeof(deviceKeyHex));
   getStr(kSttKey, sttKey, sizeof(sttKey));
   getStr(kSttUrl, sttUrl, sizeof(sttUrl));
+  getStr(kRelayUrl, relayUrl, sizeof(relayUrl));
+  getStr(kRelayToken, relayToken, sizeof(relayToken));
+  getStr(kRelayDeviceId, relayDeviceId, sizeof(relayDeviceId));
   port = prefs.getUShort(kOcPort, 443);
   tls = prefs.getBool(kOcTls, true);
 
@@ -85,9 +91,11 @@ bool CloudConfig::load() {
 
   const bool haveOpenClaw = host[0] != '\0';
   const bool haveStt = sttKey[0] != '\0';
-  LOG_INF("CLD", "loaded: openclaw=%s stt=%s sttUrl=%s", haveOpenClaw ? host : "<unset>", haveStt ? "set" : "<unset>",
-          sttUrl[0] != '\0' ? sttUrl : "<default>");
-  return haveOpenClaw || haveStt;
+  const bool haveRelay = relayUrl[0] != '\0';
+  LOG_INF("CLD", "loaded: openclaw=%s stt=%s sttUrl=%s relay=%s relayToken=%s", haveOpenClaw ? host : "<unset>",
+          haveStt ? "set" : "<unset>", sttUrl[0] != '\0' ? sttUrl : "<default>", haveRelay ? relayUrl : "<unset>",
+          relayToken[0] != '\0' ? "set" : "<unset>");
+  return haveOpenClaw || haveStt || haveRelay;
 }
 
 bool CloudConfig::save() {
@@ -103,6 +111,9 @@ bool CloudConfig::save() {
   ok = putStr(kOcDevKey, deviceKeyHex) && ok;
   ok = putStr(kSttKey, sttKey) && ok;
   ok = putStr(kSttUrl, sttUrl) && ok;
+  ok = putStr(kRelayUrl, relayUrl) && ok;
+  ok = putStr(kRelayToken, relayToken) && ok;
+  ok = putStr(kRelayDeviceId, relayDeviceId) && ok;
   ok = (prefs.putUShort(kOcPort, port) > 0) && ok;
   ok = prefs.putBool(kOcTls, tls) && ok;
 
@@ -111,7 +122,8 @@ bool CloudConfig::save() {
     return false;
   }
 
-  LOG_INF("CLD", "saved: openclaw=%s:%u tls=%d", host[0] != '\0' ? host : "<unset>", port, tls ? 1 : 0);
+  LOG_INF("CLD", "saved: openclaw=%s:%u tls=%d relay=%s", host[0] != '\0' ? host : "<unset>", port, tls ? 1 : 0,
+          relayUrl[0] != '\0' ? relayUrl : "<unset>");
   return true;
 }
 

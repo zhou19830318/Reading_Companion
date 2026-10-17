@@ -802,8 +802,12 @@ void BaseTheme::drawChoiceCards(GfxRenderer& renderer, Rect rect, int cardCount,
     if (card.hint != nullptr && card.hint[0] != '\0') {
       const int labelBlock = labelLineHeight * static_cast<int>(labelLines.size());
       const int fixedBeforeHint = iconSize + iconLabelGap + labelBlock + ruleGap * 2 + 1;
-      const int hintCapacity = std::max(1, (cardHeight - fixedBeforeHint - innerPad * 2) / hintLineHeight);
-      hintLines = renderer.wrappedText(SMALL_FONT_ID, card.hint, textWidth, hintCapacity);
+      // Three cards in landscape leave ~130 px per card: the hint is dropped
+      // (never pushed into the border) when its first line cannot fit whole.
+      const int hintCapacity = (cardHeight - fixedBeforeHint - innerPad * 2) / hintLineHeight;
+      if (hintCapacity > 0) {
+        hintLines = renderer.wrappedText(SMALL_FONT_ID, card.hint, textWidth, hintCapacity);
+      }
     }
     const int ruleBlock = hintLines.empty() ? 0 : ruleGap * 2 + 1;
     const int blockHeight = iconSize + iconLabelGap + labelLineHeight * static_cast<int>(labelLines.size()) +
@@ -839,7 +843,7 @@ void BaseTheme::drawChoiceCards(GfxRenderer& renderer, Rect rect, int cardCount,
   }
 }
 
-Rect BaseTheme::drawPopup(const GfxRenderer& renderer, const char* message) const {
+Rect BaseTheme::drawPopup(const GfxRenderer& renderer, const char* message, const bool withProgressBar) const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int marginX = metrics.popupMarginX;
   const int marginY = metrics.popupMarginY;
@@ -850,7 +854,7 @@ Rect BaseTheme::drawPopup(const GfxRenderer& renderer, const char* message) cons
   const int textWidth = renderer.getTextWidth(UI_12_FONT_ID, message, popupFontFamily);
   const int textHeight = renderer.getLineHeight(UI_12_FONT_ID);
   const int w = textWidth + marginX * 2;
-  const int h = textHeight + marginY * 2;
+  const int h = textHeight + marginY * 2 + (withProgressBar ? textHeight + marginY / 2 : 0);
   const int x = (renderer.getScreenWidth() - w) / 2;
 
   const bool useRoundedPopup = metrics.popupCornerRadius > 0;
@@ -870,13 +874,17 @@ Rect BaseTheme::drawPopup(const GfxRenderer& renderer, const char* message) cons
   return Rect{x, y, w, h};
 }
 
-void BaseTheme::fillPopupProgress(const GfxRenderer& renderer, const Rect& layout, const int progress) const {
+void BaseTheme::fillPopupProgress(const GfxRenderer& renderer, const Rect& layout, const int progress,
+                                  const bool showPercentLabel) const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int barHeight = metrics.popupProgressBarHeight;
   const int barWidth =
       std::max(0, layout.width - metrics.popupMarginX * 2);  // twice the margin in drawPopup to match text width
   const int barX = layout.x + (layout.width - barWidth) / 2;
-  const int barY = layout.y + layout.height - metrics.popupMarginY / 2 - barHeight / 2 - 1;
+  // Anchor the bar just under the title line (not to the box bottom) so
+  // drawPopup's withProgressBar strip stays below the bar for the label.
+  const int barY = layout.y + renderer.getLineHeight(UI_12_FONT_ID) + metrics.popupMarginY * 2 -
+                   metrics.popupMarginY / 2 - barHeight / 2 - 1;
   if (barWidth <= 0 || barHeight <= 0) {
     renderer.displayBuffer(HalDisplay::FAST_REFRESH);
     return;
@@ -890,6 +898,21 @@ void BaseTheme::fillPopupProgress(const GfxRenderer& renderer, const Rect& layou
   }
   if (fillWidth > 0) {
     renderer.fillRect(barX, barY, fillWidth, barHeight, metrics.popupProgressFillInverted);
+  }
+
+  if (showPercentLabel) {
+    const EpdFontFamily::Style popupFontFamily = metrics.popupTextBold ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR;
+    char percentLabel[8];
+    snprintf(percentLabel, sizeof(percentLabel), "%d%%", std::clamp(progress, 0, 100));
+    const int lineHeight = renderer.getLineHeight(UI_12_FONT_ID);
+    const int labelTop = barY + barHeight + metrics.popupMarginY / 2;
+    // Fixed-width clear region so shrinking labels (100% -> 5%) don't ghost.
+    const int clearWidth = renderer.getTextWidth(UI_12_FONT_ID, "100%", popupFontFamily);
+    renderer.fillRect(layout.x + (layout.width - clearWidth) / 2, labelTop, clearWidth, lineHeight,
+                      !metrics.popupTextInverted);
+    const int labelWidth = renderer.getTextWidth(UI_12_FONT_ID, percentLabel, popupFontFamily);
+    renderer.drawText(UI_12_FONT_ID, layout.x + (layout.width - labelWidth) / 2, labelTop, percentLabel,
+                      metrics.popupTextInverted, popupFontFamily);
   }
 
   renderer.displayBuffer(HalDisplay::FAST_REFRESH);

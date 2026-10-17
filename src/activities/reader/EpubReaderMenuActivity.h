@@ -27,7 +27,8 @@ class EpubReaderMenuActivity final : public Activity {
     DELETE_CACHE,
     RULED_LINE_SETTINGS,
     READER_SETTINGS,
-    ASK_AI
+    ASK_AI,
+    DICTIONARY
   };
 
   explicit EpubReaderMenuActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const std::string& title,

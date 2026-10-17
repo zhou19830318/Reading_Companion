@@ -19,8 +19,6 @@
 #include "Epub/converters/ImageToFramebufferDecoder.h"
 #include "Epub/htmlEntities.h"
 
-// Minimum file size (in bytes) to show indexing popup - smaller chapters don't benefit from it
-constexpr size_t MIN_SIZE_FOR_POPUP = 10 * 1024;  // 10KB
 // expat reads the temp HTML through this buffer. Each 1 KB read costs ~65 ms on
 // this card (SD command latency, not wire time), so a 30 KB chapter spent ~2 s
 // here alone during silent indexing. 4 KB cuts the call count 4x for 3 KB more
@@ -1309,10 +1307,10 @@ bool ChapterHtmlSlimParser::parseAndBuildPages() {
     return false;
   }
 
-  // Get file size to decide whether to show indexing popup.
-  if (popupFn && file.size() >= MIN_SIZE_FOR_POPUP) {
-    popupFn();
-  }
+  // Per-chunk parse progress; the caller throttles reports and maps them onto
+  // the second half of the indexing popup progress bar.
+  const uint32_t parseFileSize = file.size();
+  uint32_t bytesParsed = 0;
 
   XML_SetUserData(parser, this);
   XML_SetElementHandler(parser, startElement, endElement);
@@ -1336,6 +1334,12 @@ bool ChapterHtmlSlimParser::parseAndBuildPages() {
       destroyXmlParser(parser);
       file.close();
       return false;
+    }
+
+    if (popupFn && len > 0) {
+      bytesParsed += len;
+      const uint32_t percent = static_cast<uint32_t>(static_cast<uint64_t>(bytesParsed) * 100 / parseFileSize);
+      popupFn(static_cast<int>(percent > 100 ? 100 : percent));
     }
 
     done = file.available() == 0;

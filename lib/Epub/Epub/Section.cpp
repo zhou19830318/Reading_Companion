@@ -23,6 +23,74 @@ struct PageLutEntry {
   uint16_t paragraphIndex;
   uint16_t listItemIndex;
 };
+
+// Indexing progress phases: streaming the spine item to a temp file takes the
+// first half of the bar, HTML parse + page layout the second.
+constexpr int PROGRESS_PARSE_BASE = 50;
+constexpr int PROGRESS_STREAM_SHARE = 50;
+constexpr int PROGRESS_STEP_PERCENT = 5;
+// Every report costs a full fast-LUT panel refresh (~1s on this panel), so
+// reports are spaced by wall time, not by percent alone: a step of at least
+// PROGRESS_STEP_PERCENT after PROGRESS_MIN_INTERVAL_MS, or a keep-alive for
+// slow crawls. Bounded update count keeps indexing from being overwhelmed by
+// its own redraws.
+constexpr uint32_t PROGRESS_MIN_INTERVAL_MS = 4000;
+constexpr uint32_t PROGRESS_MAX_INTERVAL_MS = 8000;
+
+class ProgressThrottle {
+ public:
+  void report(const int percent, const std::function<void(int)>& reportFn) {
+    if (!reportFn || percent == lastPercent_) {
+      return;
+    }
+    const uint32_t now = millis();
+    const uint32_t since = now - lastMs_;
+    const bool stepDue = percent - lastPercent_ >= PROGRESS_STEP_PERCENT && since >= PROGRESS_MIN_INTERVAL_MS;
+    if (!stepDue && since < PROGRESS_MAX_INTERVAL_MS) {
+      return;
+    }
+    lastPercent_ = percent;
+    lastMs_ = now;
+    reportFn(percent);
+  }
+
+  // Records that a report was just emitted without throttling it.
+  void noteReported(const int percent) {
+    lastPercent_ = percent;
+    lastMs_ = millis();
+  }
+
+ private:
+  int lastPercent_ = 0;
+  uint32_t lastMs_ = millis();
+};
+
+// Counts the bytes readFileToStream pushes into the temp file and turns them
+// into streaming-phase progress reports.
+class ProgressPrint final : public Print {
+ public:
+  ProgressPrint(Print& sink, const uint32_t totalBytes, const std::function<void(int)>& reportFn)
+      : sink(sink), totalBytes(totalBytes), reportFn(reportFn) {}
+
+  size_t write(uint8_t b) override { return write(&b, 1); }
+
+  size_t write(const uint8_t* buffer, const size_t size) override {
+    const size_t written = sink.write(buffer, size);
+    bytesWritten += written;
+    if (totalBytes > 0) {
+      throttle.report(static_cast<int>(static_cast<uint64_t>(bytesWritten) * PROGRESS_STREAM_SHARE / totalBytes),
+                      reportFn);
+    }
+    return written;
+  }
+
+ private:
+  Print& sink;
+  const uint32_t totalBytes;
+  const std::function<void(int)>& reportFn;
+  ProgressThrottle throttle;
+  uint32_t bytesWritten = 0;
+};
 }  // namespace
 
 uint32_t Section::onPageComplete(std::unique_ptr<Page> page) {
@@ -154,7 +222,7 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
                                 const uint8_t paragraphAlignment, const uint16_t viewportWidth,
                                 const uint16_t viewportHeight, const bool hyphenationEnabled, const bool embeddedStyle,
                                 const uint8_t imageRendering, const bool focusReadingEnabled,
-                                const std::function<void()>& popupFn) {
+                                const std::function<void(int)>& popupFn) {
   const auto localPath = epub->getSpineItem(spineIndex).href;
   const auto tmpHtmlPath = epub->getCachePath() + "/.tmp_" + std::to_string(spineIndex) + ".html";
 
@@ -162,6 +230,12 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
   {
     const auto sectionsDir = epub->getCachePath() + "/sections";
     Storage.mkdir(sectionsDir.c_str());
+  }
+
+  // Inflated size of the spine item, used to turn streamed bytes into progress.
+  size_t itemSize = 0;
+  if (popupFn) {
+    epub->getItemSize(localPath, &itemSize);
   }
 
   // Retry logic for SD card timing issues
@@ -189,7 +263,8 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
     // silent chapter indexing. 8192 B keeps the transient buffers at 16 KB
     // (two per call, freed on return) against ~56 KB free internal heap.
     const int64_t streamT0 = esp_timer_get_time();
-    success = epub->readItemContentsToStream(localPath, tmpHtml, 8192);
+    ProgressPrint progressOut(tmpHtml, static_cast<uint32_t>(itemSize), popupFn);
+    success = epub->readItemContentsToStream(localPath, progressOut, 8192);
     fileSize = tmpHtml.size();
     LOG_DBG("SCT", "streamed item: %ldms (%u bytes, chunk 8192)",
             static_cast<long>((esp_timer_get_time() - streamT0) / 1000), static_cast<unsigned>(fileSize));
@@ -245,13 +320,33 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
     }
   }
 
+  // Map the parser's own 0-100 progress onto the second half of the bar. The
+  // first parse report is drawn unconditionally: it anchors the bar at the
+  // stream/parse boundary, so even builds too short to hit the report interval
+  // visibly step off 0%.
+  ProgressThrottle parseThrottle;
+  bool parseStarted = false;
+  std::function<void(int)> parsePopupFn;
+  if (popupFn) {
+    parsePopupFn = [&popupFn, &parseThrottle, &parseStarted](const int percent) {
+      const int mapped = PROGRESS_PARSE_BASE + percent / 2;
+      if (!parseStarted) {
+        parseStarted = true;
+        parseThrottle.noteReported(mapped);
+        popupFn(mapped);
+        return;
+      }
+      parseThrottle.report(mapped, popupFn);
+    };
+  }
+
   ChapterHtmlSlimParser visitor(
       epub, tmpHtmlPath, renderer, fontId, lineCompression, extraParagraphSpacing, paragraphAlignment, viewportWidth,
       viewportHeight, hyphenationEnabled, focusReadingEnabled,
       [this, &lut](std::unique_ptr<Page> page, const uint16_t paragraphIndex, const uint16_t listItemIndex) {
         lut.push_back({this->onPageComplete(std::move(page)), paragraphIndex, listItemIndex});
       },
-      embeddedStyle, contentBase, imageBasePath, imageRendering, std::move(tocAnchors), popupFn, cssParser);
+      embeddedStyle, contentBase, imageBasePath, imageRendering, std::move(tocAnchors), parsePopupFn, cssParser);
   Hyphenator::setPreferredLanguage(epub->getLanguage());
   success = visitor.parseAndBuildPages();
 

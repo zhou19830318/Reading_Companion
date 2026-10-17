@@ -6,6 +6,7 @@
 #include "MappedInputManager.h"
 #include "activities/ActivityResult.h"
 #include "components/UITheme.h"
+#include "components/icons/book64.h"
 #include "components/icons/mic64.h"
 #include "components/icons/scholar64.h"
 
@@ -83,10 +84,11 @@ void PowerMenuActivity::render(RenderLock&&) {
   const Rect content{safe.x, contentTop, safe.width, safe.y + safe.height - metrics.verticalSpacing - contentTop};
 
   // tr() takes literal keys, so the cards are spelled out rather than indexed.
-  static_assert(PICK_COUNT == 2, "PowerMenuActivity cards below must match PICK_COUNT");
+  static_assert(PICK_COUNT == 3, "PowerMenuActivity cards below must match PICK_COUNT");
   const ChoiceCard cards[PICK_COUNT] = {
       {tr(STR_ASK_AI), tr(STR_ASK_AI_HINT), Scholar64Icon},
       {tr(STR_VOICE_BOOKMARK), tr(STR_VOICE_BOOKMARK_HINT), Mic64Icon},
+      {tr(STR_DICTIONARY), tr(STR_DICTIONARY_HINT), Book64Icon},
   };
   GUI.drawChoiceCards(renderer, content, PICK_COUNT, selectedIndex, cards);
 

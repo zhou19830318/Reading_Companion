@@ -3,9 +3,10 @@
 #include <cstddef>
 #include <cstdint>
 
-// Credentials and endpoints for the two outbound cloud features, held in NVS:
+// Credentials and endpoints for the outbound cloud features, held in NVS:
 //   - MiMo cloud STT   (lib/voice/SttClient)  -> sttKey / sttUrl
 //   - OpenClaw client  (OpenClawActivity)     -> host / port / path / tls / protocol / token
+//   - Voice Relay      (lib/VoiceRelay)       -> relayUrl / relayToken / relayDeviceId
 // The web UI that edits them is src/network/html/SettingsPage.html
 // (GET/POST /api/cloud).
 //
@@ -30,6 +31,9 @@ class CloudConfig {
   static constexpr size_t STT_KEY_SIZE = 96;
   static constexpr size_t STT_URL_SIZE = 192;
   static constexpr size_t DEVICE_KEY_SIZE = 65;
+  static constexpr size_t RELAY_URL_SIZE = 192;
+  // Matches VoiceRelay::DEVICE_ID_CAP on the device side.
+  static constexpr size_t RELAY_DEVICE_ID_SIZE = 40;
 
   // OpenClaw server. host is the only mandatory field; the rest carry the
   // values an empty NVS would want anyway.
@@ -57,6 +61,14 @@ class CloudConfig {
   // MiMo cloud speech-to-text.
   char sttKey[STT_KEY_SIZE] = {};
   char sttUrl[STT_URL_SIZE] = {};
+
+  // Voice Relay (server-side ASR + LLM). An empty url means the feature is
+  // unconfigured and the device stays on the legacy MiMo + OpenClaw path.
+  // relayToken is a secret (presence flag only in the web API); relayDeviceId
+  // is the X-Device-Id the relay authenticates and counts per device.
+  char relayUrl[RELAY_URL_SIZE] = {};
+  char relayToken[TOKEN_SIZE] = {};
+  char relayDeviceId[RELAY_DEVICE_ID_SIZE] = {};
 
   static CloudConfig& getInstance();
 

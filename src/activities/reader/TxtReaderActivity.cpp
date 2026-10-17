@@ -22,6 +22,13 @@ constexpr size_t CHUNK_SIZE = 8 * 1024;  // 8KB chunk for reading
 // Cache file magic and version
 constexpr uint32_t CACHE_MAGIC = 0x54585449;  // "TXTI"
 constexpr uint8_t CACHE_VERSION = 3;          // Increment when cache format changes
+// Each progress redraw costs a full fast-LUT panel refresh (~1s on this
+// panel), so reports are spaced by wall time: a jump of at least
+// TXT_INDEX_PROGRESS_STEP percent after TXT_INDEX_PROGRESS_MIN_MS, or a
+// keep-alive for slow crawls.
+constexpr uint32_t TXT_INDEX_PROGRESS_MIN_MS = 4000;
+constexpr uint32_t TXT_INDEX_PROGRESS_MAX_MS = 8000;
+constexpr uint32_t TXT_INDEX_PROGRESS_STEP = 5;
 }  // namespace
 
 void TxtReaderActivity::onEnter() {
@@ -142,7 +149,10 @@ void TxtReaderActivity::buildPageIndex() {
 
   LOG_DBG("TRS", "Building page index for %zu bytes...", fileSize);
 
-  GUI.drawPopup(renderer, tr(STR_INDEXING));
+  const Rect indexingPopup = GUI.drawPopup(renderer, tr(STR_INDEXING), true);
+  GUI.fillPopupProgress(renderer, indexingPopup, 0, true);
+  uint32_t lastReportedPercent = 0;
+  uint32_t lastProgressMs = millis();
 
   while (offset < fileSize) {
     std::vector<std::string> tempLines;
@@ -160,6 +170,19 @@ void TxtReaderActivity::buildPageIndex() {
     offset = nextOffset;
     if (offset < fileSize) {
       pageOffsets.push_back(offset);
+    }
+
+    if (fileSize > 0) {
+      const uint32_t percent = static_cast<uint32_t>(static_cast<uint64_t>(offset) * 100 / fileSize);
+      const uint32_t now = millis();
+      const uint32_t since = now - lastProgressMs;
+      const bool stepDue =
+          percent >= lastReportedPercent + TXT_INDEX_PROGRESS_STEP && since >= TXT_INDEX_PROGRESS_MIN_MS;
+      if (percent != lastReportedPercent && (stepDue || since >= TXT_INDEX_PROGRESS_MAX_MS)) {
+        lastReportedPercent = percent;
+        lastProgressMs = now;
+        GUI.fillPopupProgress(renderer, indexingPopup, percent > 100 ? 100 : static_cast<int>(percent), true);
+      }
     }
 
     // Yield to other tasks periodically

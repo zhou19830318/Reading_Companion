@@ -202,4 +202,43 @@ class EpubReaderActivity final : public Activity {
   uint16_t notePage_ = 0;
   uint16_t notePageCount_ = 0;
   char noteExcerpt_[Notes::NoteFormat::EXCERPT_CAP] = {};
+
+  // ── dictionary character picker (short-power quick action) ─────────
+  // A page-local glyph index built from the rendered Page the first time the
+  // picker paints: side up/down walk lines, the front pair walks characters,
+  // Confirm sends the codepoint to DictionaryActivity. Cell coordinates mirror
+  // GfxRenderer::drawText's differential-rounding pen exactly (see
+  // buildDictCellTable), so the box tracks glyphs at any font size. The table
+  // lives in PSRAM (with an internal-heap fallback) and is freed when the
+  // picker closes.
+  struct DictChar {
+    uint32_t cp = 0;
+    int16_t x = 0;    // cell left edge, framebuffer coords (margins applied)
+    int16_t adv = 0;  // cell advance width, >= 1 px
+    uint8_t line = 0;
+  };
+  struct DictLine {
+    int16_t y = 0;  // line top, framebuffer coords
+    uint16_t first = 0;
+    uint16_t count = 0;
+  };
+  bool dictPickActive_ = false;
+  bool dictShowHelp_ = false;        // one hint overlay until the first move
+  bool dictCellTableValid_ = false;  // table matches the currently rendered page
+  DictChar* dictChars_ = nullptr;
+  DictLine* dictLines_ = nullptr;
+  size_t dictCharsCap_ = 0;
+  size_t dictLinesCap_ = 0;
+  size_t dictCharCount_ = 0;
+  size_t dictLineCount_ = 0;
+  size_t dictCursor_ = 0;
+  unsigned long dictEnterMs_ = 0;  // guards against the menu's orphaned Confirm release
+  // Entry from the quick-action menu sets ignoreNextConfirmRelease for the
+  // orphaned Confirm edge; moveDictCursor clears it in case none arrives.
+  void enterDictPick();
+  void exitDictPick();
+  void freeDictCellTable();
+  void buildDictCellTable(const Page& page, int fontId, int xOffset, int yOffset);
+  void moveDictCursor(int dChar, int dLine);
+  void launchDictionaryLookup();
 };

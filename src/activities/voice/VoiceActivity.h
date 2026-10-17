@@ -6,12 +6,17 @@
 #include <Recorder.h>
 #include <SttClient.h>
 #include <SttCodec.h>
+#include <VoiceRelayCodec.h>
 
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 
 #include "activities/Activity.h"
+
+namespace VoiceRelay {
+class Client;
+}
 
 // Voice conversation screen — P3-S Phase 1 (docs/voice-openclaw-port-plan.md
 // §8): one user-initiated round trip per press.
@@ -40,7 +45,10 @@
 // hardware, mirroring how OpenClawActivity's probe screen preceded a real UI.
 class VoiceActivity final : public Activity {
  public:
-  VoiceActivity(GfxRenderer& renderer, MappedInputManager& mappedInput) : Activity("Voice", renderer, mappedInput) {}
+  // Defined out-of-line (VoiceActivity.cpp): the unique_ptr<VoiceRelay::Client>
+  // member only sees a forward declaration here, and an inline constructor
+  // would require the complete type wherever this header is included.
+  VoiceActivity(GfxRenderer& renderer, MappedInputManager& mappedInput);
   ~VoiceActivity() override;
 
   // Arms note mode before onEnter(): the transcript lands in the book's note
@@ -117,9 +125,13 @@ class VoiceActivity final : public Activity {
   // Listening → Transcribing). Paired with Recorder::VOICED_MIN_MS so a
   // cough alone does not trigger a send.
   static constexpr uint32_t SILENCE_STOP_MS = 1500;
-  // Chunk-RMS speech threshold, from the measured levels of this microphone
-  // (speech ≈1600-4000, quiet room well below 1000).
-  static constexpr int32_t VAD_RMS_THRESHOLD = 1200;
+  // Chunk-RMS speech threshold. Measured on this hardware: room floor 30-80
+  // RMS, speech peaks near 9000 but most speech chunks sit below even 500 --
+  // three real captures at 500 logged only 100-300 ms of voiced audio (under
+  // Recorder::VOICED_MIN_MS), so every round still ran to the duration cap.
+  // 250 keeps ~3x headroom over the floor, and VOICED_MIN_MS still rejects a
+  // lone cough because it requires 400 ms of sustained level.
+  static constexpr int32_t VAD_RMS_THRESHOLD = 250;
   // STT endpoint override and API key, read from the same SD files
   // MicrophoneTest uses. Members rather than locals: the loop task's stack is
   // small and the config pointers must outlive the blocking upload.
@@ -171,6 +183,29 @@ class VoiceActivity final : public Activity {
   void sendPending();
   void onSessionNotify();
   static void onSessionNotifyTrampoline(void* ctx);
+
+  // ── Voice Relay (realtime path, chat mode + auto send only) ───────────
+  // The relay replaces the STT upload + chat.send halves of one round trip:
+  // the captured PCM is streamed live, the transcript and reply arrive as
+  // events, and any relay failure falls back to the legacy path once, on the
+  // same capture. See docs/Reading_Companion_realtime_agent .md §5/§8.
+  bool relayConfigured();
+  // Note mode / custom-question mode: the transcript is handed to the keyboard
+  // instead of the chat. Dictation rounds use the relay's STT-only pipeline.
+  bool dictationMode() const { return noteContext_.valid || questionInput_; }
+  bool ensureRelay();
+  void startRelayRound();
+  void pumpRelayCapture();
+  void loopRelaySending();
+  void settleRelaySuccess();
+  void handleRelayErrorEvent();
+  void relayTransportFailed();
+  void relayFallbackOrFail(const char* reason);
+  void relayClose();
+  const char* relayErrorReason() const;
+  void onRelayEvent(const VoiceRelay::Event& event);
+  static void onRelayEventTrampoline(void* ctx, const VoiceRelay::Event& event);
+
   void fail(const char* reason);
   void resetRoundTrip();
   // Stage row "Record > Transcribe > Send > Reply": the stage the round trip
@@ -252,6 +287,12 @@ class VoiceActivity final : public Activity {
   // keyboard is on top and must not be disturbed by a side capture.
   DictationState dictationState_ = DictationState::Off;
   const char* dictationError_ = nullptr;  // translated static, never freed
+  // Keyboard PTT dictation over relay: armed by dictationStart() when the
+  // relay is configured, driven by dictationPoll(). Separate from relayRound_
+  // so a keyboard round never steers the panel's history/answer routing; the
+  // end flag covers the wait after Complete, like relayEndSent_ on the panel.
+  bool dictationRelay_ = false;
+  bool dictationRelayEndSent_ = false;
   static bool dictationStartTrampoline(void* ctx);
   static int dictationPollTrampoline(void* ctx);
   static const char* dictationTextTrampoline(void* ctx);
@@ -360,4 +401,33 @@ class VoiceActivity final : public Activity {
   // Back from the settled summary returns to the day list it was started from
   // instead of leaving the activity.
   bool cameFromHistory_ = false;
+
+  // ── Voice Relay per-activity state ──────────────────────────────────────
+  // The client is allocated lazily on the first relay round and kept for the
+  // activity's lifetime (~2.5 KB heap: socket + framer + event scratch);
+  // relayReply_ is the accumulated llm.delta text (CHAT_BUF_CAP+1, PSRAM
+  // first), both released in onExit(). relayRound_ stays true through Answer
+  // so the settled panel and the history append read the relay's reply — the
+  // legacy Session's buffers hold the PREVIOUS round's text.
+  std::unique_ptr<VoiceRelay::Client> relay_;
+  bool relayRound_ = false;
+  // One automatic legacy fallback per capture (docs §5: single-round failure
+  // clears the relay state, then decides on the fallback; the capture buffer
+  // is still intact, so the fallback never costs another recording).
+  bool relayFallbackTried_ = false;
+  bool relayEndSent_ = false;  // audio.end on the wire; only session.done/error left
+  // Flags set by the event notifier (inside relay_->poll() on this task):
+  bool relayDone_ = false;
+  bool relayError_ = false;
+  bool relayRetryable_ = false;
+  VoiceRelay::ErrorCode relayErrorCode_ = VoiceRelay::ErrorCode::None;
+  // PCM cursor: how much of recorder_ has been handed to the relay. Chunks
+  // read while the dial is still handshaking are not lost — they flush from
+  // the capture buffer once the session goes Active.
+  size_t relaySentSamples_ = 0;
+  // Waiting read-out base for the relay Sending state (millis() when the
+  // capture ended), paired with lastWaitShownSec_ like the legacy branch.
+  uint32_t relayEndMs_ = 0;
+  char* relayReply_ = nullptr;
+  size_t relayReplyLen_ = 0;
 };

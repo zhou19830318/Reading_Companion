@@ -82,6 +82,10 @@ class Recorder {
   int32_t peak() const { return peak_; }
   int32_t rms() const { return rms_; }
   int32_t dcOffset() const { return dcOffset_; }
+  // Chunk-RMS range seen during the capture — the values the VAD judged on
+  // (0/0 when no chunk was read). Diagnostics for threshold tuning.
+  int32_t minChunkRms() const { return minChunkRms_; }
+  int32_t maxChunkRms() const { return maxChunkRms_; }
   // Wall-clock ms of audio above the VAD threshold (0 when the VAD is off).
   uint32_t voicedMs() const { return voicedMs_; }
   // True once the VAD decided the capture is over (Complete was returned for
@@ -110,6 +114,9 @@ class Recorder {
   uint32_t silenceRunMs_ = 0;
   uint32_t voicedMs_ = 0;
   int32_t vadRms_ = 0;
+  int32_t minChunkRms_ = 0;
+  int32_t maxChunkRms_ = 0;
+  bool haveChunkRms_ = false;
   bool endedBySilence_ = false;
   unsigned long startMs_ = 0;
   bool active_ = false;

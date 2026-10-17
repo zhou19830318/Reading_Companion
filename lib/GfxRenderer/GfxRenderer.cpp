@@ -1482,9 +1482,11 @@ std::vector<std::string> GfxRenderer::wrappedText(const int fontId, const char* 
   std::string remaining = text;
   std::string currentLine;
 
-  // Everything still unwrapped folds into one last, ellipsized line.
-  const auto finish = [&]() {
-    const std::string lastContent = currentLine.empty() ? remaining : currentLine + " " + remaining;
+  // Everything still unwrapped folds into one last, ellipsized line. `unplaced`
+  // must exclude any token prefix already emitted on earlier lines — passing
+  // the whole `remaining` repeats that prefix on the final line.
+  const auto finish = [&](const std::string& unplaced) {
+    const std::string lastContent = currentLine.empty() ? unplaced : currentLine + " " + unplaced;
     lines.push_back(truncatedText(fontId, lastContent.c_str(), maxWidth, style));
     remaining.clear();
     currentLine.clear();
@@ -1495,7 +1497,7 @@ std::vector<std::string> GfxRenderer::wrappedText(const int fontId, const char* 
 
   while (!remaining.empty()) {
     if (!lastLineAvailable()) {
-      if (!outOfLines()) finish();
+      if (!outOfLines()) finish(remaining);
       return lines;
     }
 
@@ -1517,7 +1519,7 @@ std::vector<std::string> GfxRenderer::wrappedText(const int fontId, const char* 
     size_t taken = 0;
     while (taken < tokenLen) {
       if (!lastLineAvailable()) {
-        if (!outOfLines()) finish();
+        if (!outOfLines()) finish(remaining.substr(taken));
         return lines;
       }
       const std::string tail = remaining.substr(taken, tokenLen - taken);
@@ -1551,7 +1553,7 @@ std::vector<std::string> GfxRenderer::wrappedText(const int fontId, const char* 
         lines.push_back(std::move(currentLine));
         currentLine.clear();
       } else {
-        if (!outOfLines()) finish();
+        if (!outOfLines()) finish(remaining);
         return lines;
       }
     }

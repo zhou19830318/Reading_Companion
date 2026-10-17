@@ -10,9 +10,12 @@
 #include <JsonSettingsIO.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <Utf8.h>
+#include <esp_heap_caps.h>
 #include <esp_system.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <iterator>
@@ -22,6 +25,7 @@
 #include "BookmarkEntry.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "DictionaryActivity.h"
 #include "EpubReaderBookmarksActivity.h"
 #include "EpubReaderChapterSelectionActivity.h"
 #include "EpubReaderFootnotesActivity.h"
@@ -266,6 +270,8 @@ void EpubReaderActivity::onEnter() {
 void EpubReaderActivity::onExit() {
   Activity::onExit();
 
+  freeDictCellTable();
+
   // Reset orientation back to portrait for the rest of the UI
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
 
@@ -338,20 +344,29 @@ void EpubReaderActivity::launchVoiceNote() {
   });
 }
 
-// Short power press opens the quick-action chooser: the AI question screen or
-// the voice bookmark. The chooser returns PowerMenuResult{index}; Back cancels
-// and only repaints the page. Both children are pushed from this handler, so
-// no explicit requestUpdate() is needed — ActivityManager runs one after the
-// handler returns (Activity::startActivityForResult).
+// Short power press opens the quick-action chooser: the AI question screen,
+// the voice bookmark, or the dictionary character picker. The chooser returns
+// PowerMenuResult{index}; Back cancels and only repaints the page. Ask-AI and
+// the voice bookmark push their child from this handler (no explicit
+// requestUpdate() needed — ActivityManager runs one after the handler
+// returns); the dictionary picker arms the in-reader mode instead.
 void EpubReaderActivity::launchPowerMenu() {
   startActivityForResult(std::make_unique<PowerMenuActivity>(renderer, mappedInput),
                          [this](const ActivityResult& result) {
                            if (result.isCancelled) return;
                            const auto* pick = std::get_if<PowerMenuResult>(&result.data);
-                           if (pick != nullptr && pick->index == PowerMenuActivity::PICK_ASK_AI) {
-                             launchAskAi();
-                           } else {
-                             launchVoiceNote();
+                           if (pick == nullptr) return;
+                           switch (pick->index) {
+                             case PowerMenuActivity::PICK_ASK_AI:
+                               launchAskAi();
+                               break;
+                             case PowerMenuActivity::PICK_VOICE_NOTE:
+                               launchVoiceNote();
+                               break;
+                             case PowerMenuActivity::PICK_DICTIONARY:
+                             default:
+                               enterDictPick();
+                               break;
                            }
                          });
 }
@@ -365,6 +380,218 @@ void EpubReaderActivity::launchAskAi() {
   auto ask = std::make_unique<AskAiActivity>(renderer, mappedInput);
   ask->setBookContext(epub, noteBookBase_, noteSpine_, notePage_, notePageCount_);
   startActivityForResult(std::move(ask), [this](const ActivityResult&) { noteArmed_ = false; });
+}
+
+// ── dictionary character picker ─────────────────────────────────────────────
+
+void EpubReaderActivity::enterDictPick() {
+  dictPickActive_ = true;
+  dictShowHelp_ = true;
+  dictCursor_ = 0;
+  dictCellTableValid_ = false;
+  automaticPageTurnActive = false;
+  dictEnterMs_ = millis();
+  // The Confirm release that committed the quick-action menu is about to reach
+  // this loop; the handler below swallows it within a short window instead of
+  // looking up the first character.
+  ignoreNextConfirmRelease = true;
+  requestUpdate();
+}
+
+void EpubReaderActivity::exitDictPick() {
+  dictPickActive_ = false;
+  dictShowHelp_ = false;
+  freeDictCellTable();
+}
+
+void EpubReaderActivity::freeDictCellTable() {
+  if (dictChars_ != nullptr) {
+    heap_caps_free(dictChars_);
+    dictChars_ = nullptr;
+  }
+  if (dictLines_ != nullptr) {
+    heap_caps_free(dictLines_);
+    dictLines_ = nullptr;
+  }
+  dictCharsCap_ = 0;
+  dictLinesCap_ = 0;
+  dictCharCount_ = 0;
+  dictLineCount_ = 0;
+  dictCellTableValid_ = false;
+}
+
+// Builds the per-glyph cell index for one rendered page. The pen walk mirrors
+// GfxRenderer::drawText exactly — same skips (niqqud, combining marks), same
+// ligature step, same differential rounding of (previous advance + kerning) —
+// so cells track the glyphs at any font size or spacing. PSRAM first, internal
+// heap as fallback; the table is freed when the picker closes.
+void EpubReaderActivity::buildDictCellTable(const Page& page, const int fontId, const int xOffset, const int yOffset) {
+  dictCellTableValid_ = false;
+  dictCharCount_ = 0;
+  dictLineCount_ = 0;
+
+  const auto& fontMap = renderer.getFontMap();
+  const auto fontIt = fontMap.find(fontId);
+  if (fontIt == fontMap.end()) {
+    LOG_ERR("ERS", "dict picker: font %d not registered", fontId);
+    return;
+  }
+  const auto& font = fontIt->second;
+
+  // Pass 1: count selectable cells (an upper bound — combining marks and
+  // ligatures only shrink it) and the text lines that carry any.
+  size_t charCount = 0;
+  size_t lineCount = 0;
+  for (const auto& el : page.elements) {
+    if (el->getTag() != TAG_PageLine) continue;
+    const auto& line = static_cast<const PageLine&>(*el);
+    if (line.getBlock()->getBlockStyle().isRtl) continue;  // the walk assumes LTR
+    size_t lineChars = 0;
+    for (const auto& w : line.getBlock()->getWords()) {
+      const unsigned char* p = reinterpret_cast<const unsigned char*>(w.c_str());
+      while (utf8NextCodepoint(&p) != 0) lineChars++;
+    }
+    if (lineChars == 0) continue;
+    charCount += lineChars;
+    lineCount++;
+  }
+  if (charCount == 0 || lineCount == 0) return;
+
+  if (dictCharsCap_ < charCount) {
+    if (dictChars_ != nullptr) {
+      heap_caps_free(dictChars_);
+      dictChars_ = nullptr;
+      dictCharsCap_ = 0;
+    }
+    dictChars_ = static_cast<DictChar*>(heap_caps_malloc(charCount * sizeof(DictChar), MALLOC_CAP_SPIRAM));
+    if (dictChars_ == nullptr) {
+      dictChars_ =
+          static_cast<DictChar*>(heap_caps_malloc(charCount * sizeof(DictChar), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    }
+    if (dictChars_ == nullptr) {
+      LOG_ERR("ERS", "dict picker OOM: %u chars (%u bytes)", static_cast<unsigned>(charCount),
+              static_cast<unsigned>(charCount * sizeof(DictChar)));
+      return;
+    }
+    dictCharsCap_ = charCount;
+  }
+  if (dictLinesCap_ < lineCount) {
+    if (dictLines_ != nullptr) {
+      heap_caps_free(dictLines_);
+      dictLines_ = nullptr;
+      dictLinesCap_ = 0;
+    }
+    dictLines_ =
+        static_cast<DictLine*>(heap_caps_malloc(lineCount * sizeof(DictLine), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    if (dictLines_ == nullptr) {
+      LOG_ERR("ERS", "dict picker OOM: %u lines", static_cast<unsigned>(lineCount));
+      return;
+    }
+    dictLinesCap_ = lineCount;
+  }
+
+  // Pass 2: walk every word and emit one cell per glyph.
+  size_t lineIdx = 0;
+  for (const auto& el : page.elements) {
+    if (el->getTag() != TAG_PageLine) continue;
+    const auto& lineEl = static_cast<const PageLine&>(*el);
+    const auto* block = lineEl.getBlock().get();
+    if (block->getBlockStyle().isRtl) continue;
+    const auto& words = block->getWords();
+    const auto& wordXpos = block->getWordXpos();
+    const auto& wordStyles = block->getWordStyles();
+    if (words.size() != wordXpos.size() || words.size() != wordStyles.size()) continue;
+
+    const int lineTop = lineEl.yPos + yOffset;
+    const size_t firstChar = dictCharCount_;
+    for (size_t i = 0; i < words.size(); i++) {
+      const std::string& w = words[i];
+      const auto style = wordStyles[i];
+      int penX = lineEl.xPos + wordXpos[i] + xOffset;
+      int32_t prevAdvanceFP = 0;
+      uint32_t prevCp = 0;
+      const unsigned char* p = reinterpret_cast<const unsigned char*>(w.c_str());
+      while (*p != '\0') {
+        uint32_t cp = utf8NextCodepoint(&p);
+        if (cp == 0) break;
+        if (cp >= 0x0591 && cp <= 0x05C7) continue;  // Hebrew niqqud: skipped by drawText too
+        if (utf8IsCombiningMark(cp)) continue;       // drawn over the base glyph, no cell
+        const char* cursor = reinterpret_cast<const char*>(p);
+        cp = font.applyLigatures(cp, cursor, style);
+        p = reinterpret_cast<const unsigned char*>(cursor);
+        if (prevCp != 0) {
+          penX += fp4::toPixel(prevAdvanceFP + font.getKerning(prevCp, cp, style));
+        }
+        const EpdGlyph* glyph = font.getGlyph(cp, style);
+        int32_t advanceFP = glyph != nullptr ? glyph->advanceX : 0;
+        if ((style & (EpdFontFamily::SUP | EpdFontFamily::SUB)) != 0) {
+          advanceFP = (advanceFP + 1) / 2;
+        }
+        if (dictCharCount_ < dictCharsCap_) {
+          DictChar& cell = dictChars_[dictCharCount_++];
+          cell.cp = cp;
+          cell.x = static_cast<int16_t>(penX);
+          cell.adv = static_cast<int16_t>(std::max(1, fp4::toPixel(advanceFP)));
+          cell.line = static_cast<uint8_t>(lineIdx);
+        }
+        prevAdvanceFP = advanceFP;
+        prevCp = cp;
+      }
+    }
+    if (dictCharCount_ > firstChar) {
+      dictLines_[lineIdx] = DictLine{static_cast<int16_t>(lineTop), static_cast<uint16_t>(firstChar),
+                                     static_cast<uint16_t>(dictCharCount_ - firstChar)};
+      lineIdx++;
+    }
+  }
+  dictLineCount_ = lineIdx;
+  if (dictCursor_ >= dictCharCount_) dictCursor_ = 0;
+  dictCellTableValid_ = dictCharCount_ > 0 && dictLineCount_ > 0;
+  LOG_INF("ERS", "dict picker: %u chars on %u lines", static_cast<unsigned>(dictCharCount_),
+          static_cast<unsigned>(dictLineCount_));
+}
+
+void EpubReaderActivity::moveDictCursor(const int dChar, const int dLine) {
+  if (!dictCellTableValid_) return;
+  bool moved = false;
+  if (dLine != 0) {
+    const int curLine = static_cast<int>(dictChars_[dictCursor_].line) + dLine;
+    if (curLine >= 0 && curLine < static_cast<int>(dictLineCount_)) {
+      const DictLine& ln = dictLines_[curLine];
+      const int curCenter = dictChars_[dictCursor_].x + dictChars_[dictCursor_].adv / 2;
+      size_t best = ln.first;
+      int bestDist = INT16_MAX;
+      for (size_t i = ln.first; i < ln.first + ln.count && i < dictCharCount_; i++) {
+        const int center = dictChars_[i].x + dictChars_[i].adv / 2;
+        const int dist = std::abs(center - curCenter);
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = i;
+        }
+      }
+      dictCursor_ = best;
+      moved = true;
+    }
+  } else if (dChar != 0) {
+    const int next = static_cast<int>(dictCursor_) + dChar;
+    if (next >= 0 && next < static_cast<int>(dictCharCount_)) {
+      dictCursor_ = static_cast<size_t>(next);
+      moved = true;
+    }
+  }
+  if (moved) {
+    dictShowHelp_ = false;
+    ignoreNextConfirmRelease = false;  // any orphaned menu edge is long gone
+    requestUpdate();
+  }
+}
+
+void EpubReaderActivity::launchDictionaryLookup() {
+  if (!dictCellTableValid_ || dictCursor_ >= dictCharCount_) return;
+  const uint32_t cp = dictChars_[dictCursor_].cp;
+  LOG_INF("ERS", "dictionary lookup for U+%04X", static_cast<unsigned>(cp));
+  startActivityForResult(std::make_unique<DictionaryActivity>(renderer, mappedInput, cp),
+                         [this](const ActivityResult&) { requestUpdate(); });  // repaint page + cursor box
 }
 
 void EpubReaderActivity::loop() {
@@ -432,6 +659,37 @@ void EpubReaderActivity::loop() {
   if (showBookmarkMessage && (millis() - bookmarkMessageTime) >= ReaderUtils::BOOKMARK_MESSAGE_DURATION_MS) {
     showBookmarkMessage = false;
     requestUpdate();
+  }
+
+  // ── Dictionary character picker owns every input while active ──────────
+  // The front pair walks characters, side up/down walks lines, Confirm opens
+  // the lookup, Back leaves the mode. The block runs before every other
+  // handler so both press and release edges die here: ReaderUtils::
+  // detectPageTurn can fire on releases (long-press behavior) or tilt, and
+  // the Confirm/turn/Back releases below would otherwise leak through.
+  if (dictPickActive_) {
+    if (mappedInput.wasPressed(MappedInputManager::Button::Up)) {
+      moveDictCursor(0, -1);
+    } else if (mappedInput.wasPressed(MappedInputManager::Button::Down)) {
+      moveDictCursor(0, 1);
+    } else if (mappedInput.wasPressed(MappedInputManager::Button::Left)) {
+      moveDictCursor(-1, 0);
+    } else if (mappedInput.wasPressed(MappedInputManager::Button::Right)) {
+      moveDictCursor(1, 0);
+    } else if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      if (ignoreNextConfirmRelease && millis() - dictEnterMs_ < 1000) {
+        ignoreNextConfirmRelease = false;  // the quick-action menu's own release
+      } else {
+        ignoreNextConfirmRelease = false;
+        launchDictionaryLookup();
+      }
+    } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+      // Short Back leaves the picker; the page is already on the panel, the
+      // repaint just drops the cursor box and restores the status bar title.
+      exitDictPick();
+      requestUpdate();
+    }
+    return;
   }
 
   // Enter reader menu activity on short-press Confirm. A long-press that fired a bound
@@ -762,6 +1020,12 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       launchAskAi();
       break;
     }
+    case EpubReaderMenuActivity::MenuAction::DICTIONARY: {
+      // Same picker the quick-action menu opens: box a glyph, Confirm looks
+      // the character up on the relay's dictionary endpoint.
+      enterDictPick();
+      break;
+    }
     case EpubReaderMenuActivity::MenuAction::VOICE_NOTE: {
       launchVoiceNote();
       break;
@@ -1089,9 +1353,20 @@ void EpubReaderActivity::render(RenderLock&& lock) {
                                   SETTINGS.imageRendering, SETTINGS.focusReadingEnabled)) {
       LOG_DBG("ERS", "Cache not found, building...");
 
-      GUI.drawPopup(renderer, tr(STR_INDEXING));
+      // Drawn before createSectionFile so the popup covers the SD streaming
+      // phase; the parser then drives the bar with parse progress.
+      const Rect indexingPopup = GUI.drawPopup(renderer, tr(STR_INDEXING), true);
+      GUI.fillPopupProgress(renderer, indexingPopup, 0, true);
 
-      const auto popupFn = [this]() { GUI.drawPopup(renderer, tr(STR_INDEXING)); };
+      bool popupPendingRedraw = true;
+      const auto popupFn = [this, indexingPopup, &popupPendingRedraw](const int percent) {
+        LOG_DBG("ERS", "Indexing progress: %d%%", percent);
+        if (popupPendingRedraw) {
+          popupPendingRedraw = false;
+          GUI.drawPopup(renderer, tr(STR_INDEXING), true);
+        }
+        GUI.fillPopupProgress(renderer, indexingPopup, percent, true);
+      };
 
       if (!section->createSectionFile(SETTINGS.getReaderFontId(), SETTINGS.getReaderLineCompression(),
                                       SETTINGS.extraParagraphSpacing, SETTINGS.paragraphAlignment, viewportWidth,
@@ -1196,7 +1471,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
             stagedKey_.page, stagedKey_.pageCount, stagedKey_.vw, stagedKey_.vh, stagedKey_.fontId, stageKey.spine,
             stageKey.page, stageKey.pageCount, stageKey.vw, stageKey.vh, stageKey.fontId);
   }
-  if (stagedValid_ && stagedKey_ == stageKey) {
+  if (stagedValid_ && stagedKey_ == stageKey && !dictPickActive_) {
     currentPageFootnotes = std::move(stagedFootnotes_);
     const auto start = millis();
     displayStagedContents();
@@ -1223,8 +1498,12 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     renderContents(std::move(p), orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft);
     LOG_DBG("ERS", "Rendered page in %dms", millis() - start);
   }
-  silentIndexNextChapterIfNeeded(viewportWidth, viewportHeight);
-  if (section) {
+  // Staging prepackages the next page into PSRAM; with the picker up, the
+  // "next page" is a guess the reader may never make, and every cursor move
+  // would redo it (~1s). Skip it while picking; it resumes on the next render
+  // after the picker closes.
+  if (!dictPickActive_) silentIndexNextChapterIfNeeded(viewportWidth, viewportHeight);
+  if (section && !dictPickActive_) {
     // Prepare the page we are most likely to show next while the current page
     // sits idle on screen: lay it out and render BW plus both grayscale planes
     // into PSRAM. Cold chapters cost up to ~900ms of random SD reads and
@@ -1638,6 +1917,42 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);
   drawRuledLines(*page, fontId, orientedMarginTop, orientedMarginLeft, orientedMarginRight);
   renderStatusBar();
+
+  // Dictionary picker overlay: index the page's glyphs on the first paint,
+  // then box the cursor cell — plus a one-shot control hint — into the BW
+  // frame before the display calls below push it. The whole frame is already
+  // BW-only (no staging while picking), so positing after status bar is safe.
+  if (dictPickActive_) {
+    if (!dictCellTableValid_) {
+      buildDictCellTable(*page, fontId, orientedMarginLeft, orientedMarginTop);
+    }
+    if (dictCellTableValid_) {
+      const DictChar& cell = dictChars_[dictCursor_ < dictCharCount_ ? dictCursor_ : 0];
+      const int lineH = renderer.getLineHeight(fontId);
+      renderer.drawRect(cell.x - 1, dictLines_[cell.line].y + 1, cell.adv + 2, lineH - 2, 2, true);
+      if (dictShowHelp_) {
+        const int uiFont = UI_10_FONT_ID;
+        const int uiLineH = renderer.getLineHeight(uiFont);
+        const int maxTextW = renderer.getScreenWidth() - 24;
+        const std::vector<std::string> helpLines = renderer.wrappedText(uiFont, tr(STR_DICT_PICK_HINT), maxTextW, 3);
+        int textW = 0;
+        for (const std::string& line : helpLines) {
+          textW = std::max(textW, renderer.getTextWidth(uiFont, line.c_str()));
+        }
+        const int boxW = std::min(renderer.getScreenWidth() - 8, textW + 16);
+        const int boxH = uiLineH * static_cast<int>(helpLines.size()) + 10;
+        const int bx = std::max(4, (renderer.getScreenWidth() - boxW) / 2);
+        const int by = renderer.getScreenHeight() - UITheme::getStatusBarHeight() - boxH - 6;
+        renderer.fillRect(bx, by, boxW, boxH, true);
+        int ty = by + 5;
+        for (const std::string& line : helpLines) {
+          const int lineW = renderer.getTextWidth(uiFont, line.c_str());
+          renderer.drawText(uiFont, bx + std::max(8, (boxW - lineW) / 2), ty, line.c_str(), false);
+          ty += uiLineH;
+        }
+      }
+    }
+  }
   const auto tBwRender = millis();
 
   if (pageHasImages) {
@@ -1799,6 +2114,9 @@ void EpubReaderActivity::renderStatusBar() const {
     if (statusBarHeight == 0 || statusBarHeight == UITheme::getInstance().getProgressBarHeight()) {
       textYOffset += UITheme::getInstance().getMetrics().statusBarVerticalMargin;
     }
+
+  } else if (dictPickActive_) {
+    title = tr(STR_DICTIONARY);
 
   } else if (SETTINGS.statusBarTitle == CrossPointSettings::STATUS_BAR_TITLE::CHAPTER_TITLE) {
     title = tr(STR_UNNAMED);

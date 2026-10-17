@@ -301,6 +301,13 @@ class CrossPointSettings {
   // the transcript), 1 = auto (send as soon as STT lands). Toggled on the
   // voice screen itself with Right, persisted with the rest of settings.json.
   uint8_t voiceAutoSend = 0;
+  // Voice Relay preference (live in SettingsList): 1 = prefer the relay when
+  // one is configured on the web page (CloudConfig.relayUrl + token) and fall
+  // back to MiMo + OpenClaw per the 14-code retry policy; 0 = never dial the
+  // relay (legacy path only). With no relay URL configured both values behave
+  // identically, so the default-on is safe for existing installs. Kept
+  // unguarded like voiceAutoSend above.
+  uint8_t voiceRelayEnabled = 1;
   // Quick Resume: keep current content visible with moon icon instead of showing a static sleep screen.
   uint8_t quickResumeSleepScreen = QUICK_RESUME_NEVER;
 

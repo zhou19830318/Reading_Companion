@@ -7,6 +7,7 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 // clang-format on
+#include <CloudConfig.h>
 #include <Epub/Page.h>
 #include <Epub/Section.h>
 #include <I18n.h>
@@ -134,8 +135,19 @@ void AskAiActivity::beginAsk(const char* question, Scope scope) {
                                requestUpdate();
                                return;
                              }
-                             ensureConnected();
+                             if (relayConfigured()) {
+                               beginRelayAsk();
+                             } else {
+                               ensureConnected();
+                             }
                            });
+    return;
+  }
+  // Voice relay on: the question rides the relay's text endpoint instead of
+  // the OpenClaw gateway (AI-01 over relay). Checked per ask, like the voice
+  // screen, so flipping the setting applies to the next question.
+  if (relayConfigured()) {
+    beginRelayAsk();
     return;
   }
   ensureConnected();
@@ -241,7 +253,67 @@ void AskAiActivity::exitSelectionView() {
   scrollY_ = 0;
 }
 
+bool AskAiActivity::relayConfigured() {
+  if (SETTINGS.voiceRelayEnabled == 0) return false;
+  CLOUD_CFG.load();  // NVS, idempotent; the same source the voice screen reads
+  return CLOUD_CFG.relayUrl[0] != '\0' && CLOUD_CFG.relayToken[0] != '\0' && CLOUD_CFG.relayDeviceId[0] != '\0';
+}
+
+void AskAiActivity::beginRelayAsk() {
+  // Same prompt bytes as the OpenClaw path (question + scope context); the
+  // relay's LLM turn runs the same system prompt server-side.
+  if (!buildPrompt()) {
+    fail(tr(STR_ASK_NO_TEXT));
+    return;
+  }
+  relayRound_ = true;
+  if (relayReply_ == nullptr) {
+    relayReply_ = makeUniqueNoThrow<char[]>(VoiceRelay::CHAT_TEXT_CAP + 1);
+    if (relayReply_ == nullptr) {
+      LOG_ERR("ASK", "OOM: relay reply buffer %u bytes", static_cast<unsigned>(VoiceRelay::CHAT_TEXT_CAP + 1));
+      relayRound_ = false;
+      fail(tr(STR_MIC_OOM));
+      return;
+    }
+  }
+  // Paint the waiting screen and wait for the frame: the POST below is
+  // blocking on this task, so no repaint can run mid-call (the SttClient
+  // pattern on the voice path). render()'s Asking branch falls back to the
+  // plain waiting label because the session has no round in flight.
+  state_ = State::Asking;
+  requestUpdateAndWait();
+  bool truncated = false;
+  VoiceRelay::ChatClient::Stats stats;
+  const VoiceRelay::ChatClient::Result result = VoiceRelay::ChatClient::ask(
+      CLOUD_CFG.relayUrl, CLOUD_CFG.relayToken, CLOUD_CFG.relayDeviceId, prompt_.get(), relayReply_.get(),
+      VoiceRelay::CHAT_TEXT_CAP + 1, truncated, /*mode=*/nullptr, &stats);
+  if (result != VoiceRelay::ChatClient::Result::Ok) {
+    LOG_ERR("ASK", "relay chat failed: %s (http %d), falling back to OpenClaw",
+            VoiceRelay::ChatClient::resultName(result), stats.httpStatus);
+    // Relay is the preferred service, not a gatekeeper: the same question
+    // goes to the legacy MiMo + OpenClaw gateway. ensureConnected() flips
+    // relayRound_ off, so the answer is read from the session buffer.
+    ensureConnected();
+    return;
+  }
+  if (truncated) {
+    LOG_ERR("ASK", "relay reply truncated at %u bytes", static_cast<unsigned>(VoiceRelay::CHAT_TEXT_CAP));
+  }
+  LOG_INF("ASK", "relay reply %u bytes (http %d)", static_cast<unsigned>(stats.responseBytes), stats.httpStatus);
+  answerScroll_ = 0;  // a new reply starts at its first line
+  saveRecord();
+  state_ = State::Answer;
+  requestUpdate();
+}
+
+const char* AskAiActivity::answerText() const {
+  if (relayRound_ && relayReply_ != nullptr) return relayReply_.get();
+  const char* reply = session_.replyText();
+  return reply != nullptr ? reply : "";
+}
+
 void AskAiActivity::ensureConnected() {
+  relayRound_ = false;  // an OpenClaw round must never read a relay answer
   state_ = State::Connecting;
   lastWaitTickMs_ = millis();
   requestUpdate();
@@ -399,9 +471,9 @@ void AskAiActivity::saveRecord() {
     saved_ = false;
     return;
   }
-  const char* reply = session_.replyText();
+  const char* reply = answerText();
   snprintf(record_.get(), RECORD_CAP, "%s%s%s\n%s%s%s", tr(STR_ASK_Q), tr(STR_NOTE_SEP), question_, tr(STR_ASK_A),
-           tr(STR_NOTE_SEP), reply != nullptr ? reply : "");
+           tr(STR_NOTE_SEP), reply);
   const int64_t now = OpenClaw::nowEpochMs();
   // One append per settled round trip — the same SD write discipline as a
   // dictated voice note. Failure only loses the record, never the answer on
@@ -870,7 +942,7 @@ void AskAiActivity::render(RenderLock&&) {
       // Body text stays clear of the right margin, where the side Up/Down
       // scroll hints are drawn (same split as VoiceActivity's answer window).
       const int bodyWidth = textWidth - metrics.sideButtonHintsWidth;
-      const size_t total = drawWindow(UI_10_FONT_ID, session_.replyText(), left, y, bodyWidth, maxLines, answerScroll_);
+      const size_t total = drawWindow(UI_10_FONT_ID, answerText(), left, y, bodyWidth, maxLines, answerScroll_);
       if (total > static_cast<size_t>(maxLines)) {
         const size_t lastShown = std::min(total, answerScroll_ + static_cast<size_t>(maxLines));
         char pos[24];
