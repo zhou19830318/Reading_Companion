@@ -265,8 +265,10 @@ void KeyboardEntryActivity::loop() {
       if (!dictation.start(dictation.ctx)) {
         dictating = false;
         dictationMsg = dictation.error(dictation.ctx);
+        requestUpdate();  // failed start: the mic is off, safe to repaint
       }
-      requestUpdate();
+      // No repaint on success: the mic is live, and an e-ink refresh here
+      // blocks the loop that drains the I2S ring (~0.8 s of audio lost).
       return;
     }
   }

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Builds a self-contained Voice Relay install package:
 #   dist/voice-relay-<TS>.tar.gz
-# containing relay/, deploy/ (install.sh + systemd/nginx units), tools/,
-# requirements.txt and README.md.
+# containing relay/, dict-data/ (offline dictionary cards), deploy/
+# (install.sh + systemd/nginx units), tools/, requirements.txt and README.md.
 #
 # On the target server:
 #   tar xzf voice-relay-<TS>.tar.gz -C /tmp
@@ -22,11 +22,16 @@ PKG_NAME=voice-relay-$TS
     echo "run from a full relay checkout (needs relay/, deploy/, requirements.txt)" >&2
     exit 1
 }
+[[ -f "$ROOT/dict-data/chars.json" ]] || {
+    echo "missing dict-data/chars.json — see README 'Dictionary data'" >&2
+    exit 1
+}
 
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 mkdir -p "$OUT_DIR" "$STAGE/$PKG_NAME"
 cp -r "$ROOT/relay" "$STAGE/$PKG_NAME/"
+cp -r "$ROOT/dict-data" "$STAGE/$PKG_NAME/"
 cp -r "$ROOT/deploy" "$STAGE/$PKG_NAME/"
 cp -r "$ROOT/tools" "$STAGE/$PKG_NAME/"
 cp "$ROOT/requirements.txt" "$STAGE/$PKG_NAME/"

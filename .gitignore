@@ -18,6 +18,7 @@ lib/I18n/I18nStrings.cpp
 onepage-firmware-*.bin
 build
 **/__pycache__/
+.pytest_cache/
 /compile_commands.json
 /.cache
 .history/

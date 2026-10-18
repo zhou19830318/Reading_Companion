@@ -49,11 +49,13 @@
 #include "util/ScreenshotUtil.h"
 
 namespace {
-// pagesPerRefresh now comes from SETTINGS.getRefreshFrequency()
 // pages per minute, first item is 1 to prevent division by zero if accessed
 constexpr int PAGE_TURN_RATES[] = {1, 1, 3, 6, 12};
 constexpr size_t initialBookmarkCacheCapacity = 16;
 constexpr float bookmarkProgressEpsilon = 0.0001f;
+// Bookmark-file writes are batched: at least this long after the last toggle,
+// and only when the render task is quiet (see the loop() flush).
+constexpr unsigned long BOOKMARK_SAVE_IDLE_MS = 2000UL;
 
 int clampPercent(int percent) {
   if (percent < 0) {
@@ -270,7 +272,16 @@ void EpubReaderActivity::onEnter() {
 void EpubReaderActivity::onExit() {
   Activity::onExit();
 
+  // Stop the background indexer before anything it borrows goes away: it holds
+  // a shared_ptr to epub and a reference to renderer, and a running parse must
+  // not survive into section reset / epub release / cache-dir moves.
+  nextChapterIndexer_.cancelAndJoin();
+
   freeDictCellTable();
+
+  // Last-chance flush of a deferred bookmark write (deep sleep tears the
+  // reader down through here too, so nothing user-visible is left unsaved).
+  flushBookmarks();
 
   // Reset orientation back to portrait for the rest of the UI
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
@@ -295,6 +306,25 @@ void EpubReaderActivity::onExit() {
   } else {
     epub.reset();
   }
+}
+
+void EpubReaderActivity::onPause() {
+  // Another activity (menu, settings, dictionary, voice, ...) is now on top and
+  // the reader will not render until it returns. The background indexer must
+  // not keep parsing across that window: a pushed settings/font screen can
+  // unload the very font whose advance table the layout is reading. The silent
+  // trigger restarts it on the next render.
+  nextChapterIndexer_.cancelAndJoin();
+
+  // The overlay paints over the panel: whatever the reader tracked as being on
+  // it is stale until the next full render re-asserts it.
+  panelPageKeyValid_ = false;
+  toastOnPanel_ = false;
+
+  // The reader loop stops running while another activity is on top, and deep
+  // sleep can tear down the stack from there without this activity's onExit():
+  // land any deferred toggle write before yielding the screen.
+  flushBookmarks();
 }
 
 void EpubReaderActivity::captureNoteExcerpt() {
@@ -628,6 +658,13 @@ void EpubReaderActivity::loop() {
     pendingReadFolderMove = SETTINGS.moveFinishedToReadFolder && !isInReadFolder(epub->getPath());
   } else {
     pendingReadFolderMove = false;
+  }
+
+  // Deferred bookmark save (see addBookmark()): write once the debounce has
+  // elapsed AND the render task is quiet, so the SD write never waits behind
+  // (nor holds up) a page render or its staging reads.
+  if (bookmarksDirty && (millis() - bookmarksDirtyAt) >= BOOKMARK_SAVE_IDLE_MS && !RenderLock::peek()) {
+    flushBookmarks();
   }
 
   if (automaticPageTurnActive) {
@@ -1078,6 +1115,9 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       break;
     }
     case EpubReaderMenuActivity::MenuAction::BOOKMARKS: {
+      // The list reads the file, not this RAM cache — land any deferred toggle
+      // write first so it opens on the current state.
+      flushBookmarks();
       startActivityForResult(
           std::make_unique<EpubReaderBookmarksActivity>(renderer, mappedInput, epub, epub->getPath()),
           progressChangeResultHandler);
@@ -1297,8 +1337,18 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   const auto showPendingSyncSaveError = [this]() {
     if (!pendingSyncSaveError) return;
     pendingSyncSaveError = false;
+    // The popup replaces the tracked page on the panel.
+    panelPageKeyValid_ = false;
     GUI.drawPopup(renderer, tr(STR_SAVE_PROGRESS_FAILED));
   };
+
+  // Capture-and-invalidate the panel identity: every render undoes it, the two
+  // full page paths below re-assert it. The bookmark long-press requests a
+  // render while an untouched page is still on the panel; that is the only
+  // case the toast fast path may window-push over the existing pixels.
+  const bool hadPageOnPanel = panelPageKeyValid_;
+  panelPageKeyValid_ = false;
+  toastOnPanel_ = false;
 
   // edge case handling for sub-zero spine index
   if (currentSpineIndex < 0) {
@@ -1347,35 +1397,60 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     LOG_DBG("ERS", "Loading file: %s, index: %d", filepath.c_str(), currentSpineIndex);
     section = std::unique_ptr<Section>(new Section(epub, currentSpineIndex, renderer));
 
-    if (!section->loadSectionFile(SETTINGS.getReaderFontId(), SETTINGS.getReaderLineCompression(),
-                                  SETTINGS.extraParagraphSpacing, SETTINGS.paragraphAlignment, viewportWidth,
-                                  viewportHeight, SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle,
-                                  SETTINGS.imageRendering, SETTINGS.focusReadingEnabled)) {
-      LOG_DBG("ERS", "Cache not found, building...");
-
-      // Drawn before createSectionFile so the popup covers the SD streaming
-      // phase; the parser then drives the bar with parse progress.
-      const Rect indexingPopup = GUI.drawPopup(renderer, tr(STR_INDEXING), true);
-      GUI.fillPopupProgress(renderer, indexingPopup, 0, true);
-
-      bool popupPendingRedraw = true;
-      const auto popupFn = [this, indexingPopup, &popupPendingRedraw](const int percent) {
-        LOG_DBG("ERS", "Indexing progress: %d%%", percent);
-        if (popupPendingRedraw) {
-          popupPendingRedraw = false;
-          GUI.drawPopup(renderer, tr(STR_INDEXING), true);
-        }
-        GUI.fillPopupProgress(renderer, indexingPopup, percent, true);
-      };
-
-      if (!section->createSectionFile(SETTINGS.getReaderFontId(), SETTINGS.getReaderLineCompression(),
+    const auto loadCachedSection = [this, viewportWidth, viewportHeight]() {
+      return section->loadSectionFile(SETTINGS.getReaderFontId(), SETTINGS.getReaderLineCompression(),
                                       SETTINGS.extraParagraphSpacing, SETTINGS.paragraphAlignment, viewportWidth,
                                       viewportHeight, SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle,
-                                      SETTINGS.imageRendering, SETTINGS.focusReadingEnabled, popupFn)) {
-        LOG_ERR("ERS", "Failed to persist page data to SD");
-        section.reset();
-        showPendingSyncSaveError();
-        return;
+                                      SETTINGS.imageRendering, SETTINGS.focusReadingEnabled);
+    };
+
+    if (!loadCachedSection()) {
+      LOG_DBG("ERS", "Cache not found, building...");
+
+      // Single-flight with the background indexer: when it is building this
+      // same chapter, wait for it under the popup and use its result; anything
+      // else it holds is superseded. Two builds must never write sections
+      // concurrently (shared SD, shared advance tables).
+      bool haveCache = false;
+      if (nextChapterIndexer_.running()) {
+        if (nextChapterIndexer_.spineIndex() == currentSpineIndex) {
+          const Rect indexingPopup = GUI.drawPopup(renderer, tr(STR_INDEXING), true);
+          GUI.fillPopupProgress(renderer, indexingPopup, 0, true);
+          nextChapterIndexer_.join();
+          haveCache = loadCachedSection();
+          if (haveCache) {
+            LOG_DBG("ERS", "Cache built by background indexer");
+          }
+        } else {
+          nextChapterIndexer_.cancelAndJoin();
+        }
+      }
+
+      if (!haveCache) {
+        // Drawn before createSectionFile so the popup covers the SD streaming
+        // phase; the parser then drives the bar with parse progress.
+        const Rect indexingPopup = GUI.drawPopup(renderer, tr(STR_INDEXING), true);
+        GUI.fillPopupProgress(renderer, indexingPopup, 0, true);
+
+        bool popupPendingRedraw = true;
+        const auto popupFn = [this, indexingPopup, &popupPendingRedraw](const int percent) {
+          LOG_DBG("ERS", "Indexing progress: %d%%", percent);
+          if (popupPendingRedraw) {
+            popupPendingRedraw = false;
+            GUI.drawPopup(renderer, tr(STR_INDEXING), true);
+          }
+          GUI.fillPopupProgress(renderer, indexingPopup, percent, true);
+        };
+
+        if (!section->createSectionFile(SETTINGS.getReaderFontId(), SETTINGS.getReaderLineCompression(),
+                                        SETTINGS.extraParagraphSpacing, SETTINGS.paragraphAlignment, viewportWidth,
+                                        viewportHeight, SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle,
+                                        SETTINGS.imageRendering, SETTINGS.focusReadingEnabled, popupFn)) {
+          LOG_ERR("ERS", "Failed to persist page data to SD");
+          section.reset();
+          showPendingSyncSaveError();
+          return;
+        }
       }
     } else {
       LOG_DBG("ERS", "Cache found, skipping build...");
@@ -1471,6 +1546,39 @@ void EpubReaderActivity::render(RenderLock&& lock) {
             stagedKey_.page, stagedKey_.pageCount, stagedKey_.vw, stagedKey_.vh, stagedKey_.fontId, stageKey.spine,
             stageKey.page, stageKey.pageCount, stageKey.vw, stageKey.vh, stageKey.fontId);
   }
+  // Toast fast path: the panel already shows exactly this page and the only
+  // new content is the bookmark popup plus the bookmark icon in the status bar.
+  // Drawing those two into the framebuffer and window-pushing just their rects
+  // skips the page reload, the re-render and its grayscale pass that the full
+  // path below would spend (~1.6 s) before pushing the same page pixels again.
+  if (showBookmarkMessage && hadPageOnPanel && panelPageKey_ == stageKey && !dictPickActive_ && !pendingScreenshot &&
+      !pendingSyncSaveError) {
+    renderStatusBar();
+    const Rect popupRect =
+        GUI.drawPopup(renderer, bookmarkRemoved ? tr(STR_BOOKMARK_REMOVED) : tr(STR_BOOKMARK_ADDED), false, false);
+    // Inflate by the popup frame thickness (plus slack) so the border is
+    // included, matching the tail path below.
+    const int pad = UITheme::getInstance().getMetrics().popupFrameThickness + 2;
+    if (renderer.displayWindow(popupRect.x - pad, popupRect.y - pad, popupRect.width + pad * 2,
+                               popupRect.height + pad * 2)) {
+      // Popup first so the toggle result is visible as soon as the panel
+      // allows; the strip then carries the bookmark icon change. The strip is
+      // taken from the page viewport bottom (content is anchored to the raw
+      // viewable margin, a few pixels above it) down to the screen edge.
+      const int barHeight = UITheme::getInstance().getStatusBarHeight();
+      if (barHeight > 0) {
+        renderer.displayWindow(0, renderer.getScreenHeight() - orientedMarginBottom - barHeight - 8,
+                               renderer.getScreenWidth(), orientedMarginBottom + barHeight + 8);
+      }
+      toastOnPanel_ = true;
+      panelPageKey_ = stageKey;
+      panelPageKeyValid_ = true;
+      LOG_DBG("ERS", "Bookmark toast fast path (window push)");
+      return;
+    }
+    // The window pipeline rejected the popup rect (empty or off-panel): fall
+    // through so the popup still reaches the panel via the full render.
+  }
   if (stagedValid_ && stagedKey_ == stageKey && !dictPickActive_) {
     currentPageFootnotes = std::move(stagedFootnotes_);
     const auto start = millis();
@@ -1533,8 +1641,25 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     ScreenshotUtil::takeScreenshot(renderer);
   }
 
+  // This page is now the one on the panel (showPendingSyncSaveError above may
+  // have just overridden that with its popup and cleared the flag again).
+  panelPageKey_ = stageKey;
+  panelPageKeyValid_ = true;
+
   if (showBookmarkMessage) {
-    GUI.drawPopup(renderer, bookmarkRemoved ? tr(STR_BOOKMARK_REMOVED) : tr(STR_BOOKMARK_ADDED));
+    const Rect popupRect =
+        GUI.drawPopup(renderer, bookmarkRemoved ? tr(STR_BOOKMARK_REMOVED) : tr(STR_BOOKMARK_ADDED), false, false);
+    // Only the popup differs from what is already on the panel: every path
+    // reaching this tail has just pushed the page, so the controller RAM
+    // matches the framebuffer outside the popup rect. Driving just the popup's
+    // rect avoids a second full-panel refresh per bookmark toggle. Inflate by
+    // the popup frame thickness (plus slack) so the border is included.
+    const int pad = UITheme::getInstance().getMetrics().popupFrameThickness + 2;
+    if (!renderer.displayWindow(popupRect.x - pad, popupRect.y - pad, popupRect.width + pad * 2,
+                                popupRect.height + pad * 2)) {
+      renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+    }
+    toastOnPanel_ = true;
   }
 }
 
@@ -1543,14 +1668,35 @@ void EpubReaderActivity::silentIndexNextChapterIfNeeded(const uint16_t viewportW
     return;
   }
 
-  // Build the next chapter cache from the penultimate page onward, so the work
-  // lands in the idle window before the reader crosses the chapter boundary.
-  if (section->currentPage + 2 < section->pageCount) {
+  // Build the next chapter cache from the fourth-from-last page onward, so the
+  // work lands in the idle window before the reader crosses the chapter
+  // boundary. Two pages (the old trigger) left only ~2-6 s of margin against a
+  // ~10 s cold build (measured on this card), so a normally-paced reader kept
+  // arriving while the worker was still running; the background build makes an
+  // earlier start cheap (it never blocks a page turn) and the cache is usually
+  // ready by the time the boundary is reached.
+  if (section->currentPage + 4 < section->pageCount) {
     return;
   }
 
   const int nextSpineIndex = currentSpineIndex + 1;
   if (nextSpineIndex < 0 || nextSpineIndex >= epub->getSpineItemsCount()) {
+    return;
+  }
+
+  // A build for that very chapter is the only one this pass would start, so
+  // let it finish; a build for a different spine is superseded (the user
+  // jumped somewhere else).
+  if (nextChapterIndexer_.running()) {
+    if (nextChapterIndexer_.spineIndex() == nextSpineIndex) {
+      return;
+    }
+    nextChapterIndexer_.cancelAndJoin();
+  }
+
+  // A chapter that already failed to parse once (corrupt markup, OOM) would
+  // otherwise restart the build on every render pass for the whole visit.
+  if (nextChapterIndexer_.lastFailedSpine() == nextSpineIndex) {
     return;
   }
 
@@ -1563,12 +1709,18 @@ void EpubReaderActivity::silentIndexNextChapterIfNeeded(const uint16_t viewportW
   }
 
   LOG_DBG("ERS", "Silently indexing next chapter: %d", nextSpineIndex);
-  if (!nextSection.createSectionFile(SETTINGS.getReaderFontId(), SETTINGS.getReaderLineCompression(),
-                                     SETTINGS.extraParagraphSpacing, SETTINGS.paragraphAlignment, viewportWidth,
-                                     viewportHeight, SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle,
-                                     SETTINGS.imageRendering, SETTINGS.focusReadingEnabled)) {
-    LOG_ERR("ERS", "Failed silent indexing for chapter: %d", nextSpineIndex);
-  }
+  NextChapterIndexParams params;
+  params.fontId = SETTINGS.getReaderFontId();
+  params.lineCompression = SETTINGS.getReaderLineCompression();
+  params.extraParagraphSpacing = SETTINGS.extraParagraphSpacing;
+  params.paragraphAlignment = SETTINGS.paragraphAlignment;
+  params.viewportWidth = viewportWidth;
+  params.viewportHeight = viewportHeight;
+  params.hyphenationEnabled = SETTINGS.hyphenationEnabled;
+  params.embeddedStyle = SETTINGS.embeddedStyle;
+  params.imageRendering = SETTINGS.imageRendering;
+  params.focusReadingEnabled = SETTINGS.focusReadingEnabled;
+  nextChapterIndexer_.start(epub, nextSpineIndex, renderer, params);
 }
 
 // Read a page's text out of the section cache and feed it to the SD font
@@ -1750,8 +1902,9 @@ void EpubReaderActivity::displayStagedContents() {
   renderStatusBar();
   const auto tStatus = millis();
 
-  // Staged pages are guaranteed image-free, so the ordinary cadence applies.
-  ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
+  // Staged pages are guaranteed image-free; the shared cadence decides whether
+  // this push also runs the ghost cleanup.
+  ReaderUtils::displayReaderPage(renderer);
   const auto tDisplay = millis();
 
   if (SETTINGS.textAntiAliasing && stagedLsb_ && stagedMsb_) {
@@ -1973,15 +2126,14 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     } else {
       renderer.displayBuffer(HalDisplay::HALF_REFRESH);
     }
-    // The image's own page is handled above and doesn't count toward the full
-    // refresh cadence. But the grayscale pass below leaves gray charge in the
-    // image region that a plain fast diff on the *next* page can't clear, so
-    // text there ghosts gray (#2190). Force the next ordinary page onto the
-    // HALF ghost-cleanup path, which drives every pixel to its target
-    // regardless of residue.
-    pagesUntilFullRefresh = 1;
+    // The image's own page is handled above. But the grayscale pass leaves
+    // gray charge in the image region that a plain fast diff on the *next*
+    // page can't clear, so text there ghosts gray (#2190). Park the shared
+    // cleanup counter so the next ordinary page runs the HALF ghost-cleanup
+    // path, which drives every pixel to its target regardless of residue.
+    renderer.requestGhostCleanup();
   } else {
-    ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
+    ReaderUtils::displayReaderPage(renderer);
   }
   const auto tDisplay = millis();
 
@@ -2255,14 +2407,31 @@ void EpubReaderActivity::addBookmark() {
     currentPageBookmarked = true;
   }
 
+  // Nothing reads the file until the reader reloads it itself (bookmarks list
+  // open / return) or the activity exits, so the SD write does not need to sit
+  // on the toggle's critical path: mark dirty and let flushBookmarks() write
+  // once the render task is quiet. Batching also collapses rapid toggles into
+  // one write. deep sleep runs onExit(), which flushes, so the only exposure is
+  // a crash within the debounce window.
+  bookmarksDirty = true;
+  bookmarksDirtyAt = millis();
+  requestUpdate();
+}
+
+// Writes the in-RAM bookmark cache if a toggle made it dirty. Called when the
+// render task is idle (loop), before the bookmarks list opens (it reads the
+// file, not the cache), and from onExit() (deep sleep included).
+void EpubReaderActivity::flushBookmarks() {
+  if (!bookmarksDirty || !epub) {
+    return;
+  }
+  bookmarksDirty = false;  // before the write: a failed save is retried by the
+                           // next toggle, not every idle frame the loop sees
   const std::string path = BookmarkUtil::getBookmarkPath(epub->getPath());
-  const std::string bookmarksDir = BookmarkUtil::getBookmarksDir();
-  Storage.mkdir(bookmarksDir.c_str());
-  const bool ok = JsonSettingsIO::saveBookmarks(cachedBookmarks, path.c_str());
-  if (!ok) {
+  Storage.mkdir(BookmarkUtil::getBookmarksDir().c_str());
+  if (!JsonSettingsIO::saveBookmarks(cachedBookmarks, path.c_str())) {
     LOG_ERR("ERS", "Failed to save bookmarks to: %s", path.c_str());
   }
-  requestUpdate();
 }
 
 void EpubReaderActivity::updateBookmarkFlag() {

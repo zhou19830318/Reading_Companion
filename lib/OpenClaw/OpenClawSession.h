@@ -115,9 +115,15 @@ class Session {
   // Pumps the socket and runs the deferred actions. Call every loop pass.
   // `onUpdate` fires when something user-visible changed (e-ink repaint).
   void poll();
-  // Closes the socket and releases the CA buffer. The chat buffer is freed by
-  // the destructor so a reply can be read out after close.
+  // Closes the socket and releases the CA and chat buffers. A reply is no
+  // longer readable afterwards — park() is the variant that keeps it.
   void close();
+  // Same deliberate teardown as close(), but keeps the chat buffer: the idle
+  // Wi-Fi manager calls this when it powers the radio down, and a screen still
+  // showing an answer must keep rendering it (replyText() stays valid). The
+  // next startConnect() re-dials from scratch — it re-creates the socket and
+  // handshake and joins the existing chat buffer.
+  void park();
 
   // ── state for the UI ─────────────────────────────────────────────────
   enum class State : uint8_t { Idle, Connecting, Handshake, Challenge, Connected, Failed };
@@ -179,6 +185,9 @@ class Session {
 
  private:
   void fail(const char* reason);
+  // Shared half of close()/park(): drops the socket, handshake and CA buffer,
+  // clears the reconnect state, and settles into Idle.
+  void teardownSocket();
   void notify() {
     if (notifyFn_ != nullptr) notifyFn_(notifyCtx_);
   }

@@ -222,9 +222,14 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
                                 const uint8_t paragraphAlignment, const uint16_t viewportWidth,
                                 const uint16_t viewportHeight, const bool hyphenationEnabled, const bool embeddedStyle,
                                 const uint8_t imageRendering, const bool focusReadingEnabled,
-                                const std::function<void(int)>& popupFn) {
+                                const std::function<void(int)>& popupFn, const std::atomic<bool>* cancelFlag) {
   const auto localPath = epub->getSpineItem(spineIndex).href;
   const auto tmpHtmlPath = epub->getCachePath() + "/.tmp_" + std::to_string(spineIndex) + ".html";
+  // Build into a temp path and rename into place at the end: loadSectionFile()
+  // accepts a header with pageCount == 0, so a half-written section (power
+  // loss, cancelled background index) must never be visible under the
+  // canonical name.
+  const std::string tmpSectionPath = filePath + ".tmp";
 
   // Create cache directory if it doesn't exist
   {
@@ -285,7 +290,7 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
 
   LOG_DBG("SCT", "Streamed temp HTML to %s (%d bytes)", tmpHtmlPath.c_str(), fileSize);
 
-  if (!Storage.openFileForWrite("SCT", filePath, file)) {
+  if (!Storage.openFileForWrite("SCT", tmpSectionPath, file)) {
     return false;
   }
   writeSectionFileHeader(fontId, lineCompression, extraParagraphSpacing, paragraphAlignment, viewportWidth,
@@ -346,7 +351,8 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
       [this, &lut](std::unique_ptr<Page> page, const uint16_t paragraphIndex, const uint16_t listItemIndex) {
         lut.push_back({this->onPageComplete(std::move(page)), paragraphIndex, listItemIndex});
       },
-      embeddedStyle, contentBase, imageBasePath, imageRendering, std::move(tocAnchors), parsePopupFn, cssParser);
+      embeddedStyle, contentBase, imageBasePath, imageRendering, std::move(tocAnchors), parsePopupFn, cssParser,
+      cancelFlag);
   Hyphenator::setPreferredLanguage(epub->getLanguage());
   success = visitor.parseAndBuildPages();
 
@@ -355,7 +361,7 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
     LOG_ERR("SCT", "Failed to parse XML and build pages");
     // Explicitly close() file before calling Storage.remove()
     file.close();
-    Storage.remove(filePath.c_str());
+    Storage.remove(tmpSectionPath.c_str());
     if (cssParser) {
       cssParser->clear();
     }
@@ -377,7 +383,7 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
     LOG_ERR("SCT", "Failed to write LUT due to invalid page positions");
     // Explicitly close() file before calling Storage.remove()
     file.close();
-    Storage.remove(filePath.c_str());
+    Storage.remove(tmpSectionPath.c_str());
     return false;
   }
 
@@ -412,6 +418,17 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
   file.close();
   if (cssParser) {
     cssParser->clear();
+  }
+
+  // Publish the finished file under its canonical name. SdFat's rename does not
+  // overwrite an existing destination, so drop the stale canonical file first;
+  // a crash between remove and rename reads as "no cache" (rebuild), never as
+  // a torn section.
+  Storage.remove(filePath.c_str());
+  if (!Storage.rename(tmpSectionPath.c_str(), filePath.c_str())) {
+    LOG_ERR("SCT", "Failed to rename temp section into place: %s", filePath.c_str());
+    Storage.remove(tmpSectionPath.c_str());
+    return false;
   }
   return true;
 }

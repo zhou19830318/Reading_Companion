@@ -64,8 +64,17 @@ class SdCardFont {
   void clearCache();
 
   // Drop the persistent advance cache. Call when unloading the SD font or
-  // when font/size/family/glyph-table state changes.
+  // when font/size/family/glyph-table state changes. Does NOT write the cache
+  // file — use persistAdvanceTable(true) first if the table should survive.
   void clearPersistentCache();
+
+  // Write the advance table to its SD cache file (keyed by font content hash)
+  // so a later load() starts warm and cold chapter indexing skips the
+  // scattered per-paragraph metric reads. No-op unless the table changed;
+  // non-forced calls are also throttled (min new entries + min interval) so
+  // chapter-by-chapter growth doesn't rewrite the file after every index.
+  // force=true bypasses both guards (destructor/unload path).
+  void persistAdvanceTable(bool force = false);
 
   // Returns pointer to the managed EpdFont for a given style.
   // Returns nullptr if the style is not present.
@@ -250,7 +259,7 @@ class SdCardFont {
     uint8_t* bmp;   // PSRAM bitmap bytes; nullptr when dataLength == 0
   };
   static constexpr uint32_t GLYPH_CACHE_KEY_EMPTY = 0xFFFFFFFFu;
-  static constexpr uint32_t GLYPH_CACHE_SLOTS = 12289;   // open-addressing capacity
+  static constexpr uint32_t GLYPH_CACHE_SLOTS = 12289;    // open-addressing capacity
   static constexpr uint32_t GLYPH_CACHE_MAX_FILL = 9000;  // stop inserting past this
   GlyphCacheEntry* glyphCache_ = nullptr;
   uint32_t glyphCacheFill_ = 0;
@@ -275,15 +284,31 @@ class SdCardFont {
   // OnePage (PSRAM build): raised from 768 so a full CJK novel's unique glyphs
   // all fit. Without this, indexing a Chinese book blows past the cap and every
   // further codepoint falls to the per-glyph render slow path (~30ms/glyph from
-  // SD) -> "Indexing" takes minutes. At 8 bytes/entry x4 styles this table lands
-  // in PSRAM (>4KB alloc), not internal SRAM.
-  static constexpr uint32_t ADVANCE_CACHE_LIMIT = 8192;
+  // SD) -> "Indexing" takes minutes. Once the limit is hit the table stops
+  // accepting entries for good, so the limit must cover the whole font: SD
+  // fonts seen in the field carry up to ~25k glyphs (large CJK collections),
+  // hence 16384 (131 KB per style) — PSRAM has megabytes free, and a table
+  // that stops growing would degrade every later chapter permanently.
+  static constexpr uint32_t ADVANCE_CACHE_LIMIT = 16384;
   AdvanceEntry* advanceTable_[MAX_STYLES] = {};
   uint32_t advanceTableSize_[MAX_STYLES] = {};
   bool advanceTableLookup(uint8_t styleIdx, uint32_t codepoint, uint16_t* outAdvance) const;
   // Merge sortedNew (sorted by codepoint, no overlap with existing) into the
   // advance table for styleIdx, preserving sort order; cap-truncates the tail.
   void mergeIntoAdvanceTable(uint8_t styleIdx, const AdvanceEntry* sortedNew, uint32_t newCount);
+
+  // --- Persistent advance-table cache file (I2) ---
+  // Cross-session warm start for cold indexing: without it, every reboot /
+  // font reload repays the full scattered-metric cost (~5 s on a 26 KB CJK
+  // chapter) before the in-RAM table is warm again. One file per font content
+  // (.crosspoint/fontcache/<contentHash>.adv), validated by magic/version/
+  // limit/hash, truncated-and-rewritten on save.
+  bool loadAdvanceTableFile();
+  bool advanceDirty_ = false;
+  uint32_t advanceEntriesSaved_ = 0;  // total across styles at last successful save
+  uint32_t advanceLastSaveMs_ = 0;
+  static constexpr uint32_t ADVANCE_SAVE_MIN_NEW = 256;            // entries
+  static constexpr uint32_t ADVANCE_SAVE_MIN_INTERVAL_MS = 30000;  // ms
 
   Stats stats_;
   uint32_t contentHash_ = 0;

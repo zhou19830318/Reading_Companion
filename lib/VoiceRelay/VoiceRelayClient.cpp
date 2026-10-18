@@ -31,50 +31,79 @@ namespace VoiceRelay {
 Client::~Client() { close(); }
 
 bool Client::start(const char* url, const char* token, const char* deviceId, const char* mode) {
+  if (state_ == State::Connecting && warm_) {
+    // Adopt the socket prepare() opened: the dial already happened, so the
+    // capture window sees only a queued session.start, flushed by poll().
+    warm_ = false;
+    if (!buildRound(mode)) return false;
+    startPending_ = wsOpen_;
+    return true;
+  }
+  if (state_ == State::Done) {
+    // The finished session's socket is still open: the server replaces the
+    // session on a fresh session.start. A socket the server has since closed
+    // (its 60 s idle) reads wsOpen_ false — kept that way by the upkeep poll —
+    // and dials again here; a socket that died unnoticed just fails this
+    // round into the activity's legacy fallback.
+    if (!wsOpen_ && !setUp(url, token, deviceId, false)) return false;
+    if (!buildRound(mode)) return false;
+    state_ = State::Connecting;
+    startPending_ = wsOpen_;
+    return true;
+  }
   if (state_ != State::Idle) {
     LOG_ERR("VRC", "start() while state=%u; close() first", static_cast<unsigned>(state_));
     return false;
   }
-  if (url == nullptr || token == nullptr || deviceId == nullptr) return false;
-  if (!WiFi.isConnected()) {
-    fail(TransportError::NoWifi);
+  if (!setUp(url, token, deviceId, false)) return false;
+  if (!buildRound(mode)) return false;
+  state_ = State::Connecting;
+  return true;
+}
+
+bool Client::prepare(const char* url, const char* token, const char* deviceId) {
+  if (state_ != State::Idle) return false;
+  if (!setUp(url, token, deviceId, true)) return false;
+  state_ = State::Connecting;
+  warm_ = true;
+  LOG_INF("VRC", "warm dial armed");
+  return true;
+}
+
+bool Client::setUp(const char* url, const char* token, const char* deviceId, bool warm) {
+  // A missed warm-up must only mean "no socket yet": stay Idle so the next
+  // round dials (and reports the failure) the normal way.
+  const auto reject = [this, warm](TransportError error) {
+    if (warm) {
+      transportError_ = error;
+    } else {
+      fail(error);
+    }
     return false;
-  }
+  };
+  if (url == nullptr || token == nullptr || deviceId == nullptr) return reject(TransportError::BadConfig);
+  if (!WiFi.isConnected()) return reject(TransportError::NoWifi);
   url_ = parseRelayUrl(url);
   const size_t tokenLen = strlen(token);
   const size_t deviceLen = strlen(deviceId);
   if (!url_.valid || tokenLen == 0 || tokenLen > TOKEN_CAP - 8 || deviceLen == 0 || deviceLen >= DEVICE_ID_CAP) {
     LOG_ERR("VRC", "bad config: url=%d tokenLen=%u deviceLen=%u", url_.valid ? 1 : 0, static_cast<unsigned>(tokenLen),
             static_cast<unsigned>(deviceLen));
-    fail(TransportError::BadConfig);
-    return false;
+    return reject(TransportError::BadConfig);
   }
 
-  lastEvent_ = Event{};
-  localLatency_ = Latency{};
-  sessionId_[0] = '\0';
-  ending_ = false;
   transportError_ = TransportError::None;
   startPending_ = false;
   audioStartPending_ = false;
   wsOpen_ = false;
-  framer_.reset();
+  releasePending_ = false;
   snprintf(deviceId_, sizeof(deviceId_), "%s", deviceId);
-  formatRequestId(requestId_, esp_random(), esp_random(), esp_random(), esp_random());
-  startFrameLen_ = buildSessionStart(startFrame_, sizeof(startFrame_), requestId_, deviceId_, mode);
-  if (startFrameLen_ == 0) {
-    LOG_ERR("VRC", "session.start build failed (cap=%u requestId=%u deviceId=%u)",
-            static_cast<unsigned>(sizeof(startFrame_)), static_cast<unsigned>(strlen(requestId_)),
-            static_cast<unsigned>(strlen(deviceId_)));
-    fail(TransportError::BadConfig);
-    return false;
-  }
 
+  releaseSocket();
   ws_ = makeUniqueNoThrow<WebSocketsClient>();
   if (!ws_) {
     LOG_ERR("VRC", "OOM: WebSocketsClient");
-    fail(TransportError::Oom);
-    return false;
+    return reject(TransportError::Oom);
   }
 
   char auth[TOKEN_CAP];
@@ -101,15 +130,39 @@ bool Client::start(const char* url, const char* token, const char* deviceId, con
   ws_->setAuthorization(auth);
   ws_->setExtraHeaders(headers);
 
-  state_ = State::Connecting;
   dialedAtMs_ = millis();
   LOG_INF("VRC", "dialing %s://%s:%u%s", url_.tls ? "wss" : "ws", url_.host, static_cast<unsigned>(url_.port),
           url_.path);
   return true;
 }
 
+bool Client::buildRound(const char* mode) {
+  lastEvent_ = Event{};
+  localLatency_ = Latency{};
+  sessionId_[0] = '\0';
+  ending_ = false;
+  framer_.reset();
+  formatRequestId(requestId_, esp_random(), esp_random(), esp_random(), esp_random());
+  startFrameLen_ = buildSessionStart(startFrame_, sizeof(startFrame_), requestId_, deviceId_, mode);
+  if (startFrameLen_ == 0) {
+    LOG_ERR("VRC", "session.start build failed (cap=%u requestId=%u deviceId=%u)",
+            static_cast<unsigned>(sizeof(startFrame_)), static_cast<unsigned>(strlen(requestId_)),
+            static_cast<unsigned>(strlen(deviceId_)));
+    fail(TransportError::BadConfig);
+    return false;
+  }
+  return true;
+}
+
 void Client::poll() {
   if (state_ == State::Failed) {
+    releaseSocket();
+    return;
+  }
+  if (releasePending_) {
+    // A warm socket closed from inside its own dispatch; the client cannot be
+    // freed under the library's loop() (see onWsEvent).
+    releasePending_ = false;
     releaseSocket();
     return;
   }
@@ -120,8 +173,17 @@ void Client::poll() {
   ws_->loop();
   if (startPending_) sendStart();
   if (audioStartPending_) sendAudioStart();
-  if (state_ == State::Connecting && !wsOpen_ && elapsed(dialedAtMs_) > CONNECT_TIMEOUT_MS)
+  if (state_ == State::Connecting && !wsOpen_ && elapsed(dialedAtMs_) > CONNECT_TIMEOUT_MS) {
+    if (warm_) {
+      // An unused warm socket that never opened is not a round's failure:
+      // park at Idle and let the next round dial (and report) it cold.
+      LOG_INF("VRC", "warm dial timed out");
+      releaseSocket();  // clears warm_/wsOpen_ as well
+      state_ = State::Idle;
+      return;
+    }
     fail(TransportError::ConnectTimeout);
+  }
   if (state_ == State::Starting && elapsed(startSentAtMs_) > START_TIMEOUT_MS) fail(TransportError::StartTimeout);
   if (state_ == State::Active && ending_ && elapsed(endSentAtMs_) > DONE_TIMEOUT_MS) fail(TransportError::DoneTimeout);
   if (state_ == State::Failed) releaseSocket();
@@ -164,18 +226,33 @@ bool Client::finishAudio(const char* reason) {
 
 void Client::onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
   switch (type) {
-    case WStype_CONNECTED:
-      localLatency_.connect = static_cast<int32_t>(elapsed(dialedAtMs_));
+    case WStype_CONNECTED: {
+      const uint32_t connectMs = elapsed(dialedAtMs_);
       wsOpen_ = true;
-      // Armed here, sent by the same poll() pass — the WS dispatch never
-      // writes to the socket.
-      startPending_ = true;
-      LOG_INF("VRC", "ws open in %ld ms", static_cast<long>(localLatency_.connect));
+      LOG_INF("VRC", "ws open in %ld ms%s", static_cast<long>(connectMs), warm_ ? " (warm)" : "");
+      if (!warm_) {
+        // Armed here, sent by the same poll() pass — the WS dispatch never
+        // writes to the socket. A warm socket is armed by start() instead.
+        localLatency_.connect = static_cast<int32_t>(connectMs);
+        startPending_ = true;
+      }
       return;
+    }
     case WStype_TEXT:
       if (payload != nullptr && length > 0) handleText(reinterpret_cast<const char*>(payload), length);
       return;
     case WStype_DISCONNECTED:
+      wsOpen_ = false;
+      if (state_ == State::Connecting && warm_ && !startPending_) {
+        // The unused warm socket closed (server 60 s idle, wifi flap): not a
+        // round's failure. Park at Idle; poll() releases the client, which
+        // cannot happen from inside its own dispatch.
+        LOG_INF("VRC", "warm socket closed");
+        warm_ = false;
+        state_ = State::Idle;
+        releasePending_ = true;
+        return;
+      }
       if (state_ == State::Connecting || state_ == State::Starting || state_ == State::Active) {
         fail(TransportError::SocketLost);
       }
@@ -297,6 +374,8 @@ void Client::releaseSocket() {
   wsOpen_ = false;
   startPending_ = false;
   audioStartPending_ = false;
+  warm_ = false;
+  releasePending_ = false;
 }
 
 void Client::frameSink(const uint8_t* frame, size_t len, void* ctx) {

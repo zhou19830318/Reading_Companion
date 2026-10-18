@@ -30,6 +30,11 @@ class Activity {
   virtual ~Activity() = default;
   virtual void onEnter();
   virtual void onExit();
+  // Called when another activity is pushed on top of this one (the activity
+  // stays alive on the stack). Use it to quiesce background work that must not
+  // run while the user is elsewhere — e.g. tasks that touch fonts or SD caches
+  // a pushed settings screen may swap out from under them.
+  virtual void onPause() {}
   virtual void loop() {}
 
   virtual void render(RenderLock&&) {}
@@ -43,6 +48,13 @@ class Activity {
 
   virtual bool skipLoopDelay() { return false; }
   virtual bool preventAutoSleep() { return false; }
+  // True while a repaint would preempt a live microphone capture: an e-ink
+  // refresh blocks the activity loop ~0.8 s, and that loop is the only thing
+  // draining the 8 ms I2S DMA ring — audio recorded during a refresh never
+  // exists on device (measured: server frame counts short by exactly the
+  // refresh window). Gates the automatic post-result repaint; activities with
+  // explicit requestUpdate() calls still own those.
+  virtual bool preventAutoUpdate() const { return false; }
   // True while the power key is held as a capture control (PTT dictation):
   // the main loop skips the power-hold deep sleep for the duration, or a
   // hold-to-talk utterance would put the device to sleep mid-speech.

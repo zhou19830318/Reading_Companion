@@ -14,6 +14,9 @@ class EpubReaderBookmarksActivity final : public Activity {
   int selectorIndex = 0;
   std::vector<BookmarkEntry> bookmarks;
   int confirmingDelete = 0;  // 0 = hide dialog, 1 = show dialog, 2 = allow confirmation to delete
+  // Deferred write of `bookmarks` after deletions (see flushBookmarks()): one
+  // write at exit instead of one blocking write per delete.
+  bool bookmarksDirty = false;
 
  public:
   explicit EpubReaderBookmarksActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
@@ -25,6 +28,9 @@ class EpubReaderBookmarksActivity final : public Activity {
   void render(RenderLock&&) override;
 
  private:
+  // Writes the list to the bookmark file when deletions made it dirty.
+  void flushBookmarks();
+
   // Calculate the vertical space to reserve for button hints based on orientation
   int getGutterBottom(const GfxRenderer& renderer);
 

@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <climits>
+#include <cstdio>
 #include <cstring>
 #include <memory>
 
@@ -103,7 +104,13 @@ const char* asCStr(const char* s) { return s; }
 
 }  // namespace
 
-SdCardFont::~SdCardFont() { freeAll(); }
+SdCardFont::~SdCardFont() {
+  // Last chance to save the advance table before it is freed (font switch,
+  // reader exit, font reload). Bypasses the save throttle: this happens at
+  // most once per unload, and without it a session's table would be lost.
+  persistAdvanceTable(true);
+  freeAll();
+}
 
 // --- Per-style free/cleanup ---
 
@@ -675,6 +682,12 @@ bool SdCardFont::load(const char* path) {
             h.intervalCount, h.glyphCount, h.advanceY, h.ascender, h.descender, h.kernLeftEntryCount,
             h.kernRightEntryCount, h.ligaturePairCount);
   }
+
+  // Warm-start the advance table from its SD cache file (if one exists for
+  // this exact font content). A miss is silent and costs nothing beyond the
+  // exists() check — the table just rebuilds from layout as before.
+  loadAdvanceTableFile();
+
   return true;
 }
 
@@ -1265,6 +1278,7 @@ void SdCardFont::mergeIntoAdvanceTable(uint8_t styleIdx, const AdvanceEntry* sor
   delete[] advanceTable_[styleIdx];
   advanceTable_[styleIdx] = merged;
   advanceTableSize_[styleIdx] = k;
+  if (k > oldSize) advanceDirty_ = true;
 }
 
 bool SdCardFont::hasAdvanceTable() const {
@@ -1293,6 +1307,219 @@ uint16_t SdCardFont::getAdvance(uint32_t codepoint, uint8_t style) const {
     return table[lo].advanceX;
   }
   return 0;
+}
+
+// --- Persistent advance-table cache file ---
+//
+// Format (fixed little-endian records, no struct layout dependency):
+//   0  u8[4]  magic "XFAD"
+//   4  u16    version
+//   6  u16    reserved
+//   8  u32    ADVANCE_CACHE_LIMIT at save time
+//  12  u32    font content hash (cross-check; also the file name)
+//  16  per style, entries-bearing styles only:
+//        u8 styleIdx, u8[3] reserved, u32 entryCount,
+//        entryCount x { u32 codepoint, u16 advanceX } (sorted by codepoint)
+//
+// Loads are best-effort: any structural mismatch bails out, and a corrupt tail
+// marks the table dirty so the next save rewrites the file. A partially warmed
+// table is strictly better than a cold one, so valid leading records are kept.
+
+namespace {
+constexpr uint16_t ADVANCE_FILE_VERSION = 1;
+constexpr size_t ADVANCE_FILE_HEADER_SIZE = 16;
+constexpr size_t ADVANCE_STYLE_HEADER_SIZE = 8;
+constexpr size_t ADVANCE_RECORD_SIZE = 6;
+// Records per SD transaction. 512 records = 3 KB staging; larger transactions
+// amortize the card's per-command latency without a big staging buffer.
+constexpr uint32_t ADVANCE_IO_RECORDS = 512;
+
+void advanceCachePath(const uint32_t contentHash, char* out, const size_t len) {
+  snprintf(out, len, "/.crosspoint/fontcache/%08x.adv", static_cast<unsigned>(contentHash));
+}
+}  // namespace
+
+bool SdCardFont::loadAdvanceTableFile() {
+  if (!loaded_ || contentHash_ == 0) return false;
+
+  char path[64];
+  advanceCachePath(contentHash_, path, sizeof(path));
+  if (!Storage.exists(path)) return false;
+
+  HalFile file;
+  if (!Storage.openFileForRead("SDCF", path, file)) {
+    LOG_ERR("SDCF", "Advance cache: cannot open %s", path);
+    return false;
+  }
+
+  uint8_t hdr[ADVANCE_FILE_HEADER_SIZE];
+  uint16_t version = 0;
+  uint32_t limit = 0;
+  uint32_t hash = 0;
+  if (file.read(hdr, sizeof(hdr)) != sizeof(hdr) || memcmp(hdr, "XFAD", 4) != 0) {
+    LOG_ERR("SDCF", "Advance cache: bad header in %s", path);
+    return false;
+  }
+  memcpy(&version, hdr + 4, sizeof(version));
+  memcpy(&limit, hdr + 8, sizeof(limit));
+  memcpy(&hash, hdr + 12, sizeof(hash));
+  if (version != ADVANCE_FILE_VERSION || limit != ADVANCE_CACHE_LIMIT || hash != contentHash_) {
+    LOG_DBG("SDCF", "Advance cache: version/limit/hash mismatch in %s (ignored, will be rewritten)", path);
+    return false;
+  }
+
+  auto ioBuf = std::unique_ptr<uint8_t[]>(new (std::nothrow) uint8_t[ADVANCE_IO_RECORDS * ADVANCE_RECORD_SIZE]);
+  if (!ioBuf) {
+    LOG_ERR("SDCF", "Advance cache: staging alloc failed (%u bytes)",
+            static_cast<unsigned>(ADVANCE_IO_RECORDS * ADVANCE_RECORD_SIZE));
+    return false;
+  }
+
+  uint32_t totalLoaded = 0;
+  bool corrupt = false;
+  while (!corrupt) {
+    uint8_t shdr[ADVANCE_STYLE_HEADER_SIZE];
+    const size_t hdrRead = file.read(shdr, sizeof(shdr));
+    if (hdrRead == 0) break;  // clean end of file
+    if (hdrRead != sizeof(shdr)) {
+      corrupt = true;
+      break;
+    }
+    const uint8_t styleIdx = shdr[0];
+    uint32_t count = 0;
+    memcpy(&count, shdr + 4, sizeof(count));
+    if (styleIdx >= MAX_STYLES || !styles_[styleIdx].present || count == 0 || count > ADVANCE_CACHE_LIMIT ||
+        advanceTable_[styleIdx] != nullptr) {
+      LOG_ERR("SDCF", "Advance cache: bad style record (idx=%u count=%u)", styleIdx, count);
+      corrupt = true;
+      break;
+    }
+
+    auto table = std::unique_ptr<AdvanceEntry[]>(new (std::nothrow) AdvanceEntry[count]);
+    if (!table) {
+      LOG_ERR("SDCF", "Advance cache: table alloc failed (%u entries)", count);
+      return false;  // out of memory: keep what loaded, retry next boot
+    }
+
+    uint32_t filled = 0;
+    uint32_t remaining = count;
+    bool sorted = true;
+    while (remaining > 0) {
+      const uint32_t chunk = remaining > ADVANCE_IO_RECORDS ? ADVANCE_IO_RECORDS : remaining;
+      const size_t bytes = chunk * ADVANCE_RECORD_SIZE;
+      if (file.read(ioBuf.get(), bytes) != bytes) {
+        corrupt = true;
+        break;
+      }
+      for (uint32_t i = 0; i < chunk; i++) {
+        const uint8_t* rec = ioBuf.get() + i * ADVANCE_RECORD_SIZE;
+        memcpy(&table[filled].codepoint, rec, sizeof(uint32_t));
+        memcpy(&table[filled].advanceX, rec + 4, sizeof(uint16_t));
+        if (filled > 0 && table[filled].codepoint <= table[filled - 1].codepoint) sorted = false;
+        filled++;
+      }
+      remaining -= chunk;
+    }
+    if (corrupt || !sorted) {
+      LOG_ERR("SDCF", "Advance cache: corrupt entries for style %u", styleIdx);
+      corrupt = true;
+      break;
+    }
+
+    advanceTable_[styleIdx] = table.release();
+    advanceTableSize_[styleIdx] = filled;
+    totalLoaded += filled;
+  }
+
+  if (totalLoaded == 0 && !corrupt) return false;  // empty file
+
+  advanceEntriesSaved_ = totalLoaded;
+  advanceLastSaveMs_ = millis();
+  advanceDirty_ = corrupt;  // rewrite from the RAM table on the next save
+  LOG_DBG("SDCF", "Advance cache loaded: %u entries from %s%s", totalLoaded, path, corrupt ? " (truncated)" : "");
+  return true;
+}
+
+void SdCardFont::persistAdvanceTable(const bool force) {
+  if (!loaded_ || contentHash_ == 0) return;
+
+  uint32_t total = 0;
+  for (uint8_t i = 0; i < MAX_STYLES; i++) total += advanceTableSize_[i];
+  if (total == 0) return;
+
+  const uint32_t now = millis();
+  if (!force) {
+    if (!advanceDirty_) return;
+    if (total < advanceEntriesSaved_ + ADVANCE_SAVE_MIN_NEW) return;
+    if (now - advanceLastSaveMs_ < ADVANCE_SAVE_MIN_INTERVAL_MS) return;
+  }
+
+  char path[64];
+  advanceCachePath(contentHash_, path, sizeof(path));
+  Storage.mkdir("/.crosspoint");
+  Storage.mkdir("/.crosspoint/fontcache");
+
+  HalFile file;
+  if (!Storage.openFileForWrite("SDCF", path, file)) {
+    LOG_ERR("SDCF", "Advance cache: cannot write %s", path);
+    return;
+  }
+
+  auto ioBuf = std::unique_ptr<uint8_t[]>(new (std::nothrow) uint8_t[ADVANCE_IO_RECORDS * ADVANCE_RECORD_SIZE]);
+  if (!ioBuf) {
+    LOG_ERR("SDCF", "Advance cache: staging alloc failed (%u bytes)",
+            static_cast<unsigned>(ADVANCE_IO_RECORDS * ADVANCE_RECORD_SIZE));
+    return;
+  }
+
+  uint8_t hdr[ADVANCE_FILE_HEADER_SIZE] = {};
+  const uint16_t version = ADVANCE_FILE_VERSION;
+  const uint32_t limit = ADVANCE_CACHE_LIMIT;
+  memcpy(hdr, "XFAD", 4);
+  memcpy(hdr + 4, &version, sizeof(version));
+  memcpy(hdr + 8, &limit, sizeof(limit));
+  memcpy(hdr + 12, &contentHash_, sizeof(contentHash_));
+  size_t written = file.write(hdr, sizeof(hdr));
+  size_t expected = ADVANCE_FILE_HEADER_SIZE;
+
+  for (uint8_t si = 0; si < MAX_STYLES; si++) {
+    const uint32_t count = advanceTableSize_[si];
+    if (count == 0) continue;
+    uint8_t shdr[ADVANCE_STYLE_HEADER_SIZE] = {};
+    shdr[0] = si;
+    memcpy(shdr + 4, &count, sizeof(count));
+    written += file.write(shdr, sizeof(shdr));
+    expected += ADVANCE_STYLE_HEADER_SIZE + static_cast<size_t>(count) * ADVANCE_RECORD_SIZE;
+
+    const AdvanceEntry* table = advanceTable_[si];
+    for (uint32_t off = 0; off < count; off += ADVANCE_IO_RECORDS) {
+      const uint32_t remaining = count - off;
+      const uint32_t chunk = remaining > ADVANCE_IO_RECORDS ? ADVANCE_IO_RECORDS : remaining;
+      for (uint32_t i = 0; i < chunk; i++) {
+        uint8_t* rec = ioBuf.get() + i * ADVANCE_RECORD_SIZE;
+        memcpy(rec, &table[off + i].codepoint, sizeof(uint32_t));
+        memcpy(rec + 4, &table[off + i].advanceX, sizeof(uint16_t));
+      }
+      const size_t bytes = chunk * ADVANCE_RECORD_SIZE;
+      if (file.write(ioBuf.get(), bytes) != bytes) {
+        LOG_ERR("SDCF", "Advance cache: short write to %s", path);
+        return;  // incomplete file: rejected by the size/header checks on load
+      }
+      written += bytes;
+    }
+  }
+
+  file.flush();
+  if (written != expected) {
+    LOG_ERR("SDCF", "Advance cache: write mismatch (%u/%u bytes) %s", static_cast<unsigned>(written),
+            static_cast<unsigned>(expected), path);
+    return;
+  }
+
+  advanceDirty_ = false;
+  advanceEntriesSaved_ = total;
+  advanceLastSaveMs_ = now;
+  LOG_DBG("SDCF", "Advance cache saved: %u entries, %u bytes -> %s", total, static_cast<unsigned>(written), path);
 }
 
 // Given a sorted array of unique codepoints, resolve glyph indices per style,

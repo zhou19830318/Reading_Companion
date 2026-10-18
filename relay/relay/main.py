@@ -22,7 +22,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel
 
 from . import SERVICE_NAME, __version__
-from . import metrics, protocol
+from . import dict_source, metrics, protocol
 from .auth import check_admin, check_device
 from .config import Settings, get_settings
 from .logging_setup import setup_logging
@@ -365,6 +365,31 @@ async def chat(request: Request, body: ChatRequest):
             return JSONResponse(status_code=401, content={"error": ErrorCode.UNAUTHORIZED.value})
 
     request_id = body.requestId or protocol.new_id()
+
+    # Dictionary cards come from the offline data by default: the facts
+    # (readings, radical, senses, 组词) must not be model output. DICT_SOURCE=llm
+    # restores the generated cards; when the data is missing we degrade to the
+    # LLM path rather than failing the lookup entirely.
+    if body.mode == "dict" and settings.dict_source != "llm":
+        source = dict_source.get_dict_source(settings.dict_data_dir)
+        if source is not None:
+            card = source.card(body.text)
+            log.info("dict card served", extra={"source": "local", "bytes": len(card.encode("utf-8"))})
+            if not body.stream:
+                return {
+                    "requestId": request_id,
+                    "text": card,
+                    "usage": {"inputTokens": 0, "outputTokens": 0},
+                }
+
+            async def local_card_events():
+                yield _sse({"type": "llm.start", "requestId": request_id})
+                yield _sse({"type": "llm.delta", "requestId": request_id, "text": card})
+                yield _sse({"type": "session.done", "requestId": request_id})
+
+            return StreamingResponse(local_card_events(), media_type="text/event-stream")
+        log.warning("dict data unavailable; serving this card from the LLM")
+
     dict_mode = body.mode == "dict"
     system = settings.llm_dict_system_prompt if dict_mode else None
     max_tokens = body.maxTokens or (settings.dict_max_tokens if dict_mode else settings.max_llm_output_tokens)

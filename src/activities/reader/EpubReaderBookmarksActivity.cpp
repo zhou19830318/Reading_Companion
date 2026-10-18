@@ -51,7 +51,27 @@ void EpubReaderBookmarksActivity::onEnter() {
   requestUpdate();
 }
 
-void EpubReaderBookmarksActivity::onExit() { Activity::onExit(); }
+void EpubReaderBookmarksActivity::onExit() {
+  // Every exit path (back, open-jump, last-item delete) lands here, so the
+  // batched deletions are written once, here, off the delete interaction.
+  flushBookmarks();
+  Activity::onExit();
+}
+
+// Writes the list to the bookmark file when deletions made it dirty. One write
+// for the whole session instead of one blocking save per delete; the reader
+// reloads the file on return, so the delay is invisible.
+void EpubReaderBookmarksActivity::flushBookmarks() {
+  if (!bookmarksDirty) {
+    return;
+  }
+  bookmarksDirty = false;  // cleared first: a failed write is not retried here
+  const std::string path = BookmarkUtil::getBookmarkPath(epubPath);
+  Storage.mkdir(BookmarkUtil::getBookmarksDir().c_str());
+  if (!JsonSettingsIO::saveBookmarks(bookmarks, path.c_str())) {
+    LOG_ERR("EPB", "Failed to save bookmarks after delete");
+  }
+}
 
 int EpubReaderBookmarksActivity::getGutterBottom(const GfxRenderer& renderer) {
   const auto orientation = renderer.getOrientation();
@@ -74,11 +94,9 @@ void EpubReaderBookmarksActivity::loop() {
         return;
       }
       bookmarks.erase(bookmarks.begin() + selectorIndex);
-      const std::string path = BookmarkUtil::getBookmarkPath(epubPath);
-      Storage.mkdir(BookmarkUtil::getBookmarksDir().c_str());
-      if (!JsonSettingsIO::saveBookmarks(bookmarks, path.c_str())) {
-        LOG_ERR("EPB", "Failed to save bookmarks after delete");
-      }
+      // Deferred: batch all deletions into a single write in onExit(), so the
+      // confirm UI never waits behind the SD write.
+      bookmarksDirty = true;
 
       // Move selector up if we deleted the last item
       if (selectorIndex >= bookmarks.size() && selectorIndex > 0) {

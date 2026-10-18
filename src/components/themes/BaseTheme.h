@@ -260,7 +260,11 @@ class BaseTheme {
   // withProgressBar reserves a strip below the progress bar for the percent
   // label drawn by fillPopupProgress(showPercentLabel=true); the two flags
   // must be used together.
-  virtual Rect drawPopup(const GfxRenderer& renderer, const char* message, bool withProgressBar = false) const;
+  // display=false draws the popup into the framebuffer without pushing it, so
+  // callers that know only the popup changed can window-push the returned rect
+  // (e.g. GfxRenderer::displayWindow) instead of a full-panel refresh.
+  virtual Rect drawPopup(const GfxRenderer& renderer, const char* message, bool withProgressBar = false,
+                         bool display = true) const;
   virtual void fillPopupProgress(const GfxRenderer& renderer, const Rect& layout, const int progress,
                                  bool showPercentLabel = false) const;
   void drawStatusBar(GfxRenderer& renderer, const float bookProgress, const int currentPage, const int pageCount,

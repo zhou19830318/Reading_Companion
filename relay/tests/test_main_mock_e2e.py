@@ -259,11 +259,14 @@ class _CapturingProvider:
 
 
 def test_chat_dict_mode_uses_dict_prompt_and_token_budget(client, monkeypatch):
-    from relay.config import get_settings
+    from relay.config import get_settings, reload_settings
 
+    # The optional LLM card path (DICT_SOURCE=llm); the default is the offline
+    # data, covered in test_dict_source.py.
+    monkeypatch.setenv("DICT_SOURCE", "llm")
+    settings = reload_settings()
     provider = _CapturingProvider()
     monkeypatch.setattr("relay.main.make_llm_provider", lambda settings: provider)
-    settings = get_settings()
     r = client.post("/api/v1/chat", json={"text": "踌", "stream": False, "mode": "dict"}, headers=ADMIN)
     assert r.status_code == 200
     assert "【拼音】" in r.json()["text"]

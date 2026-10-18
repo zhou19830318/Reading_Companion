@@ -506,6 +506,8 @@ LLM_BASE_URL=https://<workspace-id>.cn-beijing.maas.aliyuncs.com/compatible-mode
 ALLOWED_DEVICE_IDS=<device-id-list>
 MAX_AUDIO_SECONDS=30
 MAX_LLM_OUTPUT_TOKENS=256
+# 查字典卡片的数据来源：local=随包发布的离线数据（默认，推荐），llm=模型生成
+DICT_SOURCE=local
 ```
 
 真实部署时不要把上述占位符原样使用。API Key 只保存在服务器环境变量中，ESP32 只保存 Relay 的设备认证 token，且该 token 只允许访问当前设备的语音接口。
@@ -784,6 +786,13 @@ Content-Type: application/json
 ```
 
 `stream=true` 时返回 SSE；`stream=false` 时返回完整 JSON。该接口必须默认关闭公网访问，或者只允许服务器内网/管理员 token 访问，避免被扫描后消耗 LLM 配额。
+
+`mode="dict"` 时返回阅读器"查字典"卡片的 `【…】` 行文本。默认
+`DICT_SOURCE=local`：读音/部首/笔画来自 Unihan，释义与组词来自随包发布的
+新华字典离线数据（`dict-data/`，MIT），**不经过 LLM**；未收录字返回"未收录"
+卡片、非汉字输入返回"无法识别"卡片，而非编造内容。`DICT_SOURCE=llm` 可恢复旧行为（模型生成，可能含事实性错误，
+不建议）。离线数据缺失时自动降级为 LLM 并在日志告警；`/readyz` 的 `dict`
+字段给出 `local` / `local_missing_data` / `llm`。
 
 #### 17.5.5 管理指标接口
 

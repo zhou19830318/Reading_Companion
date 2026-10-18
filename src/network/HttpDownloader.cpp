@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <WifiIdleManager.h>
 #include <base64.h>
 #include <esp_crt_bundle.h>
 #include <esp_http_client.h>
@@ -57,6 +58,11 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
 HttpDownloader::DownloadError runRequest(const std::string& url, const std::string& username,
                                          const std::string& password, Sink& sink, const std::string& jsonBody,
                                          const std::string& bearerToken, const uint32_t timeoutMs) {
+  // Every HTTP round is network progress: keep the idle Wi-Fi manager from
+  // powering the radio down mid-browse (OPDS never arms it, but a recent
+  // dictionary/AI use can have it armed) or mid-download.
+  WIFI_IDLE.noteActivity();
+
   esp_http_client_config_t config = {};
   config.url = url.c_str();
   config.buffer_size = HTTP_RX_BUF;

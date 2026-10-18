@@ -98,6 +98,13 @@ void GfxRenderer::ensureSdCardFontReady(int fontId, const std::vector<std::strin
   }
 }
 
+void GfxRenderer::persistSdCardFontAdvances(int fontId) const {
+  auto it = sdCardFonts_.find(fontId);
+  if (it != sdCardFonts_.end()) {
+    it->second->persistAdvanceTable();
+  }
+}
+
 void GfxRenderer::begin() {
   frameBuffer = display.getFrameBuffer();
   if (!frameBuffer) {
@@ -1367,6 +1374,14 @@ void GfxRenderer::invertScreen() const {
   }
 }
 
+void GfxRenderer::requestGhostCleanup() const {
+  // refreshCadence is 1..30 from settings; parking at cadence-1 makes the next
+  // FAST push hit the promotion test (pagesSinceCleanup + 1 >= refreshCadence).
+  if (refreshCadence > 0) {
+    pagesSinceCleanup = static_cast<uint8_t>(refreshCadence - 1);
+  }
+}
+
 void GfxRenderer::displayBuffer(const HalDisplay::RefreshMode refreshMode) const {
   auto elapsed = millis() - start_ms;
   LOG_DBG("GFX", "Time = %lu ms from clearScreen to displayBuffer", elapsed);
@@ -1376,13 +1391,9 @@ void GfxRenderer::displayBuffer(const HalDisplay::RefreshMode refreshMode) const
   // Global ghosting-cleanup cadence. FAST_REFRESH writes only BW RAM and skips
   // any pixel whose RAM code is unchanged, so grey charge left by anti-aliased
   // text, popups and earlier menu frames is never re-driven until an absolute
-  // waveform runs. The reader already counts down its own N pages
-  // (ReaderUtils::displayWithRefreshCycle) but the other 70+ call sites had no
-  // cadence at all, which is why menus could ghost indefinitely. One shared
-  // counter here covers them all; the reader's explicit HALF_REFRESH resets it
-  // so the two never double up.
+  // waveform runs. One shared counter covers every call site; requestGhostCleanup()
+  // parks it so a content-driven cleanup (image pages) lands on the next push.
   if (refreshCadence > 0) {
-    static uint8_t pagesSinceCleanup = 0;  // 1 byte, function-static: one counter for the whole firmware
     // Consume one tick of the transition guard per push, before deciding the
     // mode. Any non-FAST request counts too: it still replaces the screen, so
     // it should not silently eat the pending cleanup for the frames that follow.
@@ -1675,6 +1686,25 @@ bool GfxRenderer::copyBufferToRegion(int lx, int ly, int lw, int lh, const uint8
     uint8_t* dst = frameBuffer + (y0 + row) * panelWidthBytes + byteX0;
     memcpy(dst, buf + row * bytesPerRow, bytesPerRow);
   }
+  return true;
+}
+
+bool GfxRenderer::displayWindow(const int logicalX, const int logicalY, const int logicalWidth, const int logicalHeight,
+                                const HalDisplay::RefreshMode refreshMode) const {
+  int x0, y0, x1, y1;
+  if (!logicalRectToPhysicalBounds(orientation, logicalX, logicalY, logicalWidth, logicalHeight, panelWidth,
+                                   panelHeight, &x0, &y0, &x1, &y1)) {
+    return false;
+  }
+  // The controller's windowed RAM addressing works in byte columns. x1 is
+  // already clamped to the panel, so widening the right edge to a whole byte
+  // can only reach panelWidth, never past it.
+  const int byteX0 = x0 / 8;
+  const int byteX1 = x1 / 8;
+  const int w = (byteX1 - byteX0 + 1) * 8;
+  const int h = y1 - y0 + 1;
+  display.displayWindow(static_cast<uint16_t>(byteX0 * 8), static_cast<uint16_t>(y0), static_cast<uint16_t>(w),
+                        static_cast<uint16_t>(h), refreshMode);
   return true;
 }
 

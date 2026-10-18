@@ -18,9 +18,12 @@
 //   * never send from inside the WS callback (armed flags flush in poll()),
 //   * the event notifier must not touch this object (set a flag, repaint).
 //
-// One session per instance. A completed (Done) or failed (Failed) session is
-// terminal: recovery is the activity's decision (retry budget or the legacy
-// STT + OpenClaw path), so the library's own auto-redial is disabled.
+// Session lifecycle: a finished (Done) session keeps its socket — the next
+// start() arms a fresh session on it (the server replaces the finished one),
+// which is what keeps the dial out of the capture window. A failed (Failed)
+// transport is terminal: recovery is the activity's decision (retry budget or
+// the legacy STT + OpenClaw path), so the library's own auto-redial is
+// disabled.
 namespace VoiceRelay {
 
 class Client {
@@ -77,10 +80,31 @@ class Client {
     notifyFn_ = fn;
   }
 
-  // Validates url/token/deviceId, allocates the socket, arms the dial. False
-  // means the session was never attempted; transportError() says why. `mode`
-  // is the upstream pipeline ("relay" / "dictation"); nullptr keeps "relay".
+  // Arms a round: validates url/token/deviceId, then either dials or (warm
+  // Connecting / Done with an open socket) arms on the socket already on
+  // hand — arming on an open socket writes no dial, so no handshake lands in
+  // the capture window. False means the round was never attempted or cannot
+  // proceed here; transportError() says why (state is Failed on the cold
+  // paths, which the activity turns into the legacy fallback). `mode` is the
+  // upstream pipeline ("relay" / "dictation"); nullptr keeps "relay".
   bool start(const char* url, const char* token, const char* deviceId, const char* mode = nullptr);
+  // Opens the socket (TCP connect + upgrade) without arming a session, so the
+  // blocking dial runs before any microphone is live: poll() drives it, the
+  // next start() adopts it as warm, and a failure parks quietly back at Idle
+  // — a warm-up miss must never poison a round. Rationale: the ~0.9 s dial
+  // starves the 8 ms I2S DMA ring of any loop pass that runs inside a
+  // capture, and the first second of every relay round never reached the PCM
+  // buffer (measured 2026-10-17: server frame counts trailed each capture by
+  // exactly the handshake window, droppedFrames=0).
+  bool prepare(const char* url, const char* token, const char* deviceId);
+  // Upgrade finished: the socket can carry a session right now (warm or
+  // mid-session).
+  bool connected() const { return wsOpen_; }
+  // A dial is in flight (socket opened, upgrade not finished): a poll() pass
+  // now blocks for the connect. Callers with a live microphone defer polling
+  // until it clears — the PCM flush after the capture already handles a
+  // session that only comes up once the mic is off.
+  bool dialing() const { return state_ == State::Connecting && !wsOpen_; }
   // Pumps the socket, flushes armed sends, enforces the timers. Call every
   // loop pass between start() and close().
   void poll();
@@ -113,6 +137,13 @@ class Client {
   void handleText(const char* json, size_t len);
   void handleEvent(const Event& event);
   void fail(TransportError error);
+  // Shared front half of start()/prepare(): validate, reset flags, allocate
+  // the socket, begin(). `warm` selects the failure mode: a warm miss sets
+  // transportError() and stays Idle, a cold miss fails the round.
+  bool setUp(const char* url, const char* token, const char* deviceId, bool warm);
+  // Per-session reset + session.start build (fresh request id). Runs on every
+  // arm, cold or reused socket.
+  bool buildRound(const char* mode);
   void sendStart();
   void sendAudioStart();
   void releaseSocket();
@@ -137,6 +168,13 @@ class Client {
   // Upgrade finished (WStype_CONNECTED seen); gates sendStart() and separates
   // "dial never opened" from "dial opened, server never answered".
   bool wsOpen_ = false;
+  // Set by prepare(): this socket is a warm-up, not a round. A warm socket
+  // that drops parks quietly at Idle instead of failing anything, and it
+  // arms no startPending_ of its own (start() does when it adopts it).
+  bool warm_ = false;
+  // A warm socket closed from inside its own dispatch: the client cannot be
+  // freed from within ws_->loop(), so the next poll() pass releases it.
+  bool releasePending_ = false;
   // audio.end is out; the only remaining event is session.done (or an error).
   bool ending_ = false;
   PcmFramer framer_;

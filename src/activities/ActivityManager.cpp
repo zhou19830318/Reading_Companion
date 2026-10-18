@@ -103,8 +103,12 @@ void ActivityManager::loop() {
           handler(pendingResult);
         }
 
-        // Request an update to ensure the popped activity gets re-rendered
-        if (pendingAction == PendingAction::None) {
+        // Request an update to ensure the popped activity gets re-rendered —
+        // unless it is holding a live microphone capture (a capture started
+        // inside the result handler): the refresh would starve the I2S ring
+        // for its whole duration and drop that much audio (VoiceActivity's
+        // Wi-Fi detour before a recording does exactly this without the gate).
+        if (pendingAction == PendingAction::None && !currentActivity->preventAutoUpdate()) {
           requestUpdate();
         }
 
@@ -128,6 +132,10 @@ void ActivityManager::loop() {
         // Move current activity to stack
         stackActivities.push_back(std::move(currentActivity));
         LOG_DBG("ACT", "Pushed to activity stack, new size = %zu", stackActivities.size());
+        // The stacked activity stays alive but stops rendering; quiesce its
+        // background work before the new activity can rewire shared state
+        // (fonts, caches) underneath it.
+        stackActivities.back()->onPause();
       }
       pendingAction = PendingAction::None;
       currentActivity = std::move(pendingActivity);

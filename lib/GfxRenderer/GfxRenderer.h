@@ -48,6 +48,12 @@ class GfxRenderer {
   // FAST_REFRESH to an absolute waveform. Mirrors SETTINGS.refreshFrequency;
   // injected from src/ because PlatformIO libraries cannot see src/ headers.
   int refreshCadence = 15;
+  // Shared ghosting-cleanup counter, one for the whole firmware: every FAST
+  // push ticks it and every Nth push is promoted to HALF. This is the ONLY
+  // cleanup cadence — the readers no longer keep a second per-page counter
+  // (that used to drift from this one whenever other screens pushed frames,
+  // producing irregular double flashes a few pages apart).
+  mutable uint8_t pagesSinceCleanup = 0;
   // Guard for the promotion above: while armed (a countdown of pushes), each
   // displayBuffer() keeps its FAST differential even if the counter is due.
   // Activity switches arm it (Activity::onEnter / onExit) because the frames
@@ -143,6 +149,9 @@ class GfxRenderer {
   void ensureSdCardFontReady(int fontId, const char* utf8Text, uint8_t styleMask = 0x0F) const;
   void ensureSdCardFontReady(int fontId, const std::vector<std::string>& words, bool includeHyphen,
                              uint8_t styleMask = 0x0F) const;
+  // Persist the SD font's advance table to its SD cache file (dirty + throttled
+  // internally) so a later load() starts warm. No-op for non-SD fonts.
+  void persistSdCardFontAdvances(int fontId) const;
 
   // Orientation control (affects logical width/height and coordinate transforms)
   void setOrientation(const Orientation o) { orientation = o; }
@@ -152,16 +161,23 @@ class GfxRenderer {
   void setFadingFix(const bool enabled) { fadingFix = enabled; }
   void setRefreshCadence(const int pushes) { refreshCadence = pushes; }
   void holdOffCadenceForNextPush() { cadenceHoldoffPushes = CADENCE_HOLDOFF_PUSHES; }
-  // Peek only — the counter itself is decremented inside displayBuffer(), so a
-  // caller that branches on it and then pushes stays in sync with the cadence.
-  bool isCadenceHeldOff() const { return cadenceHoldoffPushes > 0; }
+  // Park the shared cleanup counter one short of the threshold so the next
+  // FAST push promotes to HALF (the transition hold-off still wins, moving it
+  // to the push after). Used by the readers after an image page: the gray
+  // residue the grayscale pass leaves in the image region cannot be cleared
+  // by a differential refresh.
+  void requestGhostCleanup() const;
 
   // Screen ops
   int getScreenWidth() const;
   int getScreenHeight() const;
   void displayBuffer(HalDisplay::RefreshMode refreshMode = HalDisplay::FAST_REFRESH) const;
-  // EXPERIMENTAL: Windowed update - display only a rectangular region
-  // void displayWindow(int x, int y, int width, int height) const;
+  // Windowed update: push only the logical rect (orientation-aware; widened to
+  // the panel's 8-pixel RAM columns). Does NOT advance the ghost-cleanup
+  // cadence — the rest of the panel is untouched. Returns false when the rect
+  // is empty or fully off-panel, in which case nothing is displayed.
+  bool displayWindow(int logicalX, int logicalY, int logicalW, int logicalH,
+                     HalDisplay::RefreshMode refreshMode = HalDisplay::FAST_REFRESH) const;
   void invertScreen() const;
   void clearScreen(uint8_t color = 0xFF) const;
   void getOrientedViewableTRBL(int* outTop, int* outRight, int* outBottom, int* outLeft) const;

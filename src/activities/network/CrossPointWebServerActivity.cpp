@@ -17,6 +17,7 @@ static OnePageMdnsStub MDNS;
 #include <HalPowerManager.h>
 #include <I18n.h>
 #include <WiFi.h>
+#include <WifiIdleManager.h>
 #include <esp_task_wdt.h>
 
 #include <cstddef>
@@ -74,6 +75,12 @@ int barsForRssi(int rssi, int currentBars) {
 
 void CrossPointWebServerActivity::onEnter() {
   Activity::onEnter();
+  // This screen is a live network session: hold the radio while it is up so a
+  // client that pauses between requests cannot trip the idle teardown, and arm
+  // the manager so the reuse case (Wi-Fi already up on entry, this activity
+  // does not own the teardown) still powers the radio down after exit.
+  WIFI_IDLE.arm();
+  WIFI_IDLE.hold();
 
   LOG_DBG("WEBACT", "Free heap at onEnter: %d bytes", ESP.getFreeHeap());
 
@@ -101,6 +108,7 @@ void CrossPointWebServerActivity::onEnter() {
 
 void CrossPointWebServerActivity::onExit() {
   Activity::onExit();
+  WIFI_IDLE.release();  // ends the onEnter() hold; the idle countdown resumes
 
   LOG_DBG("WEBACT", "Free heap at onExit start: %d bytes", ESP.getFreeHeap());
 

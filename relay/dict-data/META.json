@@ -1,0 +1,17 @@
+{
+  "built_at": "2026-10-18T06:18:38+00:00",
+  "chars": 28056,
+  "licenses": {
+    "Unihan": "Unicode License (permissive)",
+    "chinese-xinhua": "MIT",
+    "jieba": "MIT"
+  },
+  "sources": {
+    "Unihan.zip": "a0226610e324bcf784ac380e11f4cbf533ee1e6b3d028b0991bf8c0dc3f85853",
+    "ci.json": "739e086d61dc9b95cd1df92095720e6391f952a41c476d3281ef95ebed869a09",
+    "jieba_dict.txt": "7197c3211ddd98962b036cdf40324d1ea2bfaa12bd028e68faa70111a88e12a8",
+    "word.json": "8ae3453eacc5b0f3fdfba47eac8bb686cd73914d278e8b851ae6ef81082f80e7"
+  },
+  "with_senses": 13849,
+  "with_words": 11357
+}

@@ -15,6 +15,7 @@
 #include <OpenClawIdentity.h>
 #include <OpenClawRedact.h>
 #include <WiFi.h>
+#include <WifiIdleManager.h>
 #include <esp_heap_caps.h>
 #include <esp_random.h>
 
@@ -45,6 +46,14 @@ Session::~Session() { close(); }
 
 Session& Session::instance() {
   static Session s;
+  static bool idleHookInstalled = false;
+  if (!idleHookInstalled) {
+    idleHookInstalled = true;
+    // The idle manager powers the radio down after a quiet spell; park the
+    // socket first so a live page does not watch the reconnect budget burn
+    // out against a dead radio (see park()).
+    WifiIdleManager::getInstance().setShutdownHook(&s, [](void* ctx) { static_cast<Session*>(ctx)->park(); });
+  }
   return s;
 }
 
@@ -251,13 +260,25 @@ bool Session::redial() {
 }
 
 void Session::close() {
+  teardownSocket();
+  freeChatBuffer();
+}
+
+void Session::park() {
+  // Keep the chat buffer: a screen still showing the reply must keep rendering
+  // it after the radio went down (the idle manager's case). The socket, CA and
+  // reconnect state go exactly as in close(), so no dial is attempted while
+  // the radio is off; the next startConnect() re-creates all of them.
+  teardownSocket();
+}
+
+void Session::teardownSocket() {
   if (ws_) {
     ws_->disconnect();
     ws_.reset();
   }
   handshake_.reset();
   caPem_.reset();
-  freeChatBuffer();
   state_ = State::Idle;
   linkUp_ = false;
   // A deliberate teardown cancels any reconnect the socket had scheduled:
@@ -286,6 +307,13 @@ void Session::scheduleReconnect() {
 }
 
 void Session::poll() {
+  // Keep the idle Wi-Fi manager away while the session is genuinely working:
+  // dialing, shaking hands, or waiting on a reply. A Connected-but-quiet
+  // socket does NOT count — health ticks must not hide an idle radio.
+  if (awaitingReply_ || reconnectPending_ || cronReqPending_ || retryPending_ || state_ == State::Connecting ||
+      state_ == State::Handshake || state_ == State::Challenge) {
+    WifiIdleManager::getInstance().noteActivity();
+  }
   if (pendingPersistToken_) {
     pendingPersistToken_ = false;
     const char* issued = handshake_ != nullptr ? handshake_->issuedDeviceToken() : nullptr;

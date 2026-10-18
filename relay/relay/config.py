@@ -68,6 +68,13 @@ class Settings(BaseSettings):
     dict_max_tokens: int = Field(600, alias="LLM_DICT_MAX_TOKENS")
     llm_disable_thinking: bool = Field(True, alias="LLM_DISABLE_THINKING")
 
+    # --- dictionary cards ---------------------------------------------------
+    # "local" (default): serve the shipped offline data (tools/build_dict_data.py).
+    # "llm": generate cards with the dict system prompt (pre-local behavior).
+    dict_source: str = Field("local", alias="DICT_SOURCE")
+    # Empty = auto: $RELEASE/dict-data, then relay/dict-data in a checkout.
+    dict_data_dir: str = Field("", alias="DICT_DATA_DIR")
+
     dashscope_api_key: str = Field("", alias="DASHSCOPE_API_KEY")
     dashscope_workspace_id: str = Field("", alias="DASHSCOPE_WORKSPACE_ID")
     dashscope_region: str = Field("cn-beijing", alias="DASHSCOPE_REGION")
@@ -127,6 +134,14 @@ class Settings(BaseSettings):
             v.lower(), v.lower()
         )
 
+    @field_validator("dict_source")
+    @classmethod
+    def _dict_source(cls, v: str) -> str:
+        v = v.lower()
+        if v not in ("local", "llm"):
+            raise ValueError("DICT_SOURCE must be 'local' or 'llm'")
+        return v
+
     # ------------------------------------------------------------------ helpers
     @property
     def allowed_devices(self) -> list[str]:
@@ -167,9 +182,12 @@ class Settings(BaseSettings):
 
     def ready_report(self) -> dict[str, str]:
         """What /readyz reports. Never contains key material."""
+        from . import dict_source  # local import: keeps config import light
+
         return {
             "asr": "configured" if self._asr_ready() else "missing_config",
             "llm": "configured" if self._llm_ready() else "missing_config",
+            "dict": dict_source.describe(self.dict_source, self.dict_data_dir),
             "region": self.dashscope_region,
         }
 

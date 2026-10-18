@@ -14,6 +14,7 @@
 #include <Logging.h>
 #include <SPI.h>
 #include <WiFi.h>
+#include <WifiIdleManager.h>
 #include <builtinFonts/all.h>
 #include <esp32-hal-psram.h>
 #include <esp_timer.h>
@@ -837,6 +838,12 @@ void loop() {
     screenshotButtonsReleased = true;
     screenshotComboActive = false;
   }
+
+  // Idle Wi-Fi teardown: the network features arm this on entry and note their
+  // progress; once they have all been quiet for a minute the radio is powered
+  // down (and the gateway socket parked), so reading never keeps paying the
+  // 160 MHz + ~38 KB residency a finished lookup left behind.
+  WIFI_IDLE.poll();
 
   const unsigned long sleepTimeoutMs = SETTINGS.getSleepTimeoutMs();
   if (sleepTimeoutMs > 0 && millis() - lastActivityTime >= sleepTimeoutMs) {

@@ -7,6 +7,7 @@
 
 #include "BookmarkEntry.h"
 #include "EpubReaderMenuActivity.h"
+#include "NextChapterIndexer.h"
 #include "NoteStore.h"
 #include "ProgressMapper.h"
 #include "activities/Activity.h"
@@ -14,13 +15,16 @@
 class EpubReaderActivity final : public Activity {
   std::shared_ptr<Epub> epub;
   std::unique_ptr<Section> section = nullptr;
+  // Builds the upcoming chapter's section file on a background task while the
+  // reader keeps turning pages; joined/cancelled before any other indexing
+  // (single-flight) and on onPause/onExit.
+  NextChapterIndexer nextChapterIndexer_;
   int currentSpineIndex = 0;
   int nextPageNumber = 0;
   std::optional<uint16_t> pendingPageJump;
   // Set when navigating to a footnote href with a fragment (e.g. #note1).
   // Cleared on the next render after the new section loads and resolves it to a page.
   std::string pendingAnchor;
-  int pagesUntilFullRefresh = 0;
   int cachedSpineIndex = 0;
   int cachedChapterTotalPageCount = 0;
   unsigned long lastPageTurnTime = 0UL;
@@ -43,6 +47,12 @@ class EpubReaderActivity final : public Activity {
   // removeReadBooksFromRecents feature (set at End-of-Book, cleared if paged back in).
   bool recentsEntryRemoved = false;
   unsigned long bookmarkMessageTime = 0UL;
+  // Deferred bookmark-file write (see addBookmark()/flushBookmarks()): the RAM
+  // cache is authoritative until the file is read again (bookmarks list open),
+  // so the SD write is batched to a quiet moment instead of blocking the
+  // toggle. Cleared by flushBookmarks().
+  bool bookmarksDirty = false;
+  unsigned long bookmarksDirtyAt = 0UL;
   // Set when the reader is left at end-of-book and SETTINGS.moveFinishedToReadFolder is on.
   // Consumed in onExit() to relocate the finished book into /Read/.
   bool pendingReadFolderMove = false;
@@ -116,6 +126,16 @@ class EpubReaderActivity final : public Activity {
   std::unique_ptr<uint8_t[]> stagedLsb_;
   std::unique_ptr<uint8_t[]> stagedMsb_;
   std::vector<FootnoteEntry> stagedFootnotes_;
+
+  // Identity of the full page render currently on the panel, and whether a
+  // bookmark toast has since been painted over it. Only the full page paths in
+  // render() re-assert this; every other render (and pause) invalidates it. A
+  // long-press bookmark toggle on an idle page then only has to draw and
+  // window-push the popup plus the status strip instead of reloading the page
+  // from SD, re-rendering it and redoing its grayscale pass (~2.4 s).
+  StageKey panelPageKey_;
+  bool panelPageKeyValid_ = false;
+  bool toastOnPanel_ = false;
   bool saveProgress(int spineIndex, int currentPage, int pageCount);
   // Jump to a percentage of the book (0-100), mapping it to spine and page.
   void jumpToPercent(int percent);
@@ -150,6 +170,7 @@ class EpubReaderActivity final : public Activity {
   void pageTurn(bool isForwardTurn);
   void loadCachedBookmarks();
   void addBookmark();
+  void flushBookmarks();
   void updateBookmarkFlag();
   uint16_t progressSeq_ = 0;  // dual-slot write counter (FR-01), seeded in onEnter()
 
@@ -162,6 +183,7 @@ class EpubReaderActivity final : public Activity {
       : Activity("EpubReader", renderer, mappedInput), epub(std::move(epub)) {}
   void onEnter() override;
   void onExit() override;
+  void onPause() override;
   void loop() override;
   void render(RenderLock&& lock) override;
   bool isReaderActivity() const override { return true; }

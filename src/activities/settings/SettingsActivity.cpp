@@ -3,6 +3,7 @@
 #include <GfxRenderer.h>
 #include <Logging.h>
 #include <WeatherCities.h>
+#include <WifiIdleManager.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -292,6 +293,11 @@ void SettingsActivity::toggleCurrentSetting() {
         startActivityForResult(std::make_unique<OpdsServerListActivity>(renderer, mappedInput), resultHandler);
         break;
       case SettingAction::Network:
+        // The Wi-Fi list connects to whatever the user picks; arm the idle
+        // manager so that connection is not left resident after Settings is
+        // left (the manager powers it down once quiet, or does nothing when
+        // nothing was connected).
+        WIFI_IDLE.arm();
         startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput, false), resultHandler);
         break;
       case SettingAction::ClearCache:

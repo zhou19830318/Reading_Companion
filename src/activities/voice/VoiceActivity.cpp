@@ -16,6 +16,7 @@
 #include <SttClient.h>
 #include <VoiceRelayClient.h>
 #include <WiFi.h>
+#include <WifiIdleManager.h>
 
 using Notes::NoteStore;
 using OpenClaw::ChatHistory;
@@ -66,6 +67,13 @@ bool VoiceActivity::injectTranscript(const char* text) {
 
 void VoiceActivity::onEnter() {
   Activity::onEnter();
+  // This screen can hit the network on any Confirm press (STT + chat) and its
+  // keyboard's send path waits on the gateway, so the radio is held for as
+  // long as the screen is frontmost; the idle countdown starts on exit. The
+  // session's own poll() notes dials and replies, so the hold only has to
+  // outlast the quiet stretches (thinking, typing, picking a tag).
+  WIFI_IDLE.arm();
+  WIFI_IDLE.hold();
   activeInstance_ = this;
   state_ = State::Idle;
   failReason_ = nullptr;
@@ -173,6 +181,7 @@ void VoiceActivity::onEnter() {
 }
 
 void VoiceActivity::onExit() {
+  WIFI_IDLE.release();  // ends the onEnter() hold; the idle countdown resumes
   if (activeInstance_ == this) activeInstance_ = nullptr;
   recorder_.close();
   sttParser_.reset();
@@ -217,7 +226,18 @@ bool VoiceActivity::preventAutoSleep() {
          session_.state() == OpenClaw::Session::State::Connecting;
 }
 
+bool VoiceActivity::preventAutoUpdate() const {
+  // Any repaint while the capture is live blocks the loop that drains the 8 ms
+  // I2S ring — the refresh costs ~0.8 s of audio. Covers the automatic
+  // post-result repaint after the Wi-Fi detour's handler already started a
+  // recording (the keyboard has its own override for its dictation).
+  return state_ == State::Listening || dictationState_ == DictationState::Recording;
+}
+
 void VoiceActivity::startSession() {
+  // Warm the relay socket first: it is independent of the OpenClaw session,
+  // and the dial must complete before the first capture starts.
+  warmRelay();
   if (!session_.loadConfig()) {
     // reason() carries the translated line; keep the screen usable.
     return;
@@ -416,6 +436,10 @@ const char* VoiceActivity::gatewayStatus() const {
 // ── Voice Relay ─────────────────────────────────────────────────────────────
 
 bool VoiceActivity::relayConfigured() {
+  // Workbench to-do round: the OpenClaw agent has to see the transcript — it
+  // is the only backend with the scheduling tool the card then lists. The
+  // relay may be perfectly healthy here; it just cannot create the job.
+  if (gatewayChat_) return false;
   if (SETTINGS.voiceRelayEnabled == 0) return false;
   // Manual send mode exists to review the local transcript before anything is
   // transmitted; the relay streams the audio live, so the chat round only
@@ -453,10 +477,42 @@ bool VoiceActivity::ensureRelay() {
   return true;
 }
 
+void VoiceActivity::warmRelay() {
+  if (!relayConfigured()) return;
+  if (relay_ == nullptr) {
+    relay_ = makeUniqueNoThrow<VoiceRelay::Client>();
+    if (relay_ == nullptr) return;  // the round itself retries the allocation
+    relay_->setEventNotifier(this, &VoiceActivity::onRelayEventTrampoline);
+  }
+  if (relay_->state() != VoiceRelay::Client::State::Idle) return;
+  if (!relay_->prepare(CLOUD_CFG.relayUrl, CLOUD_CFG.relayToken, CLOUD_CFG.relayDeviceId)) {
+    LOG_INF("VOICE", "warm dial skipped (%u)", static_cast<unsigned>(relay_->transportError()));
+  }
+}
+
+void VoiceActivity::pumpWarmRelay() {
+  // Drive a prepared dial to completion where no capture is live (startRecording
+  // before the mic powers, openNoteEditor before the keyboard takes the loop).
+  // loop()'s relay_->poll() drives it everywhere else. The dial's ~0.9 s blocks
+  // this pass by design — it must block here, not inside the capture.
+  if (relay_ == nullptr || relay_->state() != VoiceRelay::Client::State::Connecting) return;
+  const uint32_t deadline = millis() + RELAY_WARM_BUDGET_MS;
+  while (relay_->state() == VoiceRelay::Client::State::Connecting && !relay_->connected() && millis() < deadline) {
+    relay_->poll();
+    delay(1);
+  }
+}
+
 void VoiceActivity::startRelayRound() {
-  // A previous round is terminal (Done/Failed): close() parks it back at Idle
-  // so start() accepts the new session.
-  relay_->close();
+  // Only a live or failed round must be parked for start() to accept a new
+  // session. A warm socket (Connecting) and a finished round's socket (Done)
+  // are reused: arming a session on an open socket dials nothing, so the
+  // capture window keeps the whole handshake out of it.
+  const VoiceRelay::Client::State relayState = relay_->state();
+  if (relayState == VoiceRelay::Client::State::Active || relayState == VoiceRelay::Client::State::Starting ||
+      relayState == VoiceRelay::Client::State::Failed) {
+    relay_->close();
+  }
   relayReplyLen_ = 0;
   // Null on a keyboard-only dictation round (the client was armed without the
   // chat reply buffer); the chat paths always allocate it in ensureRelay().
@@ -483,6 +539,11 @@ void VoiceActivity::pumpRelayCapture() {
   if (relay_ == nullptr || relay_->state() != VoiceRelay::Client::State::Active) return;
   const size_t total = recorder_.samples();
   if (total <= relaySentSamples_) return;
+  // The warm socket keeps this at one VAD chunk (well under 500 ms); a larger
+  // backlog means the PCM buffer itself lagged a live round — the canary for
+  // a dial that still landed inside the capture.
+  const size_t backlogMs = (total - relaySentSamples_) * 1000 / HalMicrophone::SAMPLE_RATE;
+  if (backlogMs > 500) LOG_INF("VOICE", "relay catch-up: %u ms pending", static_cast<unsigned>(backlogMs));
   const size_t bytes = (total - relaySentSamples_) * sizeof(int16_t);
   if (relay_->sendAudio(reinterpret_cast<const uint8_t*>(recorder_.pcm() + relaySentSamples_), bytes)) {
     relaySentSamples_ = total;
@@ -660,10 +721,11 @@ void VoiceActivity::settleRelaySuccess() {
       return;
     }
     LOG_INF("VOICE", "relay dictation done (%u bytes)", static_cast<unsigned>(strlen(transcript_)));
-    relayClose();
     relayRound_ = false;
-    // Same release order as finishTranscription(): free the PCM, then hand the
-    // transcript to the keyboard (语音书签 / custom question).
+    // The socket stays up for the keyboard's next round (its 60 s idle close
+    // is caught by the upkeep poll). Same release order as
+    // finishTranscription(): free the PCM, then hand the transcript to the
+    // keyboard (语音书签 / custom question).
     recorder_.close();
     openNoteEditor();
     return;
@@ -691,10 +753,9 @@ void VoiceActivity::settleRelaySuccess() {
       "[LAT] relay local  connect=%ld asrFirstPartial=%ld asrFinal=%ld llmFirstToken=%ld llmFinal=%ld visibleTotal=%ld",
       static_cast<long>(ll.connect), static_cast<long>(ll.asrFirstPartial), static_cast<long>(ll.asrFinal),
       static_cast<long>(ll.llmFirstToken), static_cast<long>(ll.llmFinal), static_cast<long>(ll.visibleTotal));
-  // The session is over: release the socket + TLS buffers now instead of
-  // carrying them to the next round (relayRound_ keeps routing the panel and
-  // the history append to relayReply_, which close() does not touch).
-  relayClose();
+  // The session is over but the socket stays up: the next round arms a fresh
+  // session on it (no dial in the capture window). relayRound_ keeps routing
+  // the panel and the history append to relayReply_.
   recordHistoryTurn();
   // The answer is shown and fallback is off the table: release the PCM the way
   // finishTranscription() does for the legacy pipeline.
@@ -784,10 +845,15 @@ void VoiceActivity::startRecording() {
   // next stage.
   state_ = State::Listening;
   requestUpdateAndWait();
-  // Relay decision first: start() only arms the dial (the connect runs in
-  // loop()'s poll), so it costs nothing before the mic powers up, and the
-  // handshake overlaps the first seconds of speech. A rejected start simply
-  // leaves relayRound_ false and the capture proceeds on the legacy path.
+  // The dial must be done before the mic powers up — a pass of it inside a
+  // capture starves the 8 ms I2S DMA ring (measured: every relay round's
+  // server frame count trailed its capture by exactly the handshake window).
+  // onEnter warmed the socket; this catches the paths that arrive cold (no
+  // network until the Wi-Fi detour above, or a socket since closed).
+  warmRelay();
+  pumpWarmRelay();
+  // A rejected start simply leaves relayRound_ false and the capture proceeds
+  // on the legacy path.
   if (relayConfigured()) {
     if (!ensureRelay()) return;  // fail() already set the screen
     startRelayRound();
@@ -982,6 +1048,12 @@ void VoiceActivity::openNoteEditor() {
   // no SD write, and Idle lets the capture be redone. The dictation hooks make
   // the power key the talk key right here: capture, transcribe, insert at the
   // cursor, keep editing.
+  //
+  // The keyboard owns the loop next, so this is the last pass that can drive
+  // the relay dial: complete it here, where no capture is live (see
+  // warmRelay()). A warm socket makes the first power-key round loss-free.
+  warmRelay();
+  pumpWarmRelay();
   VoiceDictationHooks hooks;
   hooks.ctx = this;
   hooks.start = &VoiceActivity::dictationStartTrampoline;
@@ -1050,8 +1122,10 @@ bool VoiceActivity::dictationStart() {
   // silent round can never insert the previous transcript (relay or legacy).
   transcript_[0] = '\0';
   haveTranscript_ = false;
-  // Arm the relay before the mic powers up so the dial overlaps the first
-  // words (same reasoning as startRecording). The keyboard needs a bare client
+  // Arm the relay before the mic powers up — on the socket warmed by the note
+  // screen (startSession) and openNoteEditor(): a cold dial here would block
+  // the loop and starve the 8 ms I2S ring for the first second of speech. The
+  // keyboard needs a bare client
   // only — dictation events are ASR + session.done, no reply buffer — so the
   // question-shortcut path (no panel capture before the editor) allocates one
   // without ensureRelay(). On OOM the round stays on the legacy STT instead of
@@ -1100,7 +1174,11 @@ VoiceActivity::DictationState VoiceActivity::dictationPoll() {
 
   if (dictationRelay_) {
     if (relay_ != nullptr) {
-      relay_->poll();
+      // Same rule as loop(): a cold dial is deferred until the capture ends —
+      // a dial pass blocks ~0.9 s and starves the 8 ms I2S ring. Warm sockets
+      // never dial here, and the post-capture section below completes a dial
+      // that was deferred.
+      if (!captureLive || !relay_->dialing()) relay_->poll();
       pumpRelayCapture();
     }
     if (relay_ == nullptr || relayError_ || relay_->state() == VoiceRelay::Client::State::Failed) {
@@ -1266,8 +1344,15 @@ void VoiceActivity::loop() {
   // Note mode never opens the session; poll() on the unopened session is a
   // no-op, so this is safe in both modes. The same is true of the relay client
   // before its first start() — poll() guards on nullptr/Idle internally.
-  session_.poll();
-  if (relay_ != nullptr) relay_->poll();
+  //
+  // While the capture is live this pass must only feed the microphone: a WS
+  // dial (the OpenClaw session or a cold relay socket) blocks it for ~0.9 s
+  // and starves the recorder's 8 ms I2S ring. Neither is needed mid-capture —
+  // the relay flushes the buffered PCM once it connects, and the OpenClaw
+  // session is not touched until the transcript is ready.
+  const bool captureLive = state_ == State::Listening;
+  if (!captureLive) session_.poll();
+  if (relay_ != nullptr && !(captureLive && relay_->dialing())) relay_->poll();
 
   // Hint placement and action binding follow one rule. mapLabels() puts the
   // "previous" label on the front-Left key and "next" on the front-Right key,

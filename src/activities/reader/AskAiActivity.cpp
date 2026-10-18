@@ -15,6 +15,7 @@
 #include <Memory.h>
 #include <OpenClawHandshake.h>
 #include <WiFi.h>
+#include <WifiIdleManager.h>
 #include <esp_heap_caps.h>
 
 #include <algorithm>
@@ -69,7 +70,10 @@ void AskAiActivity::onEnter() {
   // is dialled only when a question is actually sent (ask-at-send, like the
   // note-mode fix in VoiceActivity), and prompt_/record_/lineBuf_ are allocated
   // lazily — always after the TLS dial has come back up. First paint comes
-  // straight from the armed context.
+  // straight from the armed context. The idle manager gets armed so a finished
+  // question powers the radio down once this screen goes quiet; ask-at-send
+  // re-prompts for Wi-Fi after such a teardown, so nothing strands.
+  WIFI_IDLE.arm();
   requestUpdate();
 }
 
@@ -400,16 +404,22 @@ bool AskAiActivity::buildPrompt() {
     for (int i = selStart_; i <= selEnd_ && budget > 0; i++) {
       const LineRef ref = lineRefs_[i];
       if (ref.len == 0) continue;
+      if (any) {
+        // The separator spends from the same budget the line bytes do — size
+        // take only after it, or a line that exactly fills the budget wraps
+        // the unsigned budget and the next memcpy runs past the buffer (same
+        // crash as the page loop below, 2026-10-17).
+        if (budget <= 1) break;
+        promptBuf[used++] = '\n';
+        budget--;
+        promptBuf[used] = '\0';
+      }
       size_t take = std::min(budget, static_cast<size_t>(ref.len));
       if (take < ref.len) {
         // Never cut a UTF-8 codepoint in half: back off a continuation byte.
         while (take > 0 && (static_cast<unsigned char>(linePool_[ref.off + take]) & 0xC0) == 0x80) take--;
       }
       if (take == 0) break;
-      if (any) {
-        promptBuf[used++] = '\n';
-        budget--;
-      }
       memcpy(promptBuf + used, linePool_ + ref.off, take);
       used += take;
       budget -= take;
@@ -440,14 +450,21 @@ bool AskAiActivity::buildPrompt() {
     section->currentPage = page;
     const std::string text = section->getTextFromSectionFile();
     if (text.empty()) continue;  // image-only page
+    if (any) {
+      // The separator spends from the same budget the page bytes do. Sizing
+      // take against the pre-separator budget let a page that exactly filled
+      // the budget overflow by one byte and wrap the unsigned budget to
+      // SIZE_MAX; the loop then memcpy'd the next page (961 bytes) far past
+      // the request buffer, smashing the heap (Guru Meditation, 2026-10-17).
+      if (budget <= 1) break;
+      promptBuf[used++] = '\n';
+      budget--;
+      promptBuf[used] = '\0';
+    }
     size_t take = std::min(budget, text.size());
     // Never cut a UTF-8 codepoint in half: back off a continuation byte.
     while (take > 0 && (static_cast<unsigned char>(text[take]) & 0xC0) == 0x80) take--;
     if (take == 0) break;
-    if (any) {
-      promptBuf[used++] = '\n';
-      budget--;
-    }
     memcpy(promptBuf + used, text.c_str(), take);
     used += take;
     budget -= take;

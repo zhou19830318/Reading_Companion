@@ -2,6 +2,7 @@
 
 #include <expat.h>
 
+#include <atomic>
 #include <climits>
 #include <functional>
 #include <memory>
@@ -27,6 +28,10 @@ class ChapterHtmlSlimParser {
   GfxRenderer& renderer;
   std::function<void(std::unique_ptr<Page>, uint16_t, uint16_t)> completePageFn;
   std::function<void(int)> popupFn;  // Indexing progress callback (percent 0-100)
+  // Cooperative cancellation for background indexing: polled once per parse
+  // chunk; null means the parse cannot be cancelled externally (foreground
+  // popup-path indexing, host tests).
+  const std::atomic<bool>* cancelFlag;
   int depth = 0;
   int skipUntilDepth = INT_MAX;
   int boldUntilDepth = INT_MAX;
@@ -120,7 +125,7 @@ class ChapterHtmlSlimParser {
                                  const std::string& imageBasePath, const uint8_t imageRendering = 0,
                                  std::vector<std::string> tocAnchors = {},
                                  const std::function<void(int)>& popupFn = nullptr,
-                                 const CssParser* cssParser = nullptr)
+                                 const CssParser* cssParser = nullptr, const std::atomic<bool>* cancelFlag = nullptr)
 
       : epub(epub),
         filepath(filepath),
@@ -135,6 +140,7 @@ class ChapterHtmlSlimParser {
         focusReadingEnabled(focusReadingEnabled),
         completePageFn(completePageFn),
         popupFn(popupFn),
+        cancelFlag(cancelFlag),
         cssParser(cssParser),
         embeddedStyle(embeddedStyle),
         imageRendering(imageRendering),

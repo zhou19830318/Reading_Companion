@@ -74,6 +74,7 @@ class VoiceActivity final : public Activity {
   void loop() override;
   void render(RenderLock&&) override;
   bool preventAutoSleep() override;
+  bool preventAutoUpdate() const override;
 
   // Question-input mode (AI-01): this screen is only a capture/keyboard
   // front-end for AskAiActivity. onEnter behaves like note mode (no radio, no
@@ -81,6 +82,13 @@ class VoiceActivity final : public Activity {
   // the transcript leaves through openNoteEditor() as KeyboardResult{...}
   // instead of being written to NoteStore.
   void setQuestionInput() { questionInput_ = true; }
+
+  // Gateway-chat override for the Workbench to-do card: its round must reach
+  // the OpenClaw agent — the only backend that can create the cron job the
+  // card lists on the way back. A configured relay is skipped for this
+  // instance (its LLM can only chat; a "remind me" answer is not a job), so
+  // the legacy record → STT → chat.send path runs even with the relay on.
+  void setGatewayChat() { gatewayChat_ = true; }
 
   // Serial-console debug hook (CMD:VOICE_TX, main.cpp): stands in for the STT
   // step so one chat round trip — and whatever the gateway answers it — can be
@@ -193,6 +201,15 @@ class VoiceActivity final : public Activity {
   // Note mode / custom-question mode: the transcript is handed to the keyboard
   // instead of the chat. Dictation rounds use the relay's STT-only pipeline.
   bool dictationMode() const { return noteContext_.valid || questionInput_; }
+  // Opens the relay socket ahead of any microphone: the blocking dial (~0.9 s)
+  // runs its loop pass while the mic is off, so the 8 ms I2S DMA ring never
+  // has to absorb it. Armed in startSession() and openNoteEditor(); loop()'s
+  // relay_->poll() drives it; startRelayRound() adopts the socket.
+  void warmRelay();
+  // Completes a prepared dial in place (same reasoning as warmRelay()) — for
+  // the spots where the next loop pass would already be inside a capture or
+  // under the keyboard: startRecording() and openNoteEditor().
+  void pumpWarmRelay();
   bool ensureRelay();
   void startRelayRound();
   void pumpRelayCapture();
@@ -317,6 +334,10 @@ class VoiceActivity final : public Activity {
   // exclusive with noteContext_.valid in practice (the reader arms one or the
   // other, never both).
   bool questionInput_ = false;
+  // Set by the Workbench to-do card (setGatewayChat): relayConfigured() then
+  // reports false so the round cannot be answered by a relay LLM with no
+  // scheduling tool.
+  bool gatewayChat_ = false;
   // NoteStore::append line scratch, same rationale as historyLine_ (an
   // escaped NTF1 line is at most LINE_CAP bytes; caller-owned PSRAM).
   char* noteLine_ = nullptr;
@@ -401,6 +422,11 @@ class VoiceActivity final : public Activity {
   // Back from the settled summary returns to the day list it was started from
   // instead of leaving the activity.
   bool cameFromHistory_ = false;
+
+  // openNoteEditor() drives the warm dial to completion before the keyboard
+  // opens (nothing else can pump it once the keyboard owns the loop); the
+  // budget bounds that blocking flush, well past the typical dial.
+  static constexpr uint32_t RELAY_WARM_BUDGET_MS = 1500;
 
   // ── Voice Relay per-activity state ──────────────────────────────────────
   // The client is allocated lazily on the first relay round and kept for the

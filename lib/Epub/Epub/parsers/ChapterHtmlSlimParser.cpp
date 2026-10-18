@@ -4,10 +4,15 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <Utf8.h>
 #include <XmlParserUtils.h>
 #include <esp_timer.h>
 #include <expat.h>
+#if defined(ESP_PLATFORM)
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#endif
 
 #include <algorithm>
 #include <iterator>
@@ -1318,6 +1323,28 @@ bool ChapterHtmlSlimParser::parseAndBuildPages() {
 
   // Compute the time taken to parse and build pages
   const uint32_t chapterStartTime = millis();
+
+  // Advance-table prewarm for SD fonts. Layout resolves advances per paragraph
+  // (ParsedText calls ensureSdCardFontReady for each text run), and each call
+  // is a batch of scattered SD metadata reads: on device a 26 KB CJK chapter
+  // logged ~283 such fetches (~50-260 ms each), several seconds of the ~20 s
+  // cold index. Feeding each raw 4 KB chunk through the same API first
+  // collapses that into one sorted, mostly-sequential batch per chunk (about
+  // 7 for that chapter); the per-paragraph path still covers styled runs and
+  // anything the prewarm missed. Markup/entity bytes are included, which is
+  // harmless: their advances are one-off codepoints, remembered like any
+  // other. Style mask is regular-only — styled runs inside a chapter are rare
+  // and would add 4x the lookups for text that mostly never uses them.
+  const bool prewarmAdvances = renderer.isSdCardFont(fontId);
+  auto advancePrewarmBuf = prewarmAdvances ? makeUniqueNoThrow<uint8_t[]>(PARSE_BUFFER_SIZE + 4) : nullptr;
+  size_t advancePrewarmCarry = 0;
+  uint32_t advancePrewarmMs = 0;
+  uint32_t advancePrewarmChunks = 0;
+  if (prewarmAdvances && !advancePrewarmBuf) {
+    LOG_ERR("EHP", "OOM: %u byte advance prewarm buffer; indexing will stay on the per-run path",
+            static_cast<unsigned>(PARSE_BUFFER_SIZE + 4));
+  }
+
   do {
     void* const buf = XML_GetBuffer(parser, PARSE_BUFFER_SIZE);
     if (!buf) {
@@ -1334,6 +1361,61 @@ bool ChapterHtmlSlimParser::parseAndBuildPages() {
       destroyXmlParser(parser);
       file.close();
       return false;
+    }
+
+    // Background-index cooperation (one chunk is 4 KB, ~65 ms of SD read):
+    // poll the cancellation flag so activity exit or a superseding jump ends
+    // the parse within a chunk, then yield one tick so the reader task keeps
+    // its input latency while a chapter is indexed behind it. The foreground
+    // popup path leaves cancelFlag_ null and accepts the same ~10 ms/tick
+    // delay as ordinary scheduling jitter.
+    if (cancelFlag != nullptr && cancelFlag->load(std::memory_order_relaxed)) {
+      LOG_DBG("EHP", "Indexing cancelled after %u bytes", static_cast<unsigned>(bytesParsed));
+      destroyXmlParser(parser);
+      file.close();
+      return false;
+    }
+#if defined(ESP_PLATFORM)
+    vTaskDelay(1);
+#endif
+
+    if (advancePrewarmBuf) {
+      // Buffer holds leftovers from the previous chunk (an incomplete UTF-8
+      // sequence, at most 4 bytes) followed by the new data.
+      memcpy(advancePrewarmBuf.get() + advancePrewarmCarry, buf, len);
+      const size_t prewarmTotal = advancePrewarmCarry + len;
+
+      // Carry a trailing incomplete UTF-8 sequence into the next chunk so its
+      // tail is not decoded as stray codepoints.
+      size_t carry = 0;
+      size_t scan = prewarmTotal;
+      while (scan > 0 && carry < 3) {
+        const uint8_t lastByte = advancePrewarmBuf[scan - 1];
+        if ((lastByte & 0xC0) == 0x80) {  // continuation byte
+          carry++;
+          scan--;
+          continue;
+        }
+        const size_t seqLen = (lastByte & 0x80) == 0      ? 1
+                              : (lastByte & 0xE0) == 0xC0 ? 2
+                              : (lastByte & 0xF0) == 0xE0 ? 3
+                                                          : 4;
+        carry = carry + 1 < seqLen ? carry + 1 : 0;
+        break;
+      }
+
+      const size_t feedLen = prewarmTotal - carry;
+      if (feedLen > 0) {
+        advancePrewarmBuf[feedLen] = '\0';
+        const uint32_t prewarmStart = millis();
+        renderer.ensureSdCardFontReady(fontId, reinterpret_cast<const char*>(advancePrewarmBuf.get()), 0x01);
+        advancePrewarmMs += millis() - prewarmStart;
+        advancePrewarmChunks++;
+      }
+      if (carry > 0) {
+        memmove(advancePrewarmBuf.get(), advancePrewarmBuf.get() + feedLen, carry);
+      }
+      advancePrewarmCarry = carry;
     }
 
     if (popupFn && len > 0) {
@@ -1353,6 +1435,13 @@ bool ChapterHtmlSlimParser::parseAndBuildPages() {
     }
   } while (!done);
   LOG_DBG("EHP", "Time to parse and build pages: %lu ms", millis() - chapterStartTime);
+  if (prewarmAdvances) {
+    LOG_DBG("EHP", "Advance prewarm: %u chunk(s), %u ms", static_cast<unsigned>(advancePrewarmChunks),
+            static_cast<unsigned>(advancePrewarmMs));
+    // Layout just grew the advance table; let the font save it (dirty +
+    // throttled + force-on-unload) so the next session starts warm.
+    renderer.persistSdCardFontAdvances(fontId);
+  }
 
   destroyXmlParser(parser);
   file.close();

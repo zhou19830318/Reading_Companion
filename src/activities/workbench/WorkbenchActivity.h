@@ -60,6 +60,9 @@ class WorkbenchActivity final : public Activity {
   // already promises "正在同步" and e-ink repaints between steps.
   enum class Sync : uint8_t { Idle, Geo, Fetch };
   Sync sync_ = Sync::Idle;
+  // Mirrors `sync_ != Idle` for the idle Wi-Fi manager (hold while a sync
+  // round is in flight; edge-detected in loop(), safety-released in onExit()).
+  bool wifiHeld_ = false;
   OpenClaw::IpGeoResult geo_{};
   bool haveGeo_ = false;
   uint32_t syncStartMs_ = 0;

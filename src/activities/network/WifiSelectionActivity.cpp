@@ -7,6 +7,7 @@
 #include <Logging.h>
 #include <Memory.h>
 #include <WiFi.h>
+#include <WifiIdleManager.h>
 #include <esp_heap_caps.h>
 #include <esp_task_wdt.h>
 
@@ -28,6 +29,10 @@ const char* get_phy_version_str();
 
 void WifiSelectionActivity::onEnter() {
   Activity::onEnter();
+  // A scan-plus-connect can easily outlive the idle countdown a parent feature
+  // armed before detouring here (dictionary, ask-AI, voice) — hold the radio
+  // for as long as this screen is up, and stamp the success below as activity.
+  WIFI_IDLE.hold();
 
   // Load saved WiFi credentials - SD card operations need lock as we use SPI
   // for both
@@ -91,6 +96,7 @@ void WifiSelectionActivity::onEnter() {
 }
 
 void WifiSelectionActivity::onExit() {
+  WIFI_IDLE.release();  // ends the onEnter() hold; the idle countdown resumes
   Activity::onExit();
 
   LOG_DBG("WIFI", "Free heap at onExit start: %d bytes", ESP.getFreeHeap());
@@ -385,6 +391,10 @@ void WifiSelectionActivity::checkConnectionStatus() {
     connectedIP = ipStr;
     autoConnecting = false;
     autoCandidateMode = false;
+    // A landed connect restarts the idle clock: the parent (dictionary, ask-AI,
+    // workbench) is about to use the radio and must not have the countdown it
+    // armed before this detour expire underneath the request.
+    WIFI_IDLE.noteActivity();
 
     // Sync RTC from NTP on the first successful WiFi connection only. The DS3231
     // drifts ~2 ppm so one sync is enough; users can force a re-sync from

@@ -8,6 +8,7 @@
 #include <Utf8.h>
 #include <VoiceRelayChatClient.h>
 #include <WiFi.h>
+#include <WifiIdleManager.h>
 
 #include <algorithm>
 #include <cstring>
@@ -29,6 +30,11 @@ constexpr char HERO_LABEL[] = "\xE3\x80\x90\xE5\xAD\x97\xE3\x80\x91";  // 【字
 
 void DictionaryActivity::onEnter() {
   Activity::onEnter();
+  // The lookup leaves the radio up on purpose (relay + shared gateway socket);
+  // the idle manager powers it down once this screen stops working. Every
+  // lookup approach re-prompts for Wi-Fi when the radio has since gone, so the
+  // teardown never strands the picker.
+  WIFI_IDLE.arm();
   std::string ch;
   utf8AppendCodepoint(codepoint_, ch);
   strncpy(charBuf_, ch.c_str(), sizeof(charBuf_) - 1);

@@ -20,6 +20,7 @@
 #include <WeatherCities.h>
 #include <WeatherFormat.h>
 #include <WiFi.h>
+#include <WifiIdleManager.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -648,6 +649,10 @@ void drawReadingCard(const GfxRenderer& r, const CardBox& b, const WorkbenchData
 
 void WorkbenchActivity::onEnter() {
   Activity::onEnter();
+  // The cards' sync round leaves the radio up (it may detour through
+  // WifiSelectionActivity and then resume); arming the idle manager lets the
+  // radio go down once the page stops working instead of waiting for sleep.
+  WIFI_IDLE.arm();
   lastClockTickMs = millis();   // first periodic redraw lands CLOCK_TICK_MS after entry
   todoFirstRow = 0;             // every entry starts at the top of the to-do list
   lastTodoScrollMs = millis();  // ...and gives the first window a full step to read
@@ -672,6 +677,12 @@ void WorkbenchActivity::onEnter() {
 }
 
 void WorkbenchActivity::onExit() {
+  // Safety net: loop() usually released the sync hold on the Idle edge, but a
+  // Back that lands mid-round must not leak the hold past the screen.
+  if (wifiHeld_) {
+    wifiHeld_ = false;
+    WIFI_IDLE.release();
+  }
   session_.setNotifier(nullptr, nullptr);
   // This page may have dialed the shared socket (ensureGatewayLink), but it
   // never closes it: the link outlives whichever activity opened it, exactly
@@ -995,11 +1006,16 @@ void WorkbenchActivity::activateSelected() {
     case 2: {
       // One voice round trip: the transcript is sent to the gateway exactly
       // as the AI助手 screen sends it, so "明早八点提醒我" lands as a new
-      // automation. startActivityForResult keeps this page on the stack, and
-      // the list is pulled twice on the way back — immediately, and once more
-      // when VOICE_TODO_REFRESH_MS expires in case the job was created after
-      // the reply.
+      // automation. setGatewayChat() pins this round to the OpenClaw agent
+      // even when the relay is configured: the agent is the only backend that
+      // can create the cron job this card lists — a relay LLM would answer
+      // the sentence and the list would never change (observed on hardware).
+      // startActivityForResult keeps this page on the stack, and the list is
+      // pulled twice on the way back — immediately, and once more when
+      // VOICE_TODO_REFRESH_MS expires in case the job was created after the
+      // reply.
       auto voice = std::make_unique<VoiceActivity>(renderer, mappedInput);
+      voice->setGatewayChat();
       startActivityForResult(std::move(voice), [this](const ActivityResult&) {
         // VoiceActivity takes the session notifier in its onEnter and clears
         // it in onExit(), which ActivityManager::loop() runs before this
@@ -1026,6 +1042,18 @@ void WorkbenchActivity::activateSelected() {
 }
 
 void WorkbenchActivity::loop() {
+  // A sync round must survive its quiet stretches (the geo lookup, a slow
+  // cron reply): hold the radio for its whole life, edge-detected so the
+  // hold/release calls stay paired however the round ends.
+  const bool needWifi = sync_ != Sync::Idle;
+  if (needWifi != wifiHeld_) {
+    wifiHeld_ = needWifi;
+    if (needWifi) {
+      WIFI_IDLE.hold();
+    } else {
+      WIFI_IDLE.release();
+    }
+  }
   // One-shot second list pull after a voice "add a to-do" round trip.
   if (cronRefreshQueued_ && static_cast<int32_t>(millis() - cronRefreshAtMs_) >= 0) {
     cronRefreshQueued_ = false;

@@ -59,23 +59,14 @@ inline PageTurnResult detectPageTurn(const MappedInputManager& input) {
   return {prev, next, tiltPrev || tiltNext};
 }
 
-inline void displayWithRefreshCycle(const GfxRenderer& renderer, int& pagesUntilFullRefresh) {
-  if (pagesUntilFullRefresh <= 1) {
-    if (renderer.isCadenceHeldOff()) {
-      // An activity switch owns this frame (e.g. closing the reader menu
-      // redraws the page). Spend it as a plain FAST push and leave the
-      // counter pending so the scrub runs on an ordinary page turn instead of
-      // blacking out the panel during the transition.
-      renderer.displayBuffer();
-      return;
-    }
-    renderer.displayBuffer(HalDisplay::HALF_REFRESH);
-    pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
-  } else {
-    renderer.displayBuffer();
-    pagesUntilFullRefresh--;
-  }
-}
+// Reader page push. Ghosting cleanup is not managed here anymore: the one
+// firmware-wide cadence lives in GfxRenderer::displayBuffer() (every FAST push
+// ticks a shared counter, every Nth push is promoted to HALF, activity
+// transitions hold it off). A second per-page counter here used to drift from
+// that global one whenever overlay screens pushed frames (menus, pickers), so
+// the scrub could land twice a few pages apart — the irregular black/white
+// flash. Content-driven cleanups (image pages) call requestGhostCleanup().
+inline void displayReaderPage(const GfxRenderer& renderer) { renderer.displayBuffer(); }
 
 // Grayscale anti-aliasing pass. Renders content twice (LSB + MSB) to build
 // the grayscale buffer. Only the content callback is re-rendered — status bars

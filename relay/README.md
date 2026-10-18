@@ -86,6 +86,49 @@ journalctl -u reading-companion-relay --since "5 min ago" | grep contracts
 curl -s localhost:8000/readyz      # {"status":"ready","asr":"configured",...}
 ```
 
+## Dictionary cards (offline data)
+
+The reader's 字典 card (`POST /api/v1/chat`, `mode="dict"`, sent by
+`DictionaryActivity`) is served from the offline data in `dict-data/`, not
+from a model: readings/radical/strokes come from Unihan, senses and 组词 from
+chinese-xinhua (MIT) ranked by jieba frequencies (MIT); `dict-data/META.json`
+records the source SHA-256s and licenses. A character that is not in the data
+gets an explicit `未收录` card — nothing is guessed.
+
+```
+【字】的
+【拼音】de、dì、dí
+【部首笔画】白·8画
+【释义】de：用在词或词组后表明形容词性美丽的。 dí：真实，实在的确。的当（dàng）。……
+【组词】目的、真的、似的、目的地、有的是
+```
+
+(The source writes the headword as `～` inside definitions; the relay
+substitutes the character before sending. A non-hanzi selection gets a
+`无法识别 / 请输入单个汉字` card.)
+
+Settings: `DICT_SOURCE=local` (default) or `llm` (model-generated cards — the
+pre-local behavior; may contain factual errors). If `DICT_SOURCE=local` but
+the data is missing, the relay logs an error and degrades to the LLM path;
+`/readyz` reports `"dict": "local" | "local_missing_data" | "llm"`.
+
+Rebuilding after a data-source update (needs the three source files; the
+script is stdlib-only):
+
+```bash
+python tools/build_dict_data.py \
+    --word  xinhua/data/word.json --ci xinhua/data/ci.json \
+    --unihan Unihan.zip --jieba dict.txt \
+    --out dict-data
+python -m pytest -q tests/test_dict_source.py   # rendering/lookup invariants
+```
+
+`dict-data/` is read once at first lookup and never written (the systemd unit
+runs with `ProtectSystem=strict`). `tools/make-package.sh` requires it and
+`deploy/install.sh` copies it into each release; older operators upgrading
+from a pre-dict package get `DICT_SOURCE=local` backfilled into their env
+file automatically.
+
 ## Deploy and rollback
 
 ```bash

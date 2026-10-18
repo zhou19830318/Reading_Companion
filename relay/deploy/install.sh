@@ -12,6 +12,8 @@
 # rollback is just: ln -sfn releases/<old-TS> current && systemctl restart ...
 #
 # --source must contain: relay/ (the Python package) and requirements.txt.
+# dict-data/ (offline dictionary cards) is copied when present; without it
+# dictionary lookups fall back to the LLM path.
 #
 # First run without --dashscope-key on a terminal prompts for the key (blank
 # keeps mock mode). Passing --dashscope-key on any run configures or rotates
@@ -83,6 +85,11 @@ chown -R voice-relay:voice-relay "$RELAY_ROOT"
 section "release $TS"
 cp -r "$SOURCE/relay" "$RELEASE/relay"
 cp "$SOURCE/requirements.txt" "$RELEASE/"
+if [[ -d "$SOURCE/dict-data" ]]; then
+    cp -r "$SOURCE/dict-data" "$RELEASE/dict-data"
+else
+    echo "WARN: no dict-data/ in --source; dictionary cards will fall back to the LLM" >&2
+fi
 find "$RELEASE" -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
 find "$RELEASE" -name '*.pyc' -delete 2>/dev/null || true
 
@@ -120,7 +127,7 @@ if [[ -f "$ENV_FILE" ]]; then
     # Track the release id for /healthz without touching secrets.
     sed -i "s/^RELAY_VERSION=.*/RELAY_VERSION=$TS/" "$ENV_FILE"
     # Backfill keys added after the first install (never clobber operator values).
-    for kv in MAX_WS_CONNECTIONS=32 MAX_SESSIONS_PER_DEVICE=1; do
+    for kv in MAX_WS_CONNECTIONS=32 MAX_SESSIONS_PER_DEVICE=1 DICT_SOURCE=local; do
         key=${kv%%=*}
         grep -q "^${key}=" "$ENV_FILE" || echo "$kv" >> "$ENV_FILE"
     done
@@ -165,6 +172,10 @@ MAX_AUDIO_SECONDS=30
 MAX_LLM_OUTPUT_TOKENS=256
 MAX_REPLY_CHARS=500
 SESSION_IDLE_TIMEOUT_SECONDS=60
+# Dictionary cards come from the offline data shipped in the release
+# (see README "Dictionary data"). DICT_SOURCE=llm restores model-generated
+# cards, which may contain factual errors -- not recommended.
+DICT_SOURCE=local
 # Sessions may run concurrently; keep within the DashScope account quota.
 MAX_CONCURRENT_SESSIONS=4
 # Multiple onepage devices: cap open sockets and sessions per device.
@@ -205,6 +216,9 @@ done
 echo "-- direct (127.0.0.1:8000)"
 curl -fsS http://127.0.0.1:8000/healthz | jq .
 curl -fsS http://127.0.0.1:8000/readyz | jq .
+DICT_STATUS=$(curl -fsS http://127.0.0.1:8000/readyz | jq -r .dict)
+[[ "$DICT_STATUS" == "local" ]] || \
+    echo "WARN: dictionary source is '$DICT_STATUS' (expected local; see DICT_SOURCE in $ENV_FILE)"
 if [[ "$MODE" == "dev" ]]; then
     echo "-- via nginx (8080)"
     curl -fsS http://127.0.0.1:8080/healthz | jq .
