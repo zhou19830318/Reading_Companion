@@ -180,6 +180,9 @@ dashscope` while ASR/LLM stay mock, or vice versa. `/readyz` reports
 
 ## Deploy and rollback
 
+Full operator guide (Chinese): [DEPLOY.md](./DEPLOY.md) — packaging, install,
+env/secrets, upgrade, rollback, verification, dev/prod modes, security baseline.
+
 ```bash
 # package: build a self-contained tarball under dist/
 bash tools/make-package.sh

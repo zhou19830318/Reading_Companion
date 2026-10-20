@@ -36,6 +36,7 @@ cp -r "$ROOT/deploy" "$STAGE/$PKG_NAME/"
 cp -r "$ROOT/tools" "$STAGE/$PKG_NAME/"
 cp "$ROOT/requirements.txt" "$STAGE/$PKG_NAME/"
 [[ -f "$ROOT/README.md" ]] && cp "$ROOT/README.md" "$STAGE/$PKG_NAME/"
+[[ -f "$ROOT/DEPLOY.md" ]] && cp "$ROOT/DEPLOY.md" "$STAGE/$PKG_NAME/"
 find "$STAGE" \( -name __pycache__ -o -name '*.pyc' -o -name dist \) -prune -exec rm -rf {} + 2>/dev/null || true
 
 tar czf "$OUT_DIR/$PKG_NAME.tar.gz" -C "$STAGE" "$PKG_NAME"
