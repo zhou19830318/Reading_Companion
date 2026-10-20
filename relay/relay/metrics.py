@@ -37,6 +37,11 @@ llm_requests_total = Counter(
     "LLM upstream requests by result",
     ["result"],
 )
+t2i_requests_total = Counter(
+    "t2i_requests_total",
+    "Text-to-image generation requests by result",
+    ["result"],
+)
 voice_latency_ms = Histogram(
     "voice_latency_ms",
     "Per-stage voice latency in milliseconds",

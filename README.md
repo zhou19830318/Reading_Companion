@@ -13,7 +13,10 @@ CrossPoint is open-source e-reader firmware — community-built, fully hackable,
 
 - **ESP32-C61 support** — new `onepage` PlatformIO env + board def, vendored board SDK (`open-onepage-sdk`, no submodule), `#ifdef ONEPAGE_C61` guards across the core and HAL.
 - **Simplified & Traditional Chinese UI** — added i18n translations + CJK SD-card font fallback.
-- **AI voice assistant** — chat + push-to-talk against a self-hosted **OpenClaw** gateway, with MiMo speech-to-text, on-device chat history and a device-approval flow.
+- **AI voice assistant** — push-to-talk and agent chat against self-hosted gateways: voice streams through the bundled **VoiceRelay** server, agent chat runs over **OpenClaw**. On-device chat history, device-approval flow, and the cloud API keys live only on your server.
+- **AI image generation (生图)** — text-to-image from the device: generate, browse the on-device history gallery, delete images, or set one as a book cover — served by the relay's t2i provider.
+- **Offline dictionary lookup** — in-reader word lookup without leaving the book, served from the relay's offline dictionary cards (`relay/dict-data/`, no cloud call).
+- **Self-hosted VoiceRelay server** — the repo ships the FastAPI service in `relay/`: realtime speech recognition, streaming LLM, and image generation behind one API, with systemd/nginx deploy scripts, tests, and offline dictionary data.
 - **Workbench dashboard** — gateway-synced cards (todos, weather, now-reading, gateway uptime) rendered on the e-ink screen.
 - **Redesigned web UI** — the four browser pages (Home / Files / Settings / Fonts) follow one shared design system, are fully bilingual (中文 / EN), split settings into category panels, and add Save / Reset Defaults / Reboot controls plus a Cloud Services panel for the gateway and STT secrets (stored in NVS, never echoed back).
 - **Bluetooth page-turner** — BLE HID host that learns any remote's buttons.
@@ -52,11 +55,11 @@ The reader-engine features listed below are inherited from CrossPoint.
 
 - **Customization**: multiple themes (Classic, Lyra, Lyra Extended, RoundedRaff), sleep screen modes, front/side button remapping, status bar controls, power-button behavior, refresh cadence, and more.
 
+- **AI tools**: voice assistant, text-to-image with on-device history, in-reader dictionary lookup, and preset prompt shortcuts — all backed by the self-hosted [VoiceRelay](./relay/README.md) / OpenClaw gateways.
+
 - **Localization**: 28 UI languages including Simplified and Traditional Chinese. RTL support (Hebrew). The web UI is separately bilingual (中文 / EN) and does not depend on the device language.
 
 ### Coming soon:
-
-- Dictionary lookup — inline word lookup without leaving the reader.
 
 - More themes.
 
@@ -104,7 +107,7 @@ USB port or browser before assuming the device is locked. Only reach for the unl
 ### Command line (OnePage / ESP32-C61)
 
 1. Install [`esptool`](https://github.com/espressif/esptool) (`pip install esptool`).
-2. Build `firmware.bin` (`~/.platformio/penv/bin/pio run -e onepage`) or take one from CI.
+2. Build it yourself (`~/.platformio/penv/bin/pio run -e onepage`) or download `onepage-firmware-*.bin` from this repo's [Releases](https://github.com/zhou19830318/Reading_Companion/releases) page.
 3. Connect via USB-C; find the port (`ls /dev/cu.usbmodem*` on macOS).
 4. **Flash depends on the board's SPI-flash vendor** — detect first: `esptool --chip esp32c61 -p <port> flash-id` and read the Manufacturer byte:
    - **Winbond** (`ef`): stub + compression OK, fast (~95 s):
@@ -190,6 +193,7 @@ Full index: [docs/README.md](./docs/README.md).
 **使用 / Using**
 
 - [User Guide](./USER_GUIDE.md)
+- [VoiceRelay server setup & protocol](./relay/README.md)
 - [Web server usage](./docs/webserver.md)
 - [Web server endpoints](./docs/webserver-endpoints.md)
 - [SD-card fonts](./docs/sd-card-fonts.md)
@@ -307,11 +311,12 @@ Minor adjustments may be required for Windows.
 | `lib/Epub`, `lib/GfxRenderer`, `lib/ZipFile`, `lib/InflateReader`, `lib/uzlib` | Reader engine: EPUB parsing, layout cache, e-ink rendering, archive/inflate |
 | `lib/hal` | Hardware abstraction — `HalDisplay` / `HalGPIO` / `HalStorage`; **all** SD access goes through `HalStorage` (SdFat is not thread-safe) |
 | `lib/EpdFont`, `lib/I18n`, `lib/Logging`, `lib/Memory` | Fonts, translations, logging, allocation helpers (`makeUniqueNoThrow`, PSRAM allocator) |
-| `lib/OpenClaw`, `lib/voice`, `lib/NetBootstrap`, `lib/OpdsParser` | Voice assistant, gateway client, networking helpers |
+| `lib/OpenClaw`, `lib/VoiceRelay`, `lib/voice`, `lib/NetBootstrap`, `lib/OpdsParser` | Voice assistant and AI clients (OpenClaw agent chat, VoiceRelay voice/chat/image protocol, STT), gateway and networking helpers |
 | `open-onepage-sdk/` | Vendored OnePage C61 board SDK (EInkDisplay, InputManager, BatteryMonitor, SDCardManager) — no submodule, wired in via the `symlink://` entries in `platformio.ini` |
 | `boards/`, `partitions.csv`, `sdkconfig.onepage` | PlatformIO board definition and flash/PSRAM configuration for the C61 target |
 | `scripts/` | Build helpers — `build_html.py`, `sync_web_core.py`, `gen_i18n.py`, `debugging_monitor.py` |
 | `src/network/html/` | Web UI source pages; `*.generated.h` outputs are gitignored and rebuilt on every build |
+| `relay/` | Self-hosted **VoiceRelay** FastAPI server — realtime ASR, streaming LLM, image generation (`relay/relay/`), offline dictionary data (`dict-data/`), deploy scripts, and tests |
 | `docs/` | Full documentation index ([docs/README.md](./docs/README.md)) |
 | `test/`, `simulator/` | Host-runnable unit tests and the WASM/Arduino host simulator |
 

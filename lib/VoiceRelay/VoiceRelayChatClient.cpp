@@ -88,7 +88,8 @@ Scratch allocScratch(size_t size) {
 }  // namespace
 
 ChatClient::Result ChatClient::ask(const char* url, const char* token, const char* deviceId, const char* text,
-                                   char* reply, size_t replyCap, bool& truncated, const char* mode, Stats* stats) {
+                                   char* reply, size_t replyCap, bool& truncated, char* strokesOut, size_t strokesCap,
+                                   const char* mode, Stats* stats) {
   truncated = false;
   if (stats != nullptr) *stats = Stats{};
   if (url == nullptr || token == nullptr || deviceId == nullptr || text == nullptr || reply == nullptr ||
@@ -101,6 +102,7 @@ ChatClient::Result ChatClient::ask(const char* url, const char* token, const cha
     return Result::BadConfig;
   }
   reply[0] = '\0';
+  if (strokesOut != nullptr && strokesCap > 0) strokesOut[0] = '\0';
 
   char httpUrl[URL_CAP];
   snprintf(httpUrl, sizeof(httpUrl), "%s://%s:%u/api/v1/chat", parsed.tls ? "https" : "http", parsed.host,
@@ -206,13 +208,15 @@ ChatClient::Result ChatClient::ask(const char* url, const char* token, const cha
 
   bool parseTruncated = false;
   ErrorCode code = ErrorCode::None;
-  if (!parseChatResponse(body.get(), total, reply, replyCap, parseTruncated, code)) {
+  if (!parseChatResponse(body.get(), total, reply, replyCap, parseTruncated, code, strokesOut, strokesCap)) {
     LOG_ERR("VCHAT", "no text in a %u-byte body (code=%s)", static_cast<unsigned>(total), errorCodeName(code));
     if (code != ErrorCode::None) return mapProviderError(code);
     return Result::NoText;
   }
   truncated = truncated || parseTruncated;
-  LOG_INF("VCHAT", "reply %u bytes%s", static_cast<unsigned>(strlen(reply)), truncated ? " (truncated)" : "");
+  const size_t strokeBytes = strokesOut != nullptr ? strlen(strokesOut) : 0;
+  LOG_INF("VCHAT", "reply %u bytes, strokes %u bytes%s", static_cast<unsigned>(strlen(reply)),
+          static_cast<unsigned>(strokeBytes), truncated ? " (truncated)" : "");
   return Result::Ok;
 }
 

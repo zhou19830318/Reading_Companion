@@ -27,9 +27,9 @@ constexpr uint16_t LP_TIMEOUT = 400;  // 4 s supervision timeout (400 * 10 ms)
 }  // namespace
 
 extern "C" {
-#include <host/ble_hs.h>
 #include <host/ble_gap.h>
 #include <host/ble_gatt.h>
+#include <host/ble_hs.h>
 #include <host/ble_uuid.h>
 #include <host/util/util.h>
 #include <nimble/nimble_port.h>
@@ -56,8 +56,8 @@ constexpr size_t QUEUE_DEPTH = 4;
 uint16_t g_connHandle = BLE_HS_CONN_HANDLE_NONE;
 uint16_t g_hidSvcStart = 0;
 uint16_t g_hidSvcEnd = 0;
-uint16_t g_battSvcEnd = 0;      // Battery Service end handle (for descriptor discovery)
-uint16_t g_battChrHandle = 0;   // Battery Level char value handle (0 = none/unknown)
+uint16_t g_battSvcEnd = 0;     // Battery Service end handle (for descriptor discovery)
+uint16_t g_battChrHandle = 0;  // Battery Level char value handle (0 = none/unknown)
 // Battery discovery must run AFTER both HID discovery completes and the link is
 // encrypted (concurrent GATT discovery collides; the battery read needs auth).
 bool g_hidDiscDone = false;
@@ -69,8 +69,8 @@ void maybeStartBatteryDiscovery(uint16_t conn);
 
 // --- GATT discovery ---------------------------------------------------------
 
-int onDescDisc(uint16_t conn, const struct ble_gatt_error* error, uint16_t chrValHandle,
-               const struct ble_gatt_dsc* dsc, void* arg) {
+int onDescDisc(uint16_t conn, const struct ble_gatt_error* error, uint16_t chrValHandle, const struct ble_gatt_dsc* dsc,
+               void* arg) {
   if (error->status == 0 && dsc && ble_uuid_u16(&dsc->uuid.u) == CCCD_UUID) {
     uint8_t value[2] = {0x01, 0x00};  // enable notifications
     ble_gattc_write_flat(conn, dsc->handle, value, sizeof(value), nullptr, nullptr);
@@ -78,8 +78,7 @@ int onDescDisc(uint16_t conn, const struct ble_gatt_error* error, uint16_t chrVa
   return 0;
 }
 
-int onChrDisc(uint16_t conn, const struct ble_gatt_error* error, const struct ble_gatt_chr* chr,
-              void* arg) {
+int onChrDisc(uint16_t conn, const struct ble_gatt_error* error, const struct ble_gatt_chr* chr, void* arg) {
   if (error->status == 0 && chr) {
     const uint16_t uuid = ble_uuid_u16(&chr->uuid.u);
     if (uuid == HID_REPORT_CHR_UUID && (chr->properties & BLE_GATT_CHR_PROP_NOTIFY)) {
@@ -94,8 +93,7 @@ int onChrDisc(uint16_t conn, const struct ble_gatt_error* error, const struct bl
   return 0;
 }
 
-int onSvcDisc(uint16_t conn, const struct ble_gatt_error* error, const struct ble_gatt_svc* svc,
-              void* arg) {
+int onSvcDisc(uint16_t conn, const struct ble_gatt_error* error, const struct ble_gatt_svc* svc, void* arg) {
   if (error->status == 0 && svc) {
     g_hidSvcStart = svc->start_handle;
     g_hidSvcEnd = svc->end_handle;
@@ -124,8 +122,7 @@ int onBattRead(uint16_t conn, const struct ble_gatt_error* error, struct ble_gat
   return 0;
 }
 
-int onBattChrDisc(uint16_t conn, const struct ble_gatt_error* error, const struct ble_gatt_chr* chr,
-                  void* arg) {
+int onBattChrDisc(uint16_t conn, const struct ble_gatt_error* error, const struct ble_gatt_chr* chr, void* arg) {
   if (error->status == 0 && chr && ble_uuid_u16(&chr->uuid.u) == BATTERY_LVL_CHR_UUID) {
     g_battChrHandle = chr->val_handle;
     LOG_INF("BLEHID", "battery char found (handle=%u props=0x%02X)", chr->val_handle, chr->properties);
@@ -138,8 +135,7 @@ int onBattChrDisc(uint16_t conn, const struct ble_gatt_error* error, const struc
   return 0;
 }
 
-int onBattSvcDisc(uint16_t conn, const struct ble_gatt_error* error, const struct ble_gatt_svc* svc,
-                  void* arg) {
+int onBattSvcDisc(uint16_t conn, const struct ble_gatt_error* error, const struct ble_gatt_svc* svc, void* arg) {
   if (error->status == 0 && svc) {
     g_battSvcEnd = svc->end_handle;
     LOG_INF("BLEHID", "battery service found [%u..%u]", svc->start_handle, svc->end_handle);
@@ -158,7 +154,6 @@ void maybeStartBatteryDiscovery(uint16_t conn) {
   const int rc = ble_gattc_disc_svc_by_uuid(conn, &battSvcUuid.u, onBattSvcDisc, nullptr);
   LOG_INF("BLEHID", "battery svc disc start (rc=%d)", rc);
 }
-
 
 bool advIsHid(const struct ble_hs_adv_fields& fields) {
   for (int i = 0; i < fields.num_uuids16; i++) {
@@ -180,8 +175,8 @@ void startScan() {
   // Keep ACTIVE scan (passive=0) so we still detect devices that only advertise
   // the HID service UUID in their scan response. Reconnect just takes a bit
   // longer. Once connected, scanning stops entirely (near-zero overhead).
-  params.itvl = 480;    // 300 ms
-  params.window = 48;   // 30 ms
+  params.itvl = 480;   // 300 ms
+  params.window = 48;  // 30 ms
   params.passive = 0;
   params.filter_duplicates = 1;
   uint8_t ownAddrType;
@@ -242,8 +237,7 @@ int bleHidHostGapEvent(struct ble_gap_event* event, void* arg) {
       self.state_ = BleHidState::Connecting;
       uint8_t ownAddrType;
       ble_hs_id_infer_auto(0, &ownAddrType);
-      if (ble_gap_connect(ownAddrType, &event->disc.addr, 30000, nullptr, bleHidHostGapEvent,
-                          nullptr) != 0) {
+      if (ble_gap_connect(ownAddrType, &event->disc.addr, 30000, nullptr, bleHidHostGapEvent, nullptr) != 0) {
         self.nextConnectAllowedUs_ = esp_timer_get_time() + RECONNECT_BACKOFF_US;
         startScan();
         self.state_ = BleHidState::Scanning;
@@ -540,15 +534,18 @@ void BleHidHost::onReport(uint16_t attrHandle, const uint8_t* data, uint16_t len
   // post-capture release gate so the next key can be learned.
   bool allZero = true;
   for (uint16_t i = 0; i < len; i++) {
-    if (data[i]) { allZero = false; break; }
+    if (data[i]) {
+      allZero = false;
+      break;
+    }
   }
   if (allZero) {
     awaitRelease_ = false;
     return;
   }
 
-  const uint8_t clampedLen = len > sizeof(BleReportPattern::bytes) ? sizeof(BleReportPattern::bytes)
-                                                                   : static_cast<uint8_t>(len);
+  const uint8_t clampedLen =
+      len > sizeof(BleReportPattern::bytes) ? sizeof(BleReportPattern::bytes) : static_cast<uint8_t>(len);
 
   // Learning: capture this report as the armed action's pattern. Skip while
   // waiting for the previous keypress to be released (avoids one held/repeating
@@ -568,15 +565,13 @@ void BleHidHost::onReport(uint16_t attrHandle, const uint8_t* data, uint16_t len
     learnArmed_ = false;
     learnComplete_ = true;
     awaitRelease_ = true;  // require a release before any further capture
-    LOG_INF("BLEHID", "learned action %u: attr=%u len=%u b0=0x%02X", learnTarget_, attrHandle,
-            clampedLen, data[0]);
+    LOG_INF("BLEHID", "learned action %u: attr=%u len=%u b0=0x%02X", learnTarget_, attrHandle, clampedLen, data[0]);
     return;
   }
 
   // Runtime: match against learned patterns and enqueue the action.
   auto matches = [&](const BleReportPattern& p) {
-    return p.valid && p.attrHandle == attrHandle && p.len == clampedLen &&
-           memcmp(p.bytes, data, clampedLen) == 0;
+    return p.valid && p.attrHandle == attrHandle && p.len == clampedLen && memcmp(p.bytes, data, clampedLen) == 0;
   };
   uint8_t action;
   if (matches(fwd_)) {

@@ -98,7 +98,9 @@ void HalDisplay::refreshDisplay(RefreshMode mode, bool turnOffScreen) { displayB
 
 // Grayscale is a device-only path (4-gray covers). The simulator renders 1-bit, so the
 // base plane goes through the normal buffer present and preconditioning is a no-op.
-void HalDisplay::displayGrayscaleBase(RefreshMode fallback, bool turnOffScreen) { displayBuffer(fallback, turnOffScreen); }
+void HalDisplay::displayGrayscaleBase(RefreshMode fallback, bool turnOffScreen) {
+  displayBuffer(fallback, turnOffScreen);
+}
 void HalDisplay::preconditionGrayscale() {}
 void HalDisplay::preconditionGrayscale(uint16_t /*x*/, uint16_t /*y*/, uint16_t /*w*/, uint16_t /*h*/) {}
 

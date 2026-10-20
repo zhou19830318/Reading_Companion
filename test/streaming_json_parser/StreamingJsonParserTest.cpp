@@ -64,7 +64,7 @@ JsonCallbacks makeCallbacks(TestContext* ctx) {
 // The chunk consumer: identical event stream to makeCallbacks, plus the
 // onStringPart hook capturing long values.
 JsonCallbacks makeChunkCallbacks(TestContext* ctx) {
-  return {ctx, onKey, onString, onNumber, onBool, onNull,
+  return {ctx,           onKey,       onString,     onNumber,   onBool,      onNull,
           onObjectStart, onObjectEnd, onArrayStart, onArrayEnd, onStringPart};
 }
 

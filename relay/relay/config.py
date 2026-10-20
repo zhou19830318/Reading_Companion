@@ -75,6 +75,38 @@ class Settings(BaseSettings):
     # Empty = auto: $RELEASE/dict-data, then relay/dict-data in a checkout.
     dict_data_dir: str = Field("", alias="DICT_DATA_DIR")
 
+    # --- text-to-image cards ------------------------------------------------
+    # "mock" (default): draw a placeholder locally, no cloud call and no cost —
+    # the whole endpoint/asset path is exercised. "dashscope": wanx task +
+    # poll. "openai": one-shot POST to any OpenAI-compatible images endpoint
+    # (T2I_BASE_URL + T2I_API_KEY below).
+    t2i_provider: str = Field("mock", alias="T2I_PROVIDER")
+    t2i_model: str = Field("wanx2.1-t2i-turbo", alias="T2I_MODEL")
+    # Image-to-image edit model (device "修改" flow: base image + prompt).
+    t2i_edit_model: str = Field("wanx2.1-imageedit", alias="T2I_EDIT_MODEL")
+    # Generation size; the panel size (below) is a fit crop of this. DashScope
+    # spells it W*H, OpenAI-compatible endpoints WxH — t2i.py converts.
+    t2i_size: str = Field("768*1280", alias="T2I_SIZE")
+    t2i_timeout_s: float = Field(150.0, alias="T2I_TIMEOUT_S")
+    t2i_poll_interval_s: float = Field(3.0, alias="T2I_POLL_INTERVAL_S")
+    # Simulated provider latency for mock mode (seconds, 0 = instant).
+    t2i_mock_delay_s: float = Field(2.5, alias="T2I_MOCK_DELAY_S")
+    # Onepage panel: 480x800 1-bit portrait. Server-side conversion target;
+    # the firmware draws the BMP 1:1 on the portrait screen.
+    t2i_width: int = Field(480, alias="T2I_WIDTH")
+    t2i_height: int = Field(800, alias="T2I_HEIGHT")
+    # Empty = "run/t2i-assets" under the working directory. The production
+    # service is sandboxed (ProtectSystem=strict + ReadWritePaths), so
+    # install.sh pins this to /opt/reading-companion-relay/run/t2i.
+    t2i_asset_dir: str = Field("", alias="T2I_ASSET_DIR")
+    t2i_asset_ttl_s: int = Field(86400, alias="T2I_ASSET_TTL_S")
+    # OpenAI-compatible images endpoint (T2I_PROVIDER=openai): POST
+    # <T2I_BASE_URL>/images/generations with {"model", "prompt", "size",
+    # "response_format"} — OpenAI, SiliconFlow, gateways, vLLM adapters. The
+    # size format is OpenAI's WxH (converted from T2I_SIZE's W*H).
+    t2i_base_url: str = Field("", alias="T2I_BASE_URL")
+    t2i_api_key: str = Field("", alias="T2I_API_KEY")
+
     dashscope_api_key: str = Field("", alias="DASHSCOPE_API_KEY")
     dashscope_workspace_id: str = Field("", alias="DASHSCOPE_WORKSPACE_ID")
     dashscope_region: str = Field("cn-beijing", alias="DASHSCOPE_REGION")
@@ -142,6 +174,22 @@ class Settings(BaseSettings):
             raise ValueError("DICT_SOURCE must be 'local' or 'llm'")
         return v
 
+    @field_validator("t2i_provider")
+    @classmethod
+    def _t2i_provider(cls, v: str) -> str:
+        v = v.lower()
+        if v not in ("mock", "dashscope", "openai"):
+            raise ValueError("T2I_PROVIDER must be 'mock', 'dashscope' or 'openai'")
+        return v
+
+    @field_validator("t2i_size")
+    @classmethod
+    def _t2i_size(cls, v: str) -> str:
+        parts = v.split("*")
+        if len(parts) != 2 or not all(p.isdigit() and int(p) >= 512 for p in parts):
+            raise ValueError("T2I_SIZE must look like W*H with sides >= 512, e.g. 1280*768")
+        return v
+
     # ------------------------------------------------------------------ helpers
     @property
     def allowed_devices(self) -> list[str]:
@@ -180,6 +228,14 @@ class Settings(BaseSettings):
             )
         return "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
+    def dashscope_t2i_base_url(self) -> str:
+        if self.dashscope_workspace_id:
+            return (
+                f"https://{self.dashscope_workspace_id}.{self.dashscope_region}"
+                ".maas.aliyuncs.com/api/v1"
+            )
+        return "https://dashscope.aliyuncs.com/api/v1"
+
     def ready_report(self) -> dict[str, str]:
         """What /readyz reports. Never contains key material."""
         from . import dict_source  # local import: keeps config import light
@@ -188,6 +244,7 @@ class Settings(BaseSettings):
             "asr": "configured" if self._asr_ready() else "missing_config",
             "llm": "configured" if self._llm_ready() else "missing_config",
             "dict": dict_source.describe(self.dict_source, self.dict_data_dir),
+            "t2i": self._t2i_ready(),
             "region": self.dashscope_region,
         }
 
@@ -200,6 +257,15 @@ class Settings(BaseSettings):
         if self.llm_provider == "mock":
             return True
         return self.llm_provider == "dashscope" and bool(self.dashscope_api_key)
+
+    def _t2i_ready(self) -> str:
+        if self.t2i_provider == "mock":
+            return "mock"
+        if self.t2i_provider == "openai":
+            return "configured" if self.t2i_base_url and self.t2i_api_key else "missing_config"
+        if self.dashscope_api_key:
+            return "configured"
+        return "missing_config"
 
 
 _settings: Settings | None = None

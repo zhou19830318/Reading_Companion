@@ -61,6 +61,18 @@ const char* errorCodeName(ErrorCode code) {
       return "SERVER_OVERLOADED";
     case ErrorCode::InternalError:
       return "INTERNAL_ERROR";
+    case ErrorCode::T2iEmptyPrompt:
+      return "T2I_EMPTY_PROMPT";
+    case ErrorCode::T2iRejected:
+      return "T2I_REJECTED";
+    case ErrorCode::T2iNotConfigured:
+      return "T2I_NOT_CONFIGURED";
+    case ErrorCode::T2iUpstream:
+      return "T2I_UPSTREAM";
+    case ErrorCode::T2iTimeout:
+      return "T2I_TIMEOUT";
+    case ErrorCode::T2iBadParam:
+      return "T2I_BAD_PARAM";
     case ErrorCode::None:
     case ErrorCode::Unknown:
       return "UNKNOWN";
@@ -101,6 +113,9 @@ enum class Field : uint8_t {
   // /api/v1/chat error bodies: {"error": "UNAUTHORIZED"} — a second token
   // shape the same name table already covers.
   Error,
+  // /api/v1/chat dict cards: the encoded stroke-order payload (digits, ',',
+  // ';' and '|' only — see relay tools/build_stroke_data.py).
+  Strokes,
   // latencyMs object and its members
   LatencyMs,
   LatConnect,
@@ -109,22 +124,37 @@ enum class Field : uint8_t {
   LatLlmFirstToken,
   LatLlmFinal,
   LatVisibleTotal,
+  // /api/v1/image success bodies: the "image" object's members. The keys are
+  // unique across every body this parser sees (chat replies carry no "id" /
+  // "width" / "height" / "bytes"), so capturing them needs no depth tracking.
+  ImageId,
+  ImageWidth,
+  ImageHeight,
+  ImageBytes,
 };
 
 Field classifyKey(const char* k, size_t n) {
   switch (n) {
+    case 2:
+      return memcmp(k, "id", 2) == 0 ? Field::ImageId : Field::None;
     case 3:
       return memcmp(k, "seq", 3) == 0 ? Field::Seq : Field::None;
     case 5:
-      return memcmp(k, "error", 5) == 0 ? Field::Error : Field::None;
+      if (memcmp(k, "error", 5) == 0) return Field::Error;
+      if (memcmp(k, "width", 5) == 0) return Field::ImageWidth;
+      if (memcmp(k, "bytes", 5) == 0) return Field::ImageBytes;
+      return Field::None;
     case 4:
       if (memcmp(k, "type", 4) == 0) return Field::Type;
       if (memcmp(k, "text", 4) == 0) return Field::Text;
       if (memcmp(k, "code", 4) == 0) return Field::Code;
       return Field::None;
+    case 6:
+      return memcmp(k, "height", 6) == 0 ? Field::ImageHeight : Field::None;
     case 7:
       if (memcmp(k, "message", 7) == 0) return Field::Message;
       if (memcmp(k, "connect", 7) == 0) return Field::LatConnect;
+      if (memcmp(k, "strokes", 7) == 0) return Field::Strokes;
       return Field::None;
     case 8:
       if (memcmp(k, "asrFinal", 8) == 0) return Field::LatAsrFinal;
@@ -188,6 +218,13 @@ ErrorCode codeFromWire(const char* s, size_t n) {
       {"SESSION_TIMEOUT", ErrorCode::SessionTimeout},
       {"SERVER_OVERLOADED", ErrorCode::ServerOverloaded},
       {"INTERNAL_ERROR", ErrorCode::InternalError},
+      // /api/v1/image endpoint tokens (relay t2i.py T2iError.code).
+      {"T2I_EMPTY_PROMPT", ErrorCode::T2iEmptyPrompt},
+      {"T2I_REJECTED", ErrorCode::T2iRejected},
+      {"T2I_NOT_CONFIGURED", ErrorCode::T2iNotConfigured},
+      {"T2I_UPSTREAM", ErrorCode::T2iUpstream},
+      {"T2I_TIMEOUT", ErrorCode::T2iTimeout},
+      {"T2I_BAD_PARAM", ErrorCode::T2iBadParam},
   };
   for (const Entry& e : TABLE) {
     if (strlen(e.name) == n && memcmp(s, e.name, n) == 0) return e.code;
@@ -442,20 +479,46 @@ struct ChatParseState {
   char* text = nullptr;
   size_t cap = 0;
   size_t textLen = 0;
+  char* strokes = nullptr;
+  size_t strokesCap = 0;
+  size_t strokesLen = 0;
+  // /api/v1/image bodies: the asset id plus its geometry (see parseImageResponse).
+  char* imageId = nullptr;
+  size_t imageIdCap = 0;
+  size_t imageIdLen = 0;
+  int32_t imageWidth = 0;
+  int32_t imageHeight = 0;
+  int32_t imageBytes = 0;
   bool sawText = false;
+  bool sawImageId = false;
+  bool strokesOverflowed = false;
   bool truncated = false;
   ErrorCode error = ErrorCode::None;
   Field field = Field::None;
 
-  void begin(char* out, size_t outCap) {
+  void begin(char* out, size_t outCap, char* strokesOut, size_t strokesOutCap, char* imageIdOut = nullptr,
+             size_t imageIdOutCap = 0) {
     text = out;
     cap = outCap;
     textLen = 0;
+    strokes = strokesOut;
+    strokesCap = strokesOutCap;
+    strokesLen = 0;
+    imageId = imageIdOut;
+    imageIdCap = imageIdOutCap;
+    imageIdLen = 0;
+    imageWidth = 0;
+    imageHeight = 0;
+    imageBytes = 0;
     sawText = false;
+    sawImageId = false;
+    strokesOverflowed = false;
     truncated = false;
     error = ErrorCode::None;
     field = Field::None;
     if (text != nullptr && cap > 0) text[0] = '\0';
+    if (strokes != nullptr && strokesCap > 0) strokes[0] = '\0';
+    if (imageId != nullptr && imageIdCap > 0) imageId[0] = '\0';
   }
 
   void append(const char* v, size_t n) {
@@ -472,6 +535,19 @@ struct ChatParseState {
     if (take < n) truncated = true;
   }
 
+  // Stroke payloads are all-or-nothing: a truncated payload draws the wrong
+  // character, so on overflow the buffer is left to be cleared at the end.
+  void appendStrokes(const char* v, size_t n) {
+    if (strokes == nullptr || strokesCap == 0 || strokesOverflowed) return;
+    if (strokesLen + n > strokesCap - 1) {
+      strokesOverflowed = true;
+      return;
+    }
+    memcpy(strokes + strokesLen, v, n);
+    strokesLen += n;
+    strokes[strokesLen] = '\0';
+  }
+
   static void onKeyCb(void* ctx, const char* key, size_t len) {
     static_cast<ChatParseState*>(ctx)->field = classifyKey(key, len);
   }
@@ -481,19 +557,51 @@ struct ChatParseState {
       case Field::Text:
         st->append(value, len);
         break;
+      case Field::Strokes:
+        st->appendStrokes(value, len);
+        break;
       case Field::Code:
       case Field::Error:
         st->error = codeFromWire(value, len);
         break;
+      case Field::ImageId: {
+        // All-or-nothing like the stroke payload: an id cut to fit would name
+        // a different asset than the one the server just minted.
+        if (st->imageId == nullptr || st->imageIdCap == 0 || len >= st->imageIdCap) break;
+        memcpy(st->imageId, value, len);
+        st->imageId[len] = '\0';
+        st->imageIdLen = len;
+        st->sawImageId = true;
+        break;
+      }
       default:
         break;
     }
   }
   static void onStringPartCb(void* ctx, const char* chunk, size_t len) {
     auto* st = static_cast<ChatParseState*>(ctx);
-    if (st->field == Field::Text) st->append(chunk, len);
+    if (st->field == Field::Text) {
+      st->append(chunk, len);
+    } else if (st->field == Field::Strokes) {
+      st->appendStrokes(chunk, len);
+    }
   }
-  static void onNumberCb(void*, const char*, size_t) {}
+  static void onNumberCb(void* ctx, const char* value, size_t len) {
+    auto* st = static_cast<ChatParseState*>(ctx);
+    switch (st->field) {
+      case Field::ImageWidth:
+        st->imageWidth = parseI32(value, len);
+        break;
+      case Field::ImageHeight:
+        st->imageHeight = parseI32(value, len);
+        break;
+      case Field::ImageBytes:
+        st->imageBytes = parseI32(value, len);
+        break;
+      default:
+        break;
+    }
+  }
   static void onBoolCb(void*, bool) {}
   static void onNullCb(void*) {}
   static void onObjectStartCb(void*) {}
@@ -526,8 +634,9 @@ StreamingJsonParser g_chatParser(makeChatCallbacks());
 
 }  // namespace
 
-bool parseChatResponse(const char* json, size_t len, char* textOut, size_t textCap, bool& truncated, ErrorCode& error) {
-  g_chatState.begin(textOut, textCap);
+bool parseChatResponse(const char* json, size_t len, char* textOut, size_t textCap, bool& truncated, ErrorCode& error,
+                       char* strokesOut, size_t strokesCap) {
+  g_chatState.begin(textOut, textCap, strokesOut, strokesCap);
   truncated = false;
   error = ErrorCode::None;
   if (json == nullptr || len == 0 || textOut == nullptr || textCap == 0) return false;
@@ -537,9 +646,30 @@ bool parseChatResponse(const char* json, size_t len, char* textOut, size_t textC
   if (g_chatParser.hasError()) return false;
 
   if (g_chatState.truncated) trimUtf8Tail(textOut, g_chatState.textLen);
+  // Overflowed payload: empty beats partial (a partial draw is a wrong glyph).
+  if (g_chatState.strokesOverflowed && strokesOut != nullptr && strokesCap > 0) strokesOut[0] = '\0';
   truncated = g_chatState.truncated;
   error = g_chatState.error;
   return g_chatState.sawText;
+}
+
+bool parseImageResponse(const char* json, size_t len, ImageMeta& out, char* textOut, size_t textCap, ErrorCode& error) {
+  out = ImageMeta{};
+  g_chatState.begin(textOut, textCap, nullptr, 0, out.id, sizeof(out.id));
+  error = ErrorCode::None;
+  if (json == nullptr || len == 0) return false;
+
+  g_chatParser.reset();
+  g_chatParser.feed(json, len);
+  if (g_chatParser.hasError()) return false;
+
+  if (textOut != nullptr && textCap > 0 && g_chatState.truncated) trimUtf8Tail(textOut, g_chatState.textLen);
+  error = g_chatState.error;
+  if (!g_chatState.sawImageId || g_chatState.imageIdLen == 0) return false;
+  out.width = g_chatState.imageWidth;
+  out.height = g_chatState.imageHeight;
+  out.bytes = g_chatState.imageBytes;
+  return true;
 }
 
 // ── device -> relay frames ───────────────────────────────────────────────
@@ -616,6 +746,64 @@ size_t buildChatRequest(char* out, size_t cap, const char* requestId, const char
     if (!appendLiteral(out, cap, pos, "\"")) return 0;
   }
   if (!appendLiteral(out, cap, pos, "}")) return 0;
+  if (!finishFrame(out, cap, pos)) return 0;
+  return pos;
+}
+
+size_t buildImageRequest(char* out, size_t cap, const char* requestId, const char* deviceId, const char* text,
+                         const char* style, const char* size) {
+  if (out == nullptr || cap == 0 || requestId == nullptr || deviceId == nullptr || text == nullptr) return 0;
+  size_t pos = 0;
+  if (!appendLiteral(out, cap, pos, "{\"requestId\":\"")) return 0;
+  if (!appendEscaped(out, cap, pos, requestId, strlen(requestId))) return 0;
+  if (!appendLiteral(out, cap, pos, "\",\"deviceId\":\"")) return 0;
+  if (!appendEscaped(out, cap, pos, deviceId, strlen(deviceId))) return 0;
+  if (!appendLiteral(out, cap, pos, "\",\"text\":\"")) return 0;
+  if (!appendEscaped(out, cap, pos, text, strlen(text))) return 0;
+  if (!appendLiteral(out, cap, pos, "\"")) return 0;
+  // Optional generation parameters: absent fields keep the server defaults
+  // (mock/dashscope style auto, T2I_SIZE), so the historical frames for
+  // callers that pass nothing stay byte-identical.
+  if (style != nullptr && style[0] != '\0') {
+    if (!appendLiteral(out, cap, pos, ",\"style\":\"")) return 0;
+    if (!appendEscaped(out, cap, pos, style, strlen(style))) return 0;
+    if (!appendLiteral(out, cap, pos, "\"")) return 0;
+  }
+  if (size != nullptr && size[0] != '\0') {
+    if (!appendLiteral(out, cap, pos, ",\"size\":\"")) return 0;
+    if (!appendEscaped(out, cap, pos, size, strlen(size))) return 0;
+    if (!appendLiteral(out, cap, pos, "\"")) return 0;
+  }
+  if (!appendLiteral(out, cap, pos, "}")) return 0;
+  if (!finishFrame(out, cap, pos)) return 0;
+  return pos;
+}
+
+size_t buildImageEditRequest(char* out, size_t cap, const char* requestId, const char* deviceId, const char* text,
+                             const char* imageB64, int32_t width, int32_t height) {
+  if (out == nullptr || cap == 0 || requestId == nullptr || deviceId == nullptr || text == nullptr || text[0] == '\0' ||
+      imageB64 == nullptr || imageB64[0] == '\0' || width <= 0 || height <= 0) {
+    return 0;
+  }
+  char wbuf[12];
+  char hbuf[12];
+  snprintf(wbuf, sizeof(wbuf), "%d", static_cast<int>(width));
+  snprintf(hbuf, sizeof(hbuf), "%d", static_cast<int>(height));
+  size_t pos = 0;
+  if (!appendLiteral(out, cap, pos, "{\"requestId\":\"")) return 0;
+  if (!appendEscaped(out, cap, pos, requestId, strlen(requestId))) return 0;
+  if (!appendLiteral(out, cap, pos, "\",\"deviceId\":\"")) return 0;
+  if (!appendEscaped(out, cap, pos, deviceId, strlen(deviceId))) return 0;
+  if (!appendLiteral(out, cap, pos, "\",\"text\":\"")) return 0;
+  if (!appendEscaped(out, cap, pos, text, strlen(text))) return 0;
+  if (!appendLiteral(out, cap, pos, "\",\"image\":{\"data\":\"")) return 0;
+  // base64 output is ASCII [A-Za-z0-9+/=] — no escaping needed, appended raw.
+  if (!appendLiteral(out, cap, pos, imageB64)) return 0;
+  if (!appendLiteral(out, cap, pos, "\",\"format\":\"bmp\",\"width\":")) return 0;
+  if (!appendLiteral(out, cap, pos, wbuf)) return 0;
+  if (!appendLiteral(out, cap, pos, ",\"height\":")) return 0;
+  if (!appendLiteral(out, cap, pos, hbuf)) return 0;
+  if (!appendLiteral(out, cap, pos, "}}")) return 0;
   if (!finishFrame(out, cap, pos)) return 0;
   return pos;
 }

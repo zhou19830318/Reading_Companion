@@ -18,12 +18,12 @@ class InputManager {
    * those buttons were physically pressed this frame. Must be called from the
    * same task/context as update() (e.g. right after HalGPIO calls update()),
    * NOT from an ISR or another task — it is not synchronized. The injected bits
-    * live for the current frame only; the next update() clears pressedEvents.
-    * The injection also timestamps buttonPressStart when no button was down, so
-    * getHeldTime() reports a ~1-frame hold instead of the time since the last
-    * real press (otherwise every long-press consumer would see a long press).
-    * Used by the BLE page-turner to feed page-turn key events into the normal
-    * input pipeline so no activity code needs to change.
+   * live for the current frame only; the next update() clears pressedEvents.
+   * The injection also timestamps buttonPressStart when no button was down, so
+   * getHeldTime() reports a ~1-frame hold instead of the time since the last
+   * real press (otherwise every long-press consumer would see a long press).
+   * Used by the BLE page-turner to feed page-turn key events into the normal
+   * input pipeline so no activity code needs to change.
    *
    * @param buttonMask OR of (1 << BTN_*) bits to mark as just-pressed
    */
@@ -37,7 +37,7 @@ class InputManager {
    */
   bool isPressed(uint8_t buttonIndex) const;
 
- /**
+  /**
    * Returns true if the button went from unpressed to pressed between the last two #update() calls.
    *
    * This differs from #isPressed() in that pressing and holding a button will cause this function
@@ -78,7 +78,7 @@ class InputManager {
    */
   unsigned long getHeldTime() const;
 
-    /**
+  /**
    * Returns the time the power button has been held
    *
    * @return duration in milliseconds
@@ -124,7 +124,6 @@ class InputManager {
   unsigned long buttonPressFinish;
   unsigned long powerButtonPressStart;
   unsigned long powerButtonPressFinish;
-
 
   static constexpr int NUM_BUTTONS_1 = 4;
   static const int ADC_RANGES_1[];

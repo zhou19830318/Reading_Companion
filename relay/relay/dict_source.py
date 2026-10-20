@@ -6,6 +6,11 @@ chinese-xinhua senses and 组词, so the device never receives generated
 dictionary content. A character that is not in the data gets an explicit
 "not in the offline dictionary" card instead of an LLM guess.
 
+Strokes: strokes.json (tools/build_stroke_data.py, Make Me a Hanzi medians)
+holds one pre-encoded stroke-order payload per character for the device's
+田字格 stroke view. It is optional: without it the card service is unchanged
+and the device simply offers no stroke view.
+
 Configuration: DICT_SOURCE=local (default, this module) or "llm" (the old
 LLM-generated cards). Data directory resolution: DICT_DATA_DIR, then
 $RELEASE/dict-data next to the relay package, then relay/dict-data in a
@@ -95,6 +100,7 @@ class DictSource:
         self.data_dir = Path(data_dir)
         self.chars: dict[str, list] = {}
         self.words: dict[str, list[str]] = {}
+        self.strokes: dict[str, str] = {}
         self.meta: dict = {}
         self.loaded = False
 
@@ -104,6 +110,9 @@ class DictSource:
             words_path = self.data_dir / "words.json"
             if words_path.is_file():
                 self.words = json.loads(words_path.read_text(encoding="utf-8"))
+            strokes_path = self.data_dir / "strokes.json"
+            if strokes_path.is_file():
+                self.strokes = json.loads(strokes_path.read_text(encoding="utf-8"))
             meta_path = self.data_dir / "META.json"
             if meta_path.is_file():
                 self.meta = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -116,6 +125,7 @@ class DictSource:
             extra={
                 "dir": str(self.data_dir),
                 "chars": len(self.chars),
+                "strokes": len(self.strokes),
                 "built_at": self.meta.get("built_at", ""),
             },
         )
@@ -131,6 +141,17 @@ class DictSource:
             return render_card(char, [], "", 0, [NOT_FOUND_SENSE], [])
         readings, radical, strokes, senses = entry
         return render_card(char, readings, radical, strokes, senses, self.words.get(char, []))
+
+    def stroke_payload(self, text: str) -> str | None:
+        """The character's encoded stroke-order payload, or None.
+
+        Independent of the card entry: a character missing from chars.json
+        but present in strokes.json still gets the stroke view.
+        """
+        char = text.strip()
+        if len(char) != 1 or not _CJK_CHAR.match(char):
+            return None
+        return self.strokes.get(char)
 
 
 _source: DictSource | None = None

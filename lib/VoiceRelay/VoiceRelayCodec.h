@@ -38,7 +38,9 @@ constexpr uint32_t MAX_AUDIO_MS = 30000;
 constexpr size_t REQUEST_ID_CHARS = 32;  // 32 lowercase hex digits
 constexpr size_t REQUEST_ID_CAP = REQUEST_ID_CHARS + 1;
 constexpr size_t SESSION_ID_CAP = REQUEST_ID_CAP;
-constexpr size_t DEVICE_ID_CAP = 40;  // "reading-companion-001" + margin
+constexpr size_t DEVICE_ID_CAP = 40;   // "reading-companion-001" + margin
+constexpr size_t IMAGE_ID_CHARS = 16;  // /api/v1/image asset id: 16 lowercase hex
+constexpr size_t IMAGE_ID_CAP = IMAGE_ID_CHARS + 1;
 
 // Largest control frame the device builds. Worst case is session.start with a
 // full 32-char requestId and a DEVICE_ID_CAP-1 device id: 215 bytes + NUL.
@@ -68,7 +70,9 @@ enum class EventType : uint8_t {
 };
 
 // Mirrors relay/protocol.py ErrorCode. The activity maps these to translated
-// strings (this library does not depend on I18n).
+// strings (this library does not depend on I18n). The T2i* codes are not
+// protocol.py members: they are the error tokens of the /api/v1/image
+// endpoint (relay t2i.py T2iError.code).
 enum class ErrorCode : uint8_t {
   None,
   BadProtocol,
@@ -85,6 +89,12 @@ enum class ErrorCode : uint8_t {
   SessionTimeout,
   ServerOverloaded,
   InternalError,
+  T2iEmptyPrompt,
+  T2iRejected,
+  T2iNotConfigured,
+  T2iUpstream,
+  T2iTimeout,
+  T2iBadParam,  // T2I_BAD_PARAM — unknown style/size or a bad edit image
   Unknown,
 };
 
@@ -171,7 +181,53 @@ size_t buildChatRequest(char* out, size_t cap, const char* requestId, const char
 // failures; ErrorCode::None when the body carried no error token. `truncated`
 // is set when textOut was too small and the tail was cut at a codepoint
 // boundary.
-bool parseChatResponse(const char* json, size_t len, char* textOut, size_t textCap, bool& truncated, ErrorCode& error);
+//
+// The optional "strokes" field (a dict card's encoded stroke-order payload,
+// see relay tools/build_stroke_data.py) is captured into strokesOut when a
+// buffer is passed. The payload is ASCII digits and ',', ';', '|' only. A
+// payload that does not fit is dropped in full, never truncated — a partial
+// draw would render the wrong character.
+bool parseChatResponse(const char* json, size_t len, char* textOut, size_t textCap, bool& truncated, ErrorCode& error,
+                       char* strokesOut = nullptr, size_t strokesCap = 0);
+
+// ── image endpoint (AI 生图) ─────────────────────────────────────────────
+//
+// POST <origin>/api/v1/image on the same relay (relay/relay/main.py
+// ImageRequest): bearer token + X-Device-Id, JSON body {requestId, deviceId,
+// text[, style, size]} for generation, or {requestId, deviceId, text, image}
+// for edit mode (image = {"data": <base64 BMP>, "format", "width",
+// "height"}). Success body: {"requestId", "text" (waiting phrase), "image":
+// {"id", "url", "width", "height", "bytes", "format"}}. The asset itself is
+// fetched separately with GET /api/v1/image/<id>.
+
+// Server cap for an image prompt. One line of typing, not a paragraph; the
+// relay never returns a prompt-length error, it just hands the text to the
+// image backend as-is.
+constexpr size_t IMAGE_TEXT_CAP = 512;
+
+struct ImageMeta {
+  char id[IMAGE_ID_CAP] = {};  // asset id; empty until parseImageResponse returns true
+  int32_t width = 0;
+  int32_t height = 0;
+  int32_t bytes = 0;
+};
+
+size_t buildImageRequest(char* out, size_t cap, const char* requestId, const char* deviceId, const char* text,
+                         const char* style = nullptr, const char* size = nullptr);
+
+// Edit-mode request (device 修改 flow): text + the source image as base64.
+// imageB64 is the already-encoded payload (SttCodec::base64Encode of the
+// panel BMP); width/height are the BMP header's pixel dimensions. The frame
+// is large (~65 KB for a 48 KB BMP) — the caller supplies a PSRAM buffer.
+size_t buildImageEditRequest(char* out, size_t cap, const char* requestId, const char* deviceId, const char* text,
+                             const char* imageB64, int32_t width, int32_t height);
+
+// Parses a /api/v1/image body. Returns true when the "image.id" field was
+// present — a complete ImageMeta; `textOut` (optional) receives the waiting
+// phrase when a buffer is passed. On failure `error` is filled from a
+// {"code": "T2I_..."} body (ErrorCode::None when the body carried no error
+// token, e.g. a transport-level failure).
+bool parseImageResponse(const char* json, size_t len, ImageMeta& out, char* textOut, size_t textCap, ErrorCode& error);
 
 // ── PCM framing ──────────────────────────────────────────────────────────
 //

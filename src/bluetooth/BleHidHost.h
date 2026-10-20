@@ -82,7 +82,6 @@ class BleHidHost {
   // device list can show it while scanning). -1 if never read.
   int8_t boundBatteryLevel() const { return boundBatteryLevel_; }
 
-
   // --- Discovery / pairing (driven by the pairing UI) ---
   // Enter discovery mode: scan and collect nearby BLE HID devices into a list
   // WITHOUT auto-connecting. Clears any previous scan results.
@@ -132,7 +131,7 @@ class BleHidHost {
 
   bool started_ = false;
   volatile BleHidState state_ = BleHidState::Stopped;
-  volatile int8_t batteryLevel_ = -1;  // connected remote battery % (0-100), -1 = unknown
+  volatile int8_t batteryLevel_ = -1;       // connected remote battery % (0-100), -1 = unknown
   volatile int8_t boundBatteryLevel_ = -1;  // bound remote's last-known battery, kept across disconnect
 
   // Scan mode: Discovery = collect list, don't connect; Bound = connect only to

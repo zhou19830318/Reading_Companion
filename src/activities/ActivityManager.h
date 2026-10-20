@@ -88,6 +88,7 @@ class ActivityManager {
   void goToBrowser();
   void goToReader(std::string path);
   void goToVoice();
+  void goToAiAssistant();
   void goToWorkbench();
   void goToSleep(bool fromTimeout = false);
   void goToBoot();

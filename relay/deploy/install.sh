@@ -80,6 +80,7 @@ section "voice-relay user and directories"
 id -u voice-relay >/dev/null 2>&1 || \
     useradd --system --home "$RELAY_ROOT" --shell /usr/sbin/nologin voice-relay
 mkdir -p "$RELAY_ROOT"/{releases,logs,run,deploy} "$ENV_DIR" "$RELEASE"
+mkdir -p "$RELAY_ROOT/run/t2i"
 chown -R voice-relay:voice-relay "$RELAY_ROOT"
 
 section "release $TS"
@@ -127,7 +128,8 @@ if [[ -f "$ENV_FILE" ]]; then
     # Track the release id for /healthz without touching secrets.
     sed -i "s/^RELAY_VERSION=.*/RELAY_VERSION=$TS/" "$ENV_FILE"
     # Backfill keys added after the first install (never clobber operator values).
-    for kv in MAX_WS_CONNECTIONS=32 MAX_SESSIONS_PER_DEVICE=1 DICT_SOURCE=local; do
+    for kv in MAX_WS_CONNECTIONS=32 MAX_SESSIONS_PER_DEVICE=1 DICT_SOURCE=local \
+              T2I_PROVIDER=mock "T2I_ASSET_DIR=$RELAY_ROOT/run/t2i"; do
         key=${kv%%=*}
         grep -q "^${key}=" "$ENV_FILE" || echo "$kv" >> "$ENV_FILE"
     done
@@ -176,6 +178,13 @@ SESSION_IDLE_TIMEOUT_SECONDS=60
 # (see README "Dictionary data"). DICT_SOURCE=llm restores model-generated
 # cards, which may contain factual errors -- not recommended.
 DICT_SOURCE=local
+# Text-to-image cards: mock (default) draws a placeholder locally with no
+# cloud call and no cost; T2I_PROVIDER=dashscope uses the wanx model and
+# T2I_PROVIDER=openai any OpenAI-compatible images endpoint (T2I_BASE_URL,
+# T2I_API_KEY). The asset directory must stay under run/ so the systemd
+# sandbox can write it.
+T2I_PROVIDER=mock
+T2I_ASSET_DIR=$RELAY_ROOT/run/t2i
 # Sessions may run concurrently; keep within the DashScope account quota.
 MAX_CONCURRENT_SESSIONS=4
 # Multiple onepage devices: cap open sockets and sessions per device.

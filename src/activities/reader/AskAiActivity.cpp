@@ -290,7 +290,7 @@ void AskAiActivity::beginRelayAsk() {
   VoiceRelay::ChatClient::Stats stats;
   const VoiceRelay::ChatClient::Result result = VoiceRelay::ChatClient::ask(
       CLOUD_CFG.relayUrl, CLOUD_CFG.relayToken, CLOUD_CFG.relayDeviceId, prompt_.get(), relayReply_.get(),
-      VoiceRelay::CHAT_TEXT_CAP + 1, truncated, /*mode=*/nullptr, &stats);
+      VoiceRelay::CHAT_TEXT_CAP + 1, truncated, /*strokesOut=*/nullptr, /*strokesCap=*/0, /*mode=*/nullptr, &stats);
   if (result != VoiceRelay::ChatClient::Result::Ok) {
     LOG_ERR("ASK", "relay chat failed: %s (http %d), falling back to OpenClaw",
             VoiceRelay::ChatClient::resultName(result), stats.httpStatus);

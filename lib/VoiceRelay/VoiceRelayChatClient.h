@@ -39,10 +39,13 @@ class ChatClient {
   // `url` is the configured relay URL (ws:// or wss://). On Ok, `reply` holds
   // the NUL-terminated reply text; `truncated` is set when it did not fit
   // replyCap (cut at a codepoint boundary) or the body outgrew the read
-  // buffer. `mode` selects a server-side preset (nullptr = plain ask,
-  // "dict" = dictionary entry). `stats` is optional.
+  // buffer. When strokesOut is non-null, the dict card's encoded stroke-order
+  // payload (if the body carries one) lands there — always cleared on entry,
+  // dropped whole on overflow. `mode` selects a server-side preset (nullptr =
+  // plain ask, "dict" = dictionary entry). `stats` is optional.
   static Result ask(const char* url, const char* token, const char* deviceId, const char* text, char* reply,
-                    size_t replyCap, bool& truncated, const char* mode = nullptr, Stats* stats = nullptr);
+                    size_t replyCap, bool& truncated, char* strokesOut, size_t strokesCap, const char* mode = nullptr,
+                    Stats* stats = nullptr);
 
   static const char* resultName(Result result);
 };

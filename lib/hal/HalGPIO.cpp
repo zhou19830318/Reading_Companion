@@ -226,10 +226,10 @@ void HalGPIO::begin() {
   pinMode(EPD_RST, OUTPUT);
   digitalWrite(EPD_RST, HIGH);
   delay(20);
-  digitalWrite(EPD_RST, LOW);   // power-cycle the rail / reset the EPD
+  digitalWrite(EPD_RST, LOW);  // power-cycle the rail / reset the EPD
   delay(120);
   digitalWrite(EPD_RST, HIGH);
-  delay(120);                   // let the rail settle before the SD is mounted
+  delay(120);  // let the rail settle before the SD is mounted
 #endif
 #ifdef ONEPAGE_C61
   // OnePage is neither X3 nor X4: skip the I2C fingerprint probe (it drives Wire on

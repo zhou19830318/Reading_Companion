@@ -43,7 +43,10 @@ constexpr uint32_t FIRST_FRAME_WAIT_MS = 2500;
 // does not look hung.
 constexpr uint32_t AUTH_DEADLINE_MS = 6000;
 
-size_t defaultBundleSize() { return static_cast<size_t>(_binary_x509_crt_bundle_end - _binary_x509_crt_bundle_start); }
+size_t defaultBundleSize() {
+  return static_cast<size_t>(reinterpret_cast<uintptr_t>(_binary_x509_crt_bundle_end) -
+                             reinterpret_cast<uintptr_t>(_binary_x509_crt_bundle_start));
+}
 
 // payload is not NUL-terminated; copy at most cap-1 bytes and terminate.
 void copyTrunc(char* dst, size_t cap, const uint8_t* src, size_t len) {

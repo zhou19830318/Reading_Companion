@@ -27,10 +27,14 @@ CHARS = {
 WORDS = {"的": ["目的", "真的"], "乐": ["音乐", "快乐"]}
 
 
+STROKES = {"的": "1,2;3,4|5,6;7,8"}
+
+
 @pytest.fixture()
 def data_dir(tmp_path):
     (tmp_path / "chars.json").write_text(json.dumps(CHARS, ensure_ascii=False), encoding="utf-8")
     (tmp_path / "words.json").write_text(json.dumps(WORDS, ensure_ascii=False), encoding="utf-8")
+    (tmp_path / "strokes.json").write_text(json.dumps(STROKES, ensure_ascii=False), encoding="utf-8")
     (tmp_path / "META.json").write_text(json.dumps({"built_at": "test"}), encoding="utf-8")
     return tmp_path
 
@@ -90,6 +94,40 @@ def test_card_lookup(data_dir):
     assert src.card("你好世界") == "【字】无法识别\n【释义】请输入单个汉字。\n"
     assert src.card("N") == "【字】无法识别\n【释义】请输入单个汉字。\n"  # letter, not a hanzi
     assert src.card(" 桛 ") == "【字】桛\n【部首笔画】木·10画\n【释义】日本和字。\n"
+
+
+def test_stroke_payload_rules(data_dir):
+    src = dict_source.DictSource(data_dir)
+    assert src.load()
+
+    assert src.stroke_payload("的") == "1,2;3,4|5,6;7,8"
+    assert src.stroke_payload(" 的 ") == "1,2;3,4|5,6;7,8"  # stripped like card()
+    assert src.stroke_payload("乐") is None  # a card entry without stroke data
+    assert src.stroke_payload("N") is None  # not a hanzi
+    assert src.stroke_payload("你好") is None  # not a single character
+
+
+def test_strokes_payload_is_optional(tmp_path):
+    # A data dir without strokes.json still loads; every payload is None.
+    (tmp_path / "chars.json").write_text(json.dumps(CHARS, ensure_ascii=False), encoding="utf-8")
+    src = dict_source.DictSource(tmp_path)
+    assert src.load()
+    assert src.stroke_payload("的") is None
+    assert src.card("的").startswith("【字】的\n")
+
+
+def test_chat_endpoint_serves_strokes_field(client):
+    r = client.post("/api/v1/chat", json={"text": "的", "stream": False, "mode": "dict"}, headers=ADMIN)
+    assert r.status_code == 200
+    assert r.json()["strokes"] == "1,2;3,4|5,6;7,8"
+
+    # No stroke entry for this one: the card is still served, no field.
+    r2 = client.post("/api/v1/chat", json={"text": "乐", "stream": False, "mode": "dict"}, headers=ADMIN)
+    assert r2.status_code == 200
+    assert "strokes" not in r2.json()
+    # Not a single hanzi: no strokes either.
+    r3 = client.post("/api/v1/chat", json={"text": "N", "stream": False, "mode": "dict"}, headers=ADMIN)
+    assert "strokes" not in r3.json()
 
 
 def test_describe_status(tmp_path):

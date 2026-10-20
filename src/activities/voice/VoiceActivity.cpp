@@ -317,6 +317,12 @@ int64_t todayHistoryDays() {
 constexpr StrId QUICK_TAGS[] = {StrId::STR_MARK_REVISIT, StrId::STR_MARK_LIKED,    StrId::STR_MARK_DOUBT,
                                 StrId::STR_MARK_QUOTE,   StrId::STR_MARK_PERSONAL, StrId::STR_MARK_VERIFY};
 constexpr size_t QUICK_TAG_COUNT = sizeof(QUICK_TAGS) / sizeof(QUICK_TAGS[0]);
+// Chat preset questions (State::ChatPresets): fixed translations, no user
+// config. Short enough to sit in transcript_ (CHAT_MESSAGE_CAP) and to read
+// as one list row at UI_10 on a portrait panel.
+constexpr StrId CHAT_PRESETS[] = {StrId::STR_CHAT_PRESET_1, StrId::STR_CHAT_PRESET_2, StrId::STR_CHAT_PRESET_3,
+                                  StrId::STR_CHAT_PRESET_4};
+constexpr size_t CHAT_PRESET_COUNT = sizeof(CHAT_PRESETS) / sizeof(CHAT_PRESETS[0]);
 }  // namespace
 
 void VoiceActivity::openHistory() {
@@ -1054,6 +1060,12 @@ void VoiceActivity::openNoteEditor() {
   // warmRelay()). A warm socket makes the first power-key round loss-free.
   warmRelay();
   pumpWarmRelay();
+  // Question mode with a prefill (AI 生图 "再来一张"): the previous prompt
+  // waits in the editor when the user typed nothing and spoke nothing. A
+  // transcript from this round always wins — the seed is the fallback.
+  if (questionInput_ && transcript_[0] == '\0' && questionSeed_ != nullptr && questionSeed_[0] != '\0') {
+    snprintf(transcript_, sizeof(transcript_), "%s", questionSeed_);
+  }
   VoiceDictationHooks hooks;
   hooks.ctx = this;
   hooks.start = &VoiceActivity::dictationStartTrampoline;
@@ -1062,7 +1074,7 @@ void VoiceActivity::openNoteEditor() {
   hooks.error = &VoiceActivity::dictationErrorTrampoline;
   startActivityForResult(
       std::make_unique<KeyboardEntryActivity>(renderer, mappedInput,
-                                              questionInput_ ? tr(STR_Q_CUSTOM) : tr(STR_VOICE_BOOKMARK_EDIT),
+                                              questionInput_ ? I18N.get(questionTitle_) : tr(STR_VOICE_BOOKMARK_EDIT),
                                               transcript_, sizeof(transcript_) - 1, InputType::Text, hooks),
       [this](const ActivityResult& result) {
         if (result.isCancelled) {
@@ -1317,6 +1329,62 @@ void VoiceActivity::saveQuickNote() {
   saveNoteFromTranscript();
 }
 
+void VoiceActivity::openChatPresets() {
+  presetSelected_ = 0;
+  state_ = State::ChatPresets;
+  requestUpdate();
+}
+
+void VoiceActivity::startTextSend() {
+  // Text-only chat round (preset question): transcript_ is already the
+  // outgoing message, nothing is being captured, and the legacy session path
+  // carries it — sendPending() puts it on the wire once the link is up
+  // (same oweSend_ contract as a summarize round with pendingText_ null).
+  haveTranscript_ = transcript_[0] != '\0';
+  haveAnswer_ = false;
+  answerScroll_ = 0;
+  relayRound_ = false;  // no relay audio round; the reply settles via session_
+  pendingText_ = nullptr;
+  state_ = State::Sending;
+  oweSend_ = true;
+  lastWaitShownSec_ = 0;
+  requestUpdate();
+}
+
+void VoiceActivity::sendPresetDirect() {
+  snprintf(transcript_, sizeof(transcript_), "%s", I18N.get(CHAT_PRESETS[presetSelected_]));
+  startTextSend();
+}
+
+void VoiceActivity::openPresetEditor() {
+  // The highlighted preset waits in the editor; Confirm sends the edited text
+  // through the same text-send path, Back returns to the picker untouched.
+  // transcript_ is this activity's member buffer, so it outlives the keyboard.
+  snprintf(transcript_, sizeof(transcript_), "%s", I18N.get(CHAT_PRESETS[presetSelected_]));
+  startActivityForResult(std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_PRESET_EDIT),
+                                                                 transcript_, sizeof(transcript_) - 1, InputType::Text),
+                         [this](const ActivityResult& result) {
+                           if (result.isCancelled) {
+                             LOG_INF("VOICE", "preset edit cancelled");
+                             transcript_[0] = '\0';
+                             haveTranscript_ = false;
+                             state_ = State::ChatPresets;
+                             requestUpdate();
+                             return;
+                           }
+                           snprintf(transcript_, sizeof(transcript_), "%s",
+                                    std::get<KeyboardResult>(result.data).text.c_str());
+                           if (transcript_[0] == '\0') {
+                             // An emptied editor is a discard, not an empty chat.send.
+                             haveTranscript_ = false;
+                             state_ = State::ChatPresets;
+                             requestUpdate();
+                             return;
+                           }
+                           startTextSend();
+                         });
+}
+
 void VoiceActivity::sendToOpenClaw() {
   // The session may still be handshaking if the user spoke before it settled.
   // Wait in Sending rather than dropping a capture the user just made; loop()
@@ -1396,6 +1464,12 @@ void VoiceActivity::loop() {
     // The mark picker backs out to the idle note screen, not out of the
     // activity: Back there still leaves the way it always did.
     if (state_ == State::NoteQuick) {
+      state_ = State::Idle;
+      requestUpdate();
+      return;
+    }
+    // The chat preset picker unwinds to the idle chat screen the same way.
+    if (state_ == State::ChatPresets) {
       state_ = State::Idle;
       requestUpdate();
       return;
@@ -1525,7 +1599,14 @@ void VoiceActivity::loop() {
   // ellipsis. The offsets are clamped when render() draws the window.
   if (state_ == State::Answer) {
     if (mappedInput.wasPressed(MappedInputManager::Button::Up)) {
-      if (answerScroll_ > 0) answerScroll_--;
+      if (answerScroll_ > 0) {
+        answerScroll_--;
+      } else {
+        // At the top the reply cannot scroll further up, and there is no
+        // other way back to Idle from a settled answer — so Up opens the
+        // preset picker there (hinted as 预设提问 at scroll 0, 上 above it).
+        openChatPresets();
+      }
       requestUpdate();
       return;
     }
@@ -1543,6 +1624,17 @@ void VoiceActivity::loop() {
   if (!noteContext_.valid && !questionInput_ && mappedInput.wasPressed(nextKey) &&
       (state_ == State::Idle || state_ == State::Answer || state_ == State::Failed)) {
     openHistory();
+    return;
+  }
+
+  // Chat presets: side Up from the quiet chat screen opens the preset picker.
+  // The three front keys are already bound there (talk / send-mode / history),
+  // and side Up is free in Idle and Failed (Answer spends it scrolling the
+  // reply — a new question from there starts with the talk key). Idle/Failed
+  // are the same quiet states the history key opens from.
+  if (!noteContext_.valid && !questionInput_ && mappedInput.wasPressed(MappedInputManager::Button::Up) &&
+      (state_ == State::Idle || state_ == State::Failed)) {
+    openChatPresets();
     return;
   }
 
@@ -1733,6 +1825,26 @@ void VoiceActivity::loop() {
     return;
   }
 
+  // ── Chat preset picker ──────────────────────────────────────────
+  if (state_ == State::ChatPresets) {
+    // Side Up/Down move the highlight, Confirm sends the highlighted question
+    // now, front-Left opens it in the keyboard for editing first. Back returns
+    // to Idle (handled above); the talk key is deliberately unbound so a
+    // picker pass can never start a capture.
+    if (mappedInput.wasPressed(MappedInputManager::Button::Up)) {
+      if (presetSelected_ > 0) presetSelected_--;
+      requestUpdate();
+    } else if (mappedInput.wasPressed(MappedInputManager::Button::Down)) {
+      if (presetSelected_ + 1 < CHAT_PRESET_COUNT) presetSelected_++;
+      requestUpdate();
+    } else if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+      sendPresetDirect();
+    } else if (mappedInput.wasPressed(prevKey)) {
+      openPresetEditor();
+    }
+    return;
+  }
+
   // ── Note browser input (list level) ─────────────────────────────
   if (state_ == State::NoteList) {
     if (mappedInput.wasPressed(MappedInputManager::Button::Up) && noteSelected_ > 0) {
@@ -1794,6 +1906,7 @@ void VoiceActivity::loop() {
     case State::HistoryDay:
     case State::NoteSaved:
     case State::NoteQuick:
+    case State::ChatPresets:
       break;  // unreachable: handled above
   }
 }
@@ -1806,8 +1919,9 @@ void VoiceActivity::render(RenderLock&&) {
   const int pageWidth = renderer.getScreenWidth();
   const int left = metrics.contentSidePadding;
 
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight},
-                 noteContext_.valid ? tr(STR_VOICE_BOOKMARK) : (questionInput_ ? tr(STR_ASK_AI) : tr(STR_VOICE)));
+  GUI.drawHeader(
+      renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight},
+      noteContext_.valid ? tr(STR_VOICE_BOOKMARK) : (questionInput_ ? I18N.get(questionScreenTitle_) : tr(STR_VOICE)));
 
   int y = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
@@ -1823,7 +1937,9 @@ void VoiceActivity::render(RenderLock&&) {
       if (noteContext_.valid) {
         snprintf(buf, sizeof(buf), "%s", tr(STR_VOICE_BOOKMARK));
       } else if (questionInput_) {
-        snprintf(buf, sizeof(buf), "%s", tr(STR_ASK_AI));
+        // The action label, not the header again: the header already shows
+        // questionScreenTitle_, and repeating it here read as a glitch.
+        snprintf(buf, sizeof(buf), "%s", I18N.get(questionTitle_));
       } else if (session_.state() == OpenClaw::Session::State::Connected && !session_.reconnecting()) {
         snprintf(buf, sizeof(buf), "%s · %s", tr(STR_OPENCLAW_CONNECTED), session_.status());
       } else {
@@ -2174,6 +2290,25 @@ void VoiceActivity::render(RenderLock&&) {
       break;
     }
 
+    case State::ChatPresets: {
+      // Preset questions: same row layout as the quick-mark picker (fill
+      // highlight, numbered rows). Confirm sends, front-Left edits — the
+      // hint bar below names both keys.
+      renderer.drawText(UI_10_FONT_ID, left, y, tr(STR_CHAT_PRESETS), true, EpdFontFamily::BOLD);
+      y += lineHeight + metrics.verticalSpacing;
+      for (size_t i = 0; i < CHAT_PRESET_COUNT; i++) {
+        const bool selected = i == presetSelected_;
+        char row[96];
+        snprintf(row, sizeof(row), "%u. %s", static_cast<unsigned>(i + 1), I18N.get(CHAT_PRESETS[i]));
+        if (selected) {
+          renderer.fillRect(left - 4, y - 2, textWidth, lineHeight);
+        }
+        renderer.drawText(UI_10_FONT_ID, left, y, row, !selected, EpdFontFamily::REGULAR);
+        y += lineHeight;
+      }
+      break;
+    }
+
     case State::NoteView: {
       const auto& entry = noteEntries_[noteSelected_];
       // Wall-clock stamp first: the list row shows the same one, and both
@@ -2231,9 +2366,20 @@ void VoiceActivity::render(RenderLock&&) {
   // Side Up/Down hints wherever the side keys navigate: they move the
   // hierarchy list and scroll a long turn or reply. Empty labels draw
   // nothing, so this is skipped for the states that do not use them.
-  if (state_ == State::Answer || state_ == State::HistoryList || state_ == State::HistoryDay ||
-      state_ == State::NoteList || state_ == State::NoteView || state_ == State::NoteQuick) {
+  if (state_ == State::Answer) {
+    // At the top of a reply the Up key opens the preset picker instead of
+    // scrolling (bound in loop()), so the hint names that action there.
+    GUI.drawSideButtonHints(renderer, answerScroll_ > 0 ? tr(STR_DIR_UP) : tr(STR_CHAT_PRESETS), tr(STR_DIR_DOWN));
+  } else if (state_ == State::HistoryList || state_ == State::HistoryDay || state_ == State::NoteList ||
+             state_ == State::NoteView || state_ == State::NoteQuick || state_ == State::ChatPresets) {
     GUI.drawSideButtonHints(renderer, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  } else if (state_ == State::Idle && !noteContext_.valid && !questionInput_) {
+    // Chat idle: side Up opens the preset picker (Down is unbound) — the one
+    // key that is free on this screen. Note/question mode spends the side keys
+    // on nothing and has no picker, so they draw no hint there.
+    GUI.drawSideButtonHints(renderer, tr(STR_CHAT_PRESETS), "");
+  } else if (state_ == State::Failed && !noteContext_.valid && !questionInput_) {
+    GUI.drawSideButtonHints(renderer, tr(STR_CHAT_PRESETS), "");
   }
 
   // Front-key hints. mapLabels() puts previousLabel on the front-Left key and
@@ -2291,12 +2437,19 @@ void VoiceActivity::render(RenderLock&&) {
       previousLabel = tr(STR_DIR_UP);
       nextLabel = tr(STR_DIR_DOWN);
       break;
+    case State::ChatPresets:
+      // Confirm sends the highlighted preset; front-Left opens it in the
+      // keyboard; front-Right is unbound (history stays on the idle screen).
+      confirmLabel = tr(STR_PRESET_SEND);
+      previousLabel = tr(STR_PRESET_EDIT);
+      nextLabel = "";
+      break;
     default:
       if (quiet) {
         confirmLabel = tr(STR_VOICE_TALK);
         if (questionInput_) {
           // Left = keyboard, Right unused: question mode has no browser slot.
-          previousLabel = tr(STR_Q_CUSTOM);
+          previousLabel = I18N.get(questionTitle_);
           nextLabel = "";
         } else {
           previousLabel = noteContext_.valid ? tr(STR_NOTE_LIST) : modeHint;

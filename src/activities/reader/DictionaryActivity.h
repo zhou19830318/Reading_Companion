@@ -18,8 +18,11 @@
 // the same request falls back to the legacy MiMo + OpenClaw gateway, which
 // gets the format instruction inline (the relay's dict prompt, mirrored in
 // buildDictPrompt()). Either way the reply is laid out as a Xinhua-style card
-// with the character set as a hero glyph at the top. Back returns to the
-// picker with the cursor intact; Confirm retries after a failure.
+// with the character set as a hero glyph at the top. When the relay supplied
+// a stroke-order payload for the character, Confirm on the card opens a 田字格
+// view that draws every stroke in order; Back/Confirm there return to the
+// card. Back returns to the picker with the cursor intact; Confirm retries
+// after a failure.
 class DictionaryActivity final : public Activity {
  public:
   DictionaryActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, uint32_t codepoint)
@@ -39,6 +42,7 @@ class DictionaryActivity final : public Activity {
     Connecting,  // OpenClaw fallback: gateway link coming up, sends once Connected
     Asking,      // chat.send outstanding, reply streaming
     Card,        // settled entry, scrollable
+    Strokes,     // 田字格 stroke-order view (relay strokes payload)
     Failed,      // both backends died; Confirm retries from the relay
   };
 
@@ -58,7 +62,13 @@ class DictionaryActivity final : public Activity {
   const char* failText_ = nullptr;  // tr() table pointer; valid for our lifetime
   std::unique_ptr<char[]> reply_;
   static constexpr size_t REPLY_CAP = 2048;
-  std::string heroChar_;  // 【字】's content when present, else charBuf_
+  // Encoded stroke-order payload for the hero character (relay "strokes"
+  // field): strokes separated by '|', "x,y" points by ';', quantized 0..255
+  // (relay tools/build_stroke_data.py). Empty when the fallback gateway or a
+  // character without data is in play — the card then offers no stroke view.
+  std::unique_ptr<char[]> strokes_;
+  static constexpr size_t STROKES_CAP = 1152;  // data max is 1106 (籲); see STROKES_META.json
+  std::string heroChar_;                       // 【字】's content when present, else charBuf_
   std::vector<CardRow> rows_;
   bool rowsBuilt_ = false;  // rows_ matches the current reply + text width
   int scrollLine_ = 0;
@@ -88,6 +98,7 @@ class DictionaryActivity final : public Activity {
   const char* phaseText() const;
   void promptForWifi();
   void buildCard(int fontId, int textWidth);
+  void renderStrokesView(int left, int right, int contentTop, int contentBottom);
   static void onSessionNotifyTrampoline(void* ctx);
   void onSessionNotify();
 };

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from contextlib import asynccontextmanager
 
 import orjson
@@ -22,7 +23,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel
 
 from . import SERVICE_NAME, __version__
-from . import dict_source, metrics, protocol
+from . import dict_source, metrics, protocol, t2i
 from .auth import check_admin, check_device
 from .config import Settings, get_settings
 from .logging_setup import setup_logging
@@ -115,6 +116,7 @@ async def device_config(request: Request):
             "partialAsr": settings.asr_provider != "mock" or True,
             "streamingLlm": True,
             "legacyFallback": True,
+            "textToImage": settings.t2i_provider == "mock" or bool(settings.dashscope_api_key),
         },
     }
 
@@ -341,6 +343,23 @@ async def _outbound_writer(websocket: WebSocket, queue: asyncio.Queue[str]) -> N
 # --------------------------------------------------------------------------
 
 
+def _text_endpoint_guard(settings: Settings, request: Request) -> JSONResponse | None:
+    """Shared auth for /chat and /image: admin OR device token. None = allowed."""
+    if not settings.relay_admin_token and not settings.relay_device_token:
+        return JSONResponse(status_code=404, content={"error": "disabled"})
+    authorization = request.headers.get("authorization")
+    try:
+        check_admin(settings, authorization)
+        return None
+    except ProtocolError:
+        pass
+    try:
+        check_device(settings, authorization, request.headers.get("x-device-id"))
+        return None
+    except ProtocolError:
+        return JSONResponse(status_code=401, content={"error": ErrorCode.UNAUTHORIZED.value})
+
+
 class ChatRequest(BaseModel):
     requestId: str = ""
     deviceId: str = "debug-client"
@@ -353,16 +372,9 @@ class ChatRequest(BaseModel):
 @app.post("/api/v1/chat")
 async def chat(request: Request, body: ChatRequest):
     settings = get_settings()
-    if not settings.relay_admin_token and not settings.relay_device_token:
-        return JSONResponse(status_code=404, content={"error": "disabled"})
-    authorization = request.headers.get("authorization")
-    try:
-        check_admin(settings, authorization)
-    except ProtocolError:
-        try:
-            check_device(settings, authorization, request.headers.get("x-device-id"))
-        except ProtocolError:
-            return JSONResponse(status_code=401, content={"error": ErrorCode.UNAUTHORIZED.value})
+    guard = _text_endpoint_guard(settings, request)
+    if guard is not None:
+        return guard
 
     request_id = body.requestId or protocol.new_id()
 
@@ -374,13 +386,24 @@ async def chat(request: Request, body: ChatRequest):
         source = dict_source.get_dict_source(settings.dict_data_dir)
         if source is not None:
             card = source.card(body.text)
-            log.info("dict card served", extra={"source": "local", "bytes": len(card.encode("utf-8"))})
+            strokes = source.stroke_payload(body.text)
+            log.info(
+                "dict card served",
+                extra={
+                    "source": "local",
+                    "bytes": len(card.encode("utf-8")),
+                    "strokes": len(strokes or ""),
+                },
+            )
             if not body.stream:
-                return {
-                    "requestId": request_id,
-                    "text": card,
-                    "usage": {"inputTokens": 0, "outputTokens": 0},
-                }
+                # "strokes" goes before "usage": the device reads the body
+                # into a 4 KB window and a truncated tail must never cost the
+                # card facts (usage is informational for this path).
+                response = {"requestId": request_id, "text": card}
+                if strokes:
+                    response["strokes"] = strokes
+                response["usage"] = {"inputTokens": 0, "outputTokens": 0}
+                return response
 
             async def local_card_events():
                 yield _sse({"type": "llm.start", "requestId": request_id})
@@ -428,6 +451,86 @@ async def chat(request: Request, body: ChatRequest):
                     pass
 
     return StreamingResponse(events(), media_type="text/event-stream")
+
+
+# --------------------------------------------------------------------------
+# text-to-image endpoint (same auth as /chat). The generation call returns
+# metadata + a waiting phrase; the device then fetches the BMP via the asset
+# URL. Mock provider by default (see relay/t2i.py).
+# --------------------------------------------------------------------------
+
+
+class ImageRequest(BaseModel):
+    requestId: str = ""
+    text: str = ""
+    # Optional generation parameters. style is a DashScope V1 enum value
+    # (relay/t2i.py DASHSCOPE_STYLES); size is "W*H". Both are validated in
+    # t2i.render and unknown values fail with T2I_BAD_PARAM (HTTP 400).
+    style: str = ""
+    size: str = ""
+    # Optional edit source for the device's 修改 flow: {"data": <base64 BMP>,
+    # "format": "bmp", ...}. Present = image-to-image instead of pure t2i.
+    image: dict | None = None
+
+
+@app.post("/api/v1/image")
+async def generate_image(request: Request, body: ImageRequest):
+    settings = get_settings()
+    guard = _text_endpoint_guard(settings, request)
+    if guard is not None:
+        return guard
+
+    request_id = body.requestId or protocol.new_id()
+    started = time.monotonic()
+    try:
+        bmp = await t2i.render(settings, body.text, style=body.style, size=body.size, image=body.image)
+    except t2i.T2iError as exc:
+        metrics.t2i_requests_total.labels(result="error").inc()
+        log.warning("t2i failed", extra={"code": exc.code, "detail": exc.detail})
+        status = 400 if exc.code in ("T2I_EMPTY_PROMPT", "T2I_BAD_PARAM") else 502
+        return JSONResponse(status_code=status, content={"requestId": request_id, "code": exc.code})
+
+    asset_id = t2i.save_asset(settings, bmp)
+    elapsed = time.monotonic() - started
+    metrics.t2i_requests_total.labels(result="ok").inc()
+    log.info(
+        "t2i image served",
+        extra={
+            "provider": settings.t2i_provider,
+            "bytes": len(bmp),
+            "seconds": round(elapsed, 2),
+        },
+    )
+    return {
+        "requestId": request_id,
+        "text": t2i.pick_phrase(),
+        "image": {
+            "id": asset_id,
+            "url": f"/api/v1/image/{asset_id}",
+            "width": settings.t2i_width,
+            "height": settings.t2i_height,
+            "bytes": len(bmp),
+            "format": "bmp",
+        },
+        "usage": {"seconds": round(elapsed, 1)},
+    }
+
+
+@app.get("/api/v1/image/{asset_id}")
+async def image_asset(asset_id: str, request: Request):
+    settings = get_settings()
+    guard = _text_endpoint_guard(settings, request)
+    if guard is not None:
+        return guard
+
+    data = t2i.load_asset(settings, asset_id)
+    if data is None:
+        return JSONResponse(status_code=404, content={"error": "not_found"})
+    return Response(
+        content=data,
+        media_type="image/bmp",
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
 
 
 async def _noop(_piece: str) -> None:

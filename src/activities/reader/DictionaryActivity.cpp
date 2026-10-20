@@ -26,6 +26,96 @@ constexpr int RULE_GAP = 10;  // hero rule spacing
 constexpr int MAX_WRAP_LINES = 40;
 constexpr char LABEL_END[] = "\xE3\x80\x91";                           // 】 — closes the 【...】 section marker
 constexpr char HERO_LABEL[] = "\xE3\x80\x90\xE5\xAD\x97\xE3\x80\x91";  // 【字】
+
+// ── stroke-order view (田字格) ────────────────────────────────────────────
+// Payload points are quantized 0..255 against the y-up frame defined in
+// relay/tools/build_stroke_data.py; stored top-down, so y/255 grows downward.
+struct StrokeBox {
+  int x = 0;
+  int y = 0;
+  int size = 0;
+};
+
+struct StrokePoint {
+  int x = 0;
+  int y = 0;
+};
+
+// Parses one "x,y" token, advancing p past it. Defensive: the payload is
+// server-built, but a malformed or clipped reply must never run off the end.
+bool parseStrokePoint(const char*& p, StrokePoint& out) {
+  if (*p < '0' || *p > '9') return false;
+  int v = 0;
+  while (*p >= '0' && *p <= '9') v = v * 10 + (*p++ - '0');
+  out.x = v;
+  if (*p++ != ',') return false;
+  if (*p < '0' || *p > '9') return false;
+  v = 0;
+  while (*p >= '0' && *p <= '9') v = v * 10 + (*p++ - '0');
+  out.y = v;
+  return out.x <= 255 && out.y <= 255;
+}
+
+// Stroke-order digit at the stroke's starting point, flush right of it like a
+// printed 笔顺图. A white halo keeps it readable over later strokes.
+void drawStrokeNumber(GfxRenderer& renderer, const StrokeBox& box, int fontId, StrokePoint at, int index) {
+  char label[4];
+  snprintf(label, sizeof(label), "%d", index);
+  const int w = renderer.getTextWidth(fontId, label);
+  const int h = renderer.getLineHeight(fontId);
+  int lx = at.x + 4;
+  if (lx + w + 2 > box.x + box.size) lx = box.x + box.size - w - 3;
+  const int ly = std::min(std::max(at.y - h / 2, box.y + 1), box.y + box.size - h - 1);
+  renderer.fillRect(lx - 2, ly - 1, w + 4, h + 2, false);
+  renderer.drawText(fontId, lx, ly, label, true);
+}
+
+// One polyline per stroke, numbered at its start. Coordinates map 0..255 onto
+// box.size - 1 so strokes touch the frame like on paper.
+void drawStrokeMedians(GfxRenderer& renderer, const StrokeBox& box, const char* payload, int lineWidth, int fontId) {
+  const char* p = payload;
+  int index = 1;
+  while (*p != '\0') {
+    StrokePoint prev{};
+    StrokePoint start{};
+    bool haveStart = false;
+    while (*p != '\0' && *p != '|') {
+      StrokePoint pt;
+      if (!parseStrokePoint(p, pt)) {
+        while (*p != '\0' && *p != '|') ++p;  // skip a malformed stroke's tail
+        break;
+      }
+      const int x = box.x + pt.x * (box.size - 1) / 255;
+      const int y = box.y + pt.y * (box.size - 1) / 255;
+      if (!haveStart) {
+        start = {x, y};
+        haveStart = true;
+      } else if (x != prev.x || y != prev.y) {
+        renderer.drawLine(prev.x, prev.y, x, y, lineWidth, true);
+      }
+      prev = {x, y};
+      if (*p == ';') ++p;
+    }
+    if (haveStart) drawStrokeNumber(renderer, box, fontId, start, index);
+    ++index;
+    if (*p == '|') ++p;
+  }
+}
+
+// The 田字格: outer frame plus the dashed centre cross.
+void drawHanziBox(GfxRenderer& renderer, const StrokeBox& box) {
+  renderer.drawRect(box.x, box.y, box.size, box.size, 2, true);
+  const int cx = box.x + box.size / 2;
+  const int cy = box.y + box.size / 2;
+  constexpr int DASH = 9;
+  constexpr int GAP = 7;
+  for (int y = box.y + 5; y + DASH <= box.y + box.size - 5; y += DASH + GAP) {
+    renderer.drawLine(cx, y, cx, y + DASH, true);
+  }
+  for (int x = box.x + 5; x + DASH <= box.x + box.size - 5; x += DASH + GAP) {
+    renderer.drawLine(x, cy, x + DASH, cy, true);
+  }
+}
 }  // namespace
 
 void DictionaryActivity::onEnter() {
@@ -46,6 +136,14 @@ void DictionaryActivity::onEnter() {
     state_ = State::Failed;
     requestUpdate();
     return;
+  }
+  // Stroke view is optional: without the buffer the card simply offers no
+  // stroke entry (the fallback gateway never fills it anyway).
+  strokes_ = makeUniqueNoThrow<char[]>(STROKES_CAP);
+  if (strokes_) {
+    strokes_[0] = '\0';
+  } else {
+    LOG_ERR("DICT", "OOM: stroke buffer %u bytes", static_cast<unsigned>(STROKES_CAP));
   }
   // Network first, then the request, then the reply: the entry point prompts
   // for WiFi before any waiting frame, so "查询中" is only ever painted once
@@ -70,8 +168,14 @@ void DictionaryActivity::loop() {
   session_.poll();
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    // Finish on the release edge: the picker below treats a Back release as
-    // "leave the picker", so handing it an orphaned edge would close the mode.
+    // From the stroke view Back steps back to the card; only the card hands
+    // the release edge to the picker below (a Back release there means "leave
+    // the picker", so handing it an orphaned edge would close the mode).
+    if (state_ == State::Strokes) {
+      state_ = State::Card;
+      requestUpdate();
+      return;
+    }
     finish();
     return;
   }
@@ -157,6 +261,23 @@ void DictionaryActivity::loop() {
     return;
   }
 
+  // Strokes: a two-way toggle on the card — either button returns.
+  if (state_ == State::Strokes) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      state_ = State::Card;
+      requestUpdate();
+    }
+    return;
+  }
+
+  // Card: Confirm opens the stroke view when the relay supplied a payload
+  // (the fallback gateway never does; a character without data has none).
+  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) && strokes_ && strokes_[0] != '\0') {
+    state_ = State::Strokes;
+    requestUpdate();
+    return;
+  }
+
   // Card: side Up/Down (and the mirrored front pair) scroll the entry.
   if (mappedInput.wasPressed(MappedInputManager::Button::Up) ||
       mappedInput.wasPressed(MappedInputManager::Button::Left)) {
@@ -214,6 +335,9 @@ void DictionaryActivity::beginLookup() {
     promptForWifi();
     return;
   }
+  // A retry must not reuse the previous round's strokes: the relay round below
+  // refills it, and the OpenClaw fallback leaves it empty.
+  if (strokes_) strokes_[0] = '\0';
 
   CLOUD_CFG.load();  // NVS, idempotent; the same source the voice screen reads
   const bool relayConfigured = SETTINGS.voiceRelayEnabled != 0 && CLOUD_CFG.relayUrl[0] != '\0' &&
@@ -221,9 +345,9 @@ void DictionaryActivity::beginLookup() {
   if (relayConfigured) {
     bool truncated = false;
     VoiceRelay::ChatClient::Stats stats;
-    const VoiceRelay::ChatClient::Result result =
-        VoiceRelay::ChatClient::ask(CLOUD_CFG.relayUrl, CLOUD_CFG.relayToken, CLOUD_CFG.relayDeviceId, charBuf_,
-                                    reply_.get(), REPLY_CAP + 1, truncated, "dict", &stats);
+    const VoiceRelay::ChatClient::Result result = VoiceRelay::ChatClient::ask(
+        CLOUD_CFG.relayUrl, CLOUD_CFG.relayToken, CLOUD_CFG.relayDeviceId, charBuf_, reply_.get(), REPLY_CAP + 1,
+        truncated, strokes_.get(), strokes_ ? STROKES_CAP : 0, "dict", &stats);
     if (result == VoiceRelay::ChatClient::Result::Ok) {
       if (truncated) {
         LOG_ERR("DICT", "reply truncated at %u bytes", static_cast<unsigned>(REPLY_CAP));
@@ -409,6 +533,20 @@ void DictionaryActivity::buildCard(const int fontId, const int textWidth) {
   }
 }
 
+void DictionaryActivity::renderStrokesView(const int left, const int right, const int contentTop,
+                                           const int contentBottom) {
+  // Legibility first: the square grows to the smaller of the content box's
+  // dimensions and centres in the remainder (portrait is width-bound).
+  StrokeBox box;
+  box.size = std::min(right - left, contentBottom - contentTop);
+  if (box.size < 16) return;
+  box.x = left + ((right - left) - box.size) / 2;
+  box.y = contentTop + ((contentBottom - contentTop) - box.size) / 2;
+  drawHanziBox(renderer, box);
+  const int lineWidth = std::max(3, box.size / 44);  // skeleton at ~168px pen-equivalent
+  drawStrokeMedians(renderer, box, strokes_.get(), lineWidth, UI_10_FONT_ID);
+}
+
 void DictionaryActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
@@ -435,7 +573,9 @@ void DictionaryActivity::render(RenderLock&&) {
     renderer.drawText(bodyFont, left + (textWidth - heroW) / 2, contentTop, heroChar_.c_str(), true);
   };
 
-  if (state_ == State::Loading || state_ == State::Connecting || state_ == State::Asking) {
+  if (state_ == State::Strokes) {
+    renderStrokesView(left, right, contentTop, contentBottom);
+  } else if (state_ == State::Loading || state_ == State::Connecting || state_ == State::Asking) {
     drawHero();
     // Loading keeps the old bare line ("查询中…"), the OpenClaw phases name
     // themselves; Asking counts the 120 s chat timeout down like Ask-AI.
@@ -513,7 +653,12 @@ void DictionaryActivity::render(RenderLock&&) {
   if (state_ == State::Card) {
     GUI.drawSideButtonHints(renderer, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   }
-  const char* confirmLabel = state_ == State::Failed ? tr(STR_RETRY) : "";
+  const char* confirmLabel = "";
+  if (state_ == State::Failed) {
+    confirmLabel = tr(STR_RETRY);
+  } else if (state_ == State::Card && strokes_ && strokes_[0] != '\0') {
+    confirmLabel = tr(STR_DICT_STROKES);
+  }
   const char* scrollUp = state_ == State::Card ? tr(STR_DIR_UP) : "";
   const char* scrollDown = state_ == State::Card ? tr(STR_DIR_DOWN) : "";
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel, scrollUp, scrollDown);

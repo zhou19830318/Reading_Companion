@@ -295,6 +295,6 @@ void HomeActivity::onFileTransferOpen() { activityManager.goToFileTransfer(); }
 
 void HomeActivity::onOpdsBrowserOpen() { activityManager.goToBrowser(); }
 
-void HomeActivity::onVoiceOpen() { activityManager.goToVoice(); }
+void HomeActivity::onVoiceOpen() { activityManager.goToAiAssistant(); }
 
 void HomeActivity::onWorkbenchOpen() { activityManager.goToWorkbench(); }

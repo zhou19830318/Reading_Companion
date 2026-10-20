@@ -3,7 +3,10 @@
 #ifdef ONEPAGE_C61
 // OnePage: espressif/mdns isn't in the slim C61 source-build component set
 // (ESPmDNS.h compiles to empty without CONFIG_MDNS_MAX_INTERFACES), so stub it.
-struct OnePageMdnsStub { bool begin(const char*) { return false; } void end() {} };
+struct OnePageMdnsStub {
+  bool begin(const char*) { return false; }
+  void end() {}
+};
 static OnePageMdnsStub MDNS;
 #else
 #include <ESPmDNS.h>

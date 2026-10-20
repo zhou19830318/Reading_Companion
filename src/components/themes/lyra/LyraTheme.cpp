@@ -22,6 +22,7 @@
 #include "components/icons/hotspot.h"
 #include "components/icons/image24.h"
 #include "components/icons/library.h"
+#include "components/icons/mic24.h"
 #include "components/icons/recent.h"
 #include "components/icons/settings2.h"
 #include "components/icons/text24.h"
@@ -58,6 +59,10 @@ const uint8_t* iconForName(UIIcon icon, int size) {
         return Book24Icon;
       case UIIcon::File:
         return File24Icon;
+      case UIIcon::Mic:
+        // 24 px lists (no subtitle) had no Mic bitmap, so the AI对话 row
+        // rendered label-only — the user-visible missing icon.
+        return Mic24Icon;
       default:
         return nullptr;
     }

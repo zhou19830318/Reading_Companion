@@ -2,7 +2,7 @@
 
 namespace {
 #ifdef ONEPAGE_C61
-constexpr uint8_t SD_CS = 26;        // OnePage SD CS (shared SPI bus with EPD)
+constexpr uint8_t SD_CS = 26;  // OnePage SD CS (shared SPI bus with EPD)
 // 20MHz. The shared EPD+SD bus was marginal at 20MHz (intermittent SD drops on
 // heavy activity); instead of slowing the clock we lower the SPI pins' GPIO
 // drive strength one level (CAP_2 -> CAP_1) in HalGPIO::begin to soften edges /
@@ -12,7 +12,7 @@ constexpr uint32_t SPI_FQ = 20000000;
 constexpr uint8_t SD_CS = 12;
 constexpr uint32_t SPI_FQ = 40000000;
 #endif
-}
+}  // namespace
 
 SDCardManager SDCardManager::instance;
 
@@ -50,9 +50,7 @@ bool SDCardManager::begin() {
 #endif
 }
 
-bool SDCardManager::ready() const {
-  return initialized;
-}
+bool SDCardManager::ready() const { return initialized; }
 
 std::vector<String> SDCardManager::listFiles(const char* path, const int maxFiles) {
   std::vector<String> ret;
@@ -140,8 +138,7 @@ bool SDCardManager::readFileToStream(const char* path, Print& out, const size_t 
 }
 
 size_t SDCardManager::readFileToBuffer(const char* path, char* buffer, const size_t bufferSize, const size_t maxBytes) {
-  if (!buffer || bufferSize == 0)
-    return 0;
+  if (!buffer || bufferSize == 0) return 0;
   if (!initialized) {
     if (Serial) Serial.println("SDCardManager: not initialized; cannot read file");
     buffer[0] = '\0';

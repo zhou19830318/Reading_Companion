@@ -92,8 +92,8 @@ bool HalMicrophone::begin() {
     return false;
   }
 
-  rawBuf = static_cast<uint16_t*>(heap_caps_malloc(RAW_WORDS_PER_READ * sizeof(uint16_t),
-                                                   MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
+  rawBuf = static_cast<uint16_t*>(
+      heap_caps_malloc(RAW_WORDS_PER_READ * sizeof(uint16_t), MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
   if (rawBuf == nullptr) {
     LOG_ERR("MIC", "raw buffer alloc failed (%u bytes)", static_cast<unsigned>(RAW_WORDS_PER_READ * sizeof(uint16_t)));
     i2s_del_channel(rx);

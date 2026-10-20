@@ -7,3 +7,4 @@ pydantic-settings>=2.4,<3.0
 python-json-logger>=2.0,<4.0
 prometheus-client>=0.20,<1.0
 orjson>=3.10,<4.0
+pillow>=10,<13

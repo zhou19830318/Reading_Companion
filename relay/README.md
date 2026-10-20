@@ -129,6 +129,55 @@ runs with `ProtectSystem=strict`). `tools/make-package.sh` requires it and
 from a pre-dict package get `DICT_SOURCE=local` backfilled into their env
 file automatically.
 
+## Text-to-image cards
+
+`POST /api/v1/image` (`{"text": "<prompt>"}`) generates a picture for the
+reader screen and returns metadata plus a waiting phrase; the picture itself
+is fetched from the asset URL in the response (same token auth):
+
+```bash
+TOKEN=...  # device or admin token
+curl -s -H "Authorization: Bearer $TOKEN" -H "X-Device-Id: debug-client" \
+     -H 'Content-Type: application/json' \
+     -d '{"text":"山间小屋，炊烟袅袅"}' localhost:8000/api/v1/image | jq .
+# {"requestId":"...","text":"正在铺开画纸……",
+#  "image":{"id":"<16 hex>","url":"/api/v1/image/<id>","width":480,"height":800,
+#           "bytes":48062,"format":"bmp"},"usage":{"seconds":2.5}}
+curl -s -H "Authorization: Bearer $TOKEN" -H "X-Device-Id: debug-client" \
+     -o /tmp/card.bmp localhost:8000/api/v1/image/<id>
+```
+
+The server does the whole conversion with Pillow: source image → fit to the
+panel (default 480x800 portrait) → autocontrast → Floyd-Steinberg dither →
+**1-bit BMP, exactly 48,062 bytes** (62-byte header + 48,000-byte bitmap).
+That is the exact format the firmware's Bitmap reader accepts
+(`lib/GfxRenderer/BitmapHelpers.cpp`), so the device just streams rows into
+its framebuffer — no on-device decoding (a JPEG would take ~5-10 s on the
+ESP32-C61; this path is near-instant).
+
+Providers: `T2I_PROVIDER=mock` (default) draws a deterministic placeholder
+locally — no cloud call, no cost, so the full endpoint/asset path can be
+tested end-to-end before any image quota is spent. `T2I_PROVIDER=dashscope`
+submits a wanx text-to-image task (`T2I_MODEL`, default `wanx2.1-t2i-turbo`)
+and polls it to completion; it needs `DASHSCOPE_API_KEY` and is rejected
+closed (`T2I_NOT_CONFIGURED`) without it. `T2I_PROVIDER=openai` POSTs
+`<T2I_BASE_URL>/images/generations` with `{"model","prompt","size",
+"response_format":"b64_json"}`, accepts either an inline `b64_json` or a
+`url` to download, and needs `T2I_BASE_URL` + `T2I_API_KEY` (rejected closed
+without them) — this covers OpenAI and any OpenAI-compatible image gateway
+(SiliconFlow, vLLM/SD-WebUI adapters, ...). `T2I_SIZE` is the provider's
+generation size as `W*H` (default `768*1280`) and is converted to OpenAI's
+`WxH`. Content-moderation rejections come back as `T2I_REJECTED` on every
+provider. Other knobs: `T2I_TIMEOUT_S`, `T2I_POLL_INTERVAL_S`,
+`T2I_MOCK_DELAY_S`, `T2I_WIDTH`/`T2I_HEIGHT`, `T2I_ASSET_TTL_S` (assets are
+deleted after this, default 24 h). `T2I_ASSET_DIR` must stay inside the
+systemd sandbox's writable paths — `install.sh` pins it to
+`/opt/reading-companion-relay/run/t2i`.
+
+Providers for text and voice are independent: you can run `T2I_PROVIDER=
+dashscope` while ASR/LLM stay mock, or vice versa. `/readyz` reports
+`"t2i": "mock" | "configured" | "missing_config"`.
+
 ## Deploy and rollback
 
 ```bash

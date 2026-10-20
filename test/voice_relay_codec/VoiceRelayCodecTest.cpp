@@ -3,6 +3,7 @@
 
 #include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace VoiceRelay;
@@ -278,6 +279,66 @@ TEST(VoiceRelayCodec, ChatResponseTruncatesAtCodepointBoundary) {
   EXPECT_EQ(std::string(text), "中中");
 }
 
+TEST(VoiceRelayCodec, ChatResponseParsesStrokesPayload) {
+  char text[64];
+  char strokes[64];
+  bool truncated = false;
+  ErrorCode error = ErrorCode::None;
+  const char* body = R"({"requestId":"r1","text":"【字】的","strokes":"1,2;3,4|5,6","usage":{"a":1}})";
+  EXPECT_TRUE(parseChatResponse(body, strlen(body), text, sizeof(text), truncated, error, strokes, sizeof(strokes)));
+  EXPECT_STREQ(text, "【字】的");
+  EXPECT_STREQ(strokes, "1,2;3,4|5,6");
+  EXPECT_FALSE(truncated);
+  EXPECT_EQ(error, ErrorCode::None);
+}
+
+TEST(VoiceRelayCodec, ChatResponseWithoutStrokesLeavesTheBufferEmpty) {
+  char text[64];
+  char strokes[64] = "dirty";
+  bool truncated = false;
+  ErrorCode error = ErrorCode::None;
+  const char* body = R"({"text":"word"})";
+  EXPECT_TRUE(parseChatResponse(body, strlen(body), text, sizeof(text), truncated, error, strokes, sizeof(strokes)));
+  EXPECT_STREQ(strokes, "");
+}
+
+TEST(VoiceRelayCodec, ChatResponseIgnoresStrokesWhenNoBufferIsPassed) {
+  char text[64];
+  bool truncated = false;
+  ErrorCode error = ErrorCode::None;
+  const char* body = R"({"text":"的","strokes":"1,2;3,4|5,6"})";
+  // Defaults keep every pre-stroke call site compiling and crash-free.
+  EXPECT_TRUE(parseChatResponse(body, strlen(body), text, sizeof(text), truncated, error));
+  EXPECT_STREQ(text, "的");
+}
+
+TEST(VoiceRelayCodec, ChatResponseDropsAnOverflowingStrokesPayload) {
+  char text[64];
+  char strokes[8];
+  bool truncated = false;
+  ErrorCode error = ErrorCode::None;
+  const std::string body = R"({"text":"x","strokes":")" + std::string(20, '1') + R"("})";
+  EXPECT_TRUE(
+      parseChatResponse(body.c_str(), body.size(), text, sizeof(text), truncated, error, strokes, sizeof(strokes)));
+  EXPECT_STREQ(strokes, "");  // a partial payload would draw the wrong glyph
+  EXPECT_STREQ(text, "x");
+}
+
+TEST(VoiceRelayCodec, ChatResponseLongStrokesStreamInParts) {
+  std::string payload;
+  payload.reserve(1200);
+  for (int i = 0; i < 280; ++i) payload += "9,9;";  // 1119 bytes: > token buffer, < STROKES_CAP
+  payload.pop_back();
+  const std::string body = R"({"text":"x","strokes":")" + payload + R"("})";
+  char text[64];
+  char strokes[1152];
+  bool truncated = false;
+  ErrorCode error = ErrorCode::None;
+  ASSERT_TRUE(
+      parseChatResponse(body.c_str(), body.size(), text, sizeof(text), truncated, error, strokes, sizeof(strokes)));
+  EXPECT_EQ(std::string(strokes), payload);
+}
+
 TEST(VoiceRelayCodec, ParsesChatErrorBodies) {
   char text[64];
   bool truncated = false;
@@ -296,6 +357,151 @@ TEST(VoiceRelayCodec, ParsesChatErrorBodies) {
   const char* disabled = R"({"error":"disabled"})";
   EXPECT_FALSE(parseChatResponse(disabled, strlen(disabled), text, sizeof(text), truncated, error));
   EXPECT_EQ(error, ErrorCode::Unknown);
+}
+
+// ------------------------------------------------------------- image (t2i)
+
+TEST(VoiceRelayCodec, ImageRequestBuildsExpectedFrame) {
+  char buf[CONTROL_FRAME_CAP];
+  const size_t n = buildImageRequest(buf, sizeof(buf), "r1", "reading-companion-001", "画一只水墨猫");
+  ASSERT_GT(n, 0u);
+  EXPECT_EQ(str(buf, n), R"({"requestId":"r1","deviceId":"reading-companion-001","text":"画一只水墨猫"})");
+}
+
+TEST(VoiceRelayCodec, ImageRequestEscapesAndRefusesPartialFrames) {
+  char buf[CONTROL_FRAME_CAP];
+  const size_t n = buildImageRequest(buf, sizeof(buf), "r1", "d1", "say \"hi\"\\\u000a");
+  ASSERT_GT(n, 0u);
+  EXPECT_EQ(str(buf, n), R"({"requestId":"r1","deviceId":"d1","text":"say \"hi\"\\\u000a"})");
+  EXPECT_EQ(str(buf, n).find('\n'), std::string::npos);  // control bytes never go raw
+
+  char small[32];
+  const std::string tooLong(64, 'x');
+  EXPECT_EQ(buildImageRequest(small, sizeof(small), "r1", "d1", tooLong.c_str()), 0u);
+  EXPECT_EQ(buildImageRequest(nullptr, 64, "r", "d", "x"), 0u);
+  EXPECT_EQ(buildImageRequest(buf, sizeof(buf), nullptr, "d", "x"), 0u);
+  EXPECT_EQ(buildImageRequest(buf, sizeof(buf), "r", nullptr, "x"), 0u);
+  EXPECT_EQ(buildImageRequest(buf, sizeof(buf), "r", "d", nullptr), 0u);
+}
+
+TEST(VoiceRelayCodec, ImageRequestCarriesOptionalStyleAndSize) {
+  char buf[CONTROL_FRAME_CAP];
+  // nullptr / empty keep the historical byte layout (server defaults apply).
+  const size_t bare = buildImageRequest(buf, sizeof(buf), "r1", "d1", "山间小屋");
+  ASSERT_GT(bare, 0u);
+  EXPECT_EQ(str(buf, bare), R"({"requestId":"r1","deviceId":"d1","text":"山间小屋"})");
+
+  const size_t full = buildImageRequest(buf, sizeof(buf), "r1", "d1", "山间小屋", "chinese_ink", "1280*768");
+  ASSERT_GT(full, 0u);
+  EXPECT_EQ(str(buf, full),
+            R"({"requestId":"r1","deviceId":"d1","text":"山间小屋","style":"chinese_ink","size":"1280*768"})");
+
+  const size_t styleOnly = buildImageRequest(buf, sizeof(buf), "r1", "d1", "山间小屋", "sketch", nullptr);
+  ASSERT_GT(styleOnly, 0u);
+  EXPECT_EQ(str(buf, styleOnly), R"({"requestId":"r1","deviceId":"d1","text":"山间小屋","style":"sketch"})");
+
+  const size_t emptyStyle = buildImageRequest(buf, sizeof(buf), "r1", "d1", "山间小屋", "", "768*1280");
+  ASSERT_GT(emptyStyle, 0u);
+  EXPECT_EQ(str(buf, emptyStyle), R"({"requestId":"r1","deviceId":"d1","text":"山间小屋","size":"768*1280"})");
+}
+
+TEST(VoiceRelayCodec, ImageEditRequestEmbedsBase64Image) {
+  char buf[512];
+  const size_t n = buildImageEditRequest(buf, sizeof(buf), "r1", "d1", "改成夜景", "QUJDRA==", 480, 800);
+  ASSERT_GT(n, 0u);
+  EXPECT_EQ(str(buf, n),
+            R"({"requestId":"r1","deviceId":"d1","text":"改成夜景","image":{"data":"QUJDRA==","format":"bmp",)"
+            R"("width":480,"height":800}})");
+
+  EXPECT_EQ(buildImageEditRequest(buf, sizeof(buf), "r1", "d1", "x", "", 480, 800), 0u);
+  EXPECT_EQ(buildImageEditRequest(buf, sizeof(buf), "r1", "d1", "x", "QUJDRA==", 0, 800), 0u);
+  EXPECT_EQ(buildImageEditRequest(buf, sizeof(buf), "r1", "d1", "x", "QUJDRA==", 480, -1), 0u);
+  EXPECT_EQ(buildImageEditRequest(buf, sizeof(buf), "r1", "d1", "", "QUJDRA==", 480, 800), 0u);
+}
+
+TEST(VoiceRelayCodec, ParsesImageResponse) {
+  ImageMeta meta;
+  char phrase[128];
+  ErrorCode error = ErrorCode::Unknown;
+  const char* body =
+      R"({"requestId":"r1","text":"墨色正在纸上晕开……","image":{"id":"0123456789abcdef","url":"/api/v1/image/0123456789abcdef","width":480,"height":800,"bytes":48062,"format":"bmp"},"usage":{"seconds":9.9}})";
+  EXPECT_TRUE(parseImageResponse(body, strlen(body), meta, phrase, sizeof(phrase), error));
+  EXPECT_STREQ(meta.id, "0123456789abcdef");
+  EXPECT_EQ(meta.width, 480);
+  EXPECT_EQ(meta.height, 800);
+  EXPECT_EQ(meta.bytes, 48062);
+  EXPECT_STREQ(phrase, "墨色正在纸上晕开……");
+  EXPECT_EQ(error, ErrorCode::None);
+}
+
+TEST(VoiceRelayCodec, ImageResponseErrorBodiesSetT2iCodes) {
+  const std::pair<const char*, ErrorCode> cases[] = {
+      {"T2I_EMPTY_PROMPT", ErrorCode::T2iEmptyPrompt},
+      {"T2I_REJECTED", ErrorCode::T2iRejected},
+      {"T2I_NOT_CONFIGURED", ErrorCode::T2iNotConfigured},
+      {"T2I_UPSTREAM", ErrorCode::T2iUpstream},
+      {"T2I_TIMEOUT", ErrorCode::T2iTimeout},
+      {"T2I_BAD_PARAM", ErrorCode::T2iBadParam},
+  };
+  for (const auto& [code, expected] : cases) {
+    const std::string body = std::string(R"({"requestId":"r1","code":")") + code + R"("})";
+    ImageMeta meta;
+    char phrase[64];
+    ErrorCode error = ErrorCode::None;
+    EXPECT_FALSE(parseImageResponse(body.c_str(), body.size(), meta, phrase, sizeof(phrase), error)) << code;
+    EXPECT_EQ(error, expected) << code;
+    EXPECT_STREQ(meta.id, "");
+  }
+}
+
+TEST(VoiceRelayCodec, ImageResponseWithoutImageObjectFailsCleanly) {
+  ImageMeta meta;
+  char phrase[64];
+  ErrorCode error = ErrorCode::None;
+  const char* body = R"({"requestId":"r1","text":"ok"})";
+  EXPECT_FALSE(parseImageResponse(body, strlen(body), meta, phrase, sizeof(phrase), error));
+  EXPECT_EQ(error, ErrorCode::None);
+  EXPECT_STREQ(meta.id, "");
+}
+
+TEST(VoiceRelayCodec, ImageResponseLongPhraseStreamsInParts) {
+  std::string phrase;
+  for (int i = 0; i < 300; ++i) phrase += "中";  // 900 bytes > parser token buffer
+  const std::string body =
+      R"({"text":")" + phrase + R"(","image":{"id":"0123456789abcdef","width":480,"height":800,"bytes":48062}})";
+  ImageMeta meta;
+  char text[IMAGE_TEXT_CAP + 1];
+  ErrorCode error = ErrorCode::None;
+  ASSERT_TRUE(parseImageResponse(body.c_str(), body.size(), meta, text, sizeof(text), error));
+  EXPECT_STREQ(meta.id, "0123456789abcdef");
+  EXPECT_EQ(strlen(text), 510u);  // 170 full 3-byte codepoints, no half at the end
+  EXPECT_EQ(std::string(text + strlen(text) - 3, 3), "中");
+}
+
+TEST(VoiceRelayCodec, ImageResponseOversizedIdIsDroppedInFull) {
+  ImageMeta meta;
+  char phrase[64];
+  ErrorCode error = ErrorCode::None;
+  // One char past cap: the whole id is refused, never cut to fit.
+  const char* body = R"({"image":{"id":"0123456789abcdefg","width":480,"height":800,"bytes":1}})";
+  EXPECT_FALSE(parseImageResponse(body, strlen(body), meta, phrase, sizeof(phrase), error));
+  EXPECT_STREQ(meta.id, "");
+}
+
+TEST(VoiceRelayCodec, ChatAndImageParsersDoNotShareState) {
+  char text[64];
+  bool truncated = false;
+  ErrorCode error = ErrorCode::None;
+  const char* image = R"({"text":"x","image":{"id":"0123456789abcdef","width":1,"height":1,"bytes":1}})";
+  ImageMeta meta;
+  ASSERT_TRUE(parseImageResponse(image, strlen(image), meta, nullptr, 0, error));
+
+  // A chat body parsed after an image body must not carry its fields over.
+  const char* chat = R"({"requestId":"r1","text":"reply"})";
+  EXPECT_TRUE(parseChatResponse(chat, strlen(chat), text, sizeof(text), truncated, error));
+  EXPECT_STREQ(text, "reply");
+  EXPECT_EQ(error, ErrorCode::None);
+  EXPECT_FALSE(truncated);
 }
 
 TEST(VoiceRelayCodec, ScopedFramesAreExact) {

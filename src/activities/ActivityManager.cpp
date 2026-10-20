@@ -6,6 +6,7 @@
 #include <algorithm>
 
 #include "OpdsServerStore.h"
+#include "ai/AiHubActivity.h"
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
 #include "browser/OpdsBookBrowserActivity.h"
@@ -209,6 +210,8 @@ void ActivityManager::goToReader(std::string path) {
 }
 
 void ActivityManager::goToVoice() { replaceActivity(std::make_unique<VoiceActivity>(renderer, mappedInput)); }
+
+void ActivityManager::goToAiAssistant() { replaceActivity(std::make_unique<AiHubActivity>(renderer, mappedInput)); }
 
 void ActivityManager::goToWorkbench() { replaceActivity(std::make_unique<WorkbenchActivity>(renderer, mappedInput)); }
 

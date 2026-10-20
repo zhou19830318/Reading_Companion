@@ -1,0 +1,27 @@
+{
+  "built_at": "2026-10-18T07:55:54+00:00",
+  "chars": 9574,
+  "frame": {
+    "quantized": "0..255, y screen-order (0 = top)",
+    "x": [
+      0.0,
+      1024.0
+    ],
+    "y": [
+      -144.0,
+      880.0
+    ]
+  },
+  "licenses": {
+    "Make Me a Hanzi graphics.txt": "Arphic Public License (derived from Arphic PL KaitiM GB / UKai)"
+  },
+  "max_encoded_char": "籲",
+  "max_encoded_len": 1106,
+  "max_points": 151,
+  "max_strokes": 33,
+  "skipped": 0,
+  "source_url": "https://raw.githubusercontent.com/skishore/makemeahanzi/master/graphics.txt",
+  "sources": {
+    "graphics.txt": "a28c478b5178e98f67f510b2d52fde08a69dc664654ef43498253b9b764d46ee"
+  }
+}
