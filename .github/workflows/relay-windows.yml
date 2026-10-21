@@ -16,9 +16,9 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -26,9 +26,30 @@ jobs:
         shell: pwsh
         run: choco install innosetup --no-progress -y
 
+      # Surface build failures as ::error:: annotations: job logs need repo
+      # admin to read via API, annotations are public for a public repo.
       - name: Build installer
         shell: pwsh
-        run: ./relay/deploy/windows/build.ps1 -Version "${{ github.ref_name }}"
+        run: |
+          $err = $null
+          try {
+            ./relay/deploy/windows/build.ps1 -Version "${{ github.ref_name }}" 2>&1 |
+              Tee-Object -FilePath build.log |
+              ForEach-Object {
+                $s = "$_"
+                if ($s -match '(?i)error|failed|not found|missing|cannot|exception|throw') {
+                  Write-Host "::error::$s"
+                }
+              }
+          } catch {
+            $err = $_.Exception.Message
+            Write-Host "::error::$err"
+          }
+          if ($err -or $LASTEXITCODE -ne 0) {
+            Get-Content build.log -Tail 15 -ErrorAction SilentlyContinue |
+              ForEach-Object { Write-Host "::error::LOG: $_" }
+            exit 1
+          }
 
       - uses: actions/upload-artifact@v4
         with:

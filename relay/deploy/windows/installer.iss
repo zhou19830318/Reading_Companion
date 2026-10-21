@@ -1,4 +1,4 @@
-; Inno Setup 6 script for the Reading Companion Voice Relay (Windows x64).
+﻿; Inno Setup 6 script for the Reading Companion Voice Relay (Windows x64).
 ;
 ; build.ps1 stages everything and invokes:
 ;   ISCC.exe /DAppVersion=<ver> /DStageDir=<stage> /DOutDir=<out> installer.iss
