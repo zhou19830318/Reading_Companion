@@ -38,8 +38,60 @@ readlink -f /opt/reading-companion-relay/current
 ## 前置条件
 
 - Debian/Ubuntu 系服务器 + sudo（`install.sh` 以 root 运行，缺的 apt 包会自动补装：python3、python3-venv、nginx、curl、jq 等）。
+- 或 Windows 10/11 x64（安装包自带 Python 运行时，**无需预装 Python**）。
 - 云安全组放行 **TCP 8080**（dev 模式）；prod 模式需域名 + 443。
 - 本机有仓库检出（打包用）与 `scp` 到服务器的权限。
+
+## 0. 一键部署（推荐）
+
+### Ubuntu / Debian（一条命令）
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/zhou19830318/Reading_Companion/main/relay/deploy/bootstrap.sh \
+  | sudo bash -s -- --dashscope-key sk-...
+```
+
+- 不带 key = mock 模式（固定回复，用于联调）；之后重跑带 `--dashscope-key` 即可切换真实语音。
+- 其余参数原样透传给 `install.sh`（`--mode prod --domain ...`、`--device-id`、`--public-url`、`--asr-model` 等）。
+- 离线/无 GitHub 访问：`sudo bash bootstrap.sh --tarball /path/to/voice-relay-<TS>.tar.gz [参数]`。
+- 脚本幂等，重复执行即升级；结束会打印设备三要素与安装摘要。
+- 也可用环境变量传 key：`DASHSCOPE_API_KEY=sk-... sudo -E bash bootstrap.sh`。
+
+### Windows（安装包）
+
+CI 构建：GitHub Actions `Relay Windows installer`（`.github/workflows/relay-windows.yml`），推送 `relay/**`、手动触发或发布 Release 均会产出 artifact `voice-relay-windows-installer`。
+
+本地构建（需 Python 3.12 + Inno Setup 6）：
+
+```powershell
+./relay/deploy/windows/build.ps1 -Version v1.5.0
+# 产物: build/windows/out/voice-relay-setup-v1.5.0.exe
+```
+
+双击安装（管理员）自动完成：解压运行时（无需 Python）→ 生成 `C:\ProgramData\ReadingCompanion\voice-relay.env`（随机 device/admin token）→ 注册并启动 Windows 服务 `ReadingCompanionVoiceRelay`（开机自启、崩溃自动重启）→ 防火墙放行 8080/tcp（仅专用网络）→ 等待 `/healthz` 就绪 → **自动打开管理页面**。
+
+服务管理（管理员 PowerShell，目录为 `C:\Program Files\ReadingCompanionVoiceRelay`）：
+
+```powershell
+.\voice-relay-service.exe status|stop|start|restart
+# 日志: .\logs\（按大小滚动）；配置: C:\ProgramData\ReadingCompanion\voice-relay.env
+```
+
+升级 = 直接运行新安装包（安装器会先停服再覆盖，env/token 保留）；卸载通过“应用和功能”或开始菜单快捷方式。
+
+### 管理页面（两个平台通用）
+
+- Ubuntu：<http://127.0.0.1:8000/admin>
+- Windows：<http://127.0.0.1:8080/admin>
+
+显示服务状态、ASR/LLM/字典/生图 provider、设备三要素（Relay URL / Device ID / Token，一键复制）、局域网 IP 与并发限制。页面仅允许本机访问（127.0.0.1/::1），nginx 不代理 `/admin`；无桌面的 Ubuntu 用 SSH 隧道：
+
+```bash
+ssh -L 8000:127.0.0.1:8000 <user>@<server-ip>
+# 本地浏览器打开 http://127.0.0.1:8000/admin
+```
+
+设置了 `RELAY_ADMIN_TOKEN` 时，也可用 `?token=<admin-token>` 远程访问。`RELAY_PUBLIC_URL` 可覆盖页面上显示的 Relay URL（经域名/TLS 反代时使用）。
 
 ## 1. 打包
 
@@ -82,7 +134,7 @@ sudo bash /tmp/voice-relay-<TS>/deploy/install.sh \
 ## 3. 配置阅读器
 
 1. 阅读器联网，打开其 Web UI（`http://<reader-ip>/settings`）；
-2. **Voice Relay** 卡片粘贴安装脚本输出的三项：
+2. **Voice Relay** 卡片粘贴安装脚本输出的三项（也可从管理页面一键复制）：
 
    ```
    Relay URL:  ws://<server-ip>:8080/api/v1/voice/stream
@@ -115,6 +167,9 @@ sudo systemctl restart reading-companion-relay
 
 重新 `make-package.sh` → 上传 → 重跑 `install.sh --source ...`。环境文件、token、密钥全部保留；旧 release 自动清理（留 5 个）。
 
+- 一键脚本：重跑同一条 `bootstrap.sh` 命令即可。
+- Windows：直接运行新版 `voice-relay-setup-<ver>.exe`（先停服再覆盖，env/token 保留）。
+
 ## 6. 回滚
 
 ```bash
@@ -138,6 +193,7 @@ curl -s localhost:8080/healthz | jq .                 # 经 nginx（dev）
 ```
 
 - `/readyz` 里 `"dict": "local"` 才说明离线字典生效；`local_missing_data` 表示 release 缺 `dict-data/`。
+- Windows 日志：安装目录 `logs\voice-relay-service.out.log` / `.err.log`；管理页打不开时先 `.\voice-relay-service.exe status`。
 - 无硬件联调：`python tools/test_client.py --pcm speech.wav`（协议）；`--realtime` 走真实上游；4 设备压测 `tools/load_test.py --clients 4 --rounds 5`。
 - 设备连不上：先确认安全组 8080、nginx 站点已 enable、token 与 env 一致（`sudo grep RELAY_DEVICE_TOKEN /etc/reading-companion/voice-relay.env`）。
 - 日志脱敏过滤器保证 API key 不会进日志；`/metrics` 仅内网可访问。
@@ -153,6 +209,8 @@ curl -s localhost:8080/healthz | jq .                 # 经 nginx（dev）
 ## 9. 安全基线
 
 - 密钥只在 `voice-relay.env`（root:voice-relay 640），永不入库、永不下发到设备、不回显到 Web UI。
+- 管理页面 `/admin` **仅本机可访问**（127.0.0.1/::1），nginx 不代理；需要远程时用 SSH 隧道或 `RELAY_ADMIN_TOKEN`。
+- Windows 防火墙规则只对“专用网络”放行 8080/tcp；公网使用请加 Caddy/nginx 反代 wss://。
 - systemd 沙箱：`ProtectSystem=strict` + 仅放行 `logs/`、`run/` 两个写路径；`NoNewPrivileges`、`PrivateTmp`。
 - 设备认证靠 `Authorization: Bearer` + 可选 `ALLOWED_DEVICE_IDS` 白名单；空 token 配置拒绝启动。
 - 结构化日志带脱敏过滤，API key 不可能被打印。

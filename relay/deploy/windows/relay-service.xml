@@ -1,0 +1,21 @@
+<service>
+  <id>ReadingCompanionVoiceRelay</id>
+  <name>Reading Companion Voice Relay</name>
+  <description>Voice / chat / image relay for Reading Companion e-readers.</description>
+
+  <executable>%BASE%\voice-relay\voice-relay.exe</executable>
+  <workingdirectory>%BASE%\voice-relay</workingdirectory>
+  <env name="VOICE_RELAY_ENV_FILE" value="%ProgramData%\ReadingCompanion\voice-relay.env"/>
+
+  <logpath>%BASE%\logs</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>1048576</sizeThreshold>
+    <keepFiles>4</keepFiles>
+  </log>
+
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+  <onfailure action="restart" delay="5 sec"/>
+  <resetfailure>1 hour</resetfailure>
+  <stoptimeout>15 sec</stoptimeout>
+</service>

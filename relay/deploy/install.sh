@@ -56,6 +56,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ $EUID -eq 0 ]] || { echo "run with sudo" >&2; exit 1; }
+# Non-interactive deploys (CI, config management) can export the key.
+DASHSCOPE_KEY="${DASHSCOPE_KEY:-${DASHSCOPE_API_KEY:-}}"
 [[ -n "$SOURCE" && -d "$SOURCE/relay" && -f "$SOURCE/requirements.txt" ]] || {
     echo "--source must contain relay/ and requirements.txt" >&2; exit 1; }
 [[ "$MODE" == "dev" || "$MODE" == "prod" ]] || { echo "--mode dev|prod" >&2; exit 1; }
@@ -193,6 +195,8 @@ MAX_SESSIONS_PER_DEVICE=1
 EOF
     echo "created $ENV_FILE (device token generated)"
 fi
+# Reader-facing URL surfaced by /admin when the relay sits behind a TLS proxy.
+[[ -n "$PUBLIC_URL" ]] && upsert_env RELAY_PUBLIC_URL "$PUBLIC_URL"
 chown root:voice-relay "$ENV_FILE"
 chmod 640 "$ENV_FILE"
 
@@ -240,6 +244,9 @@ for dir in "${OLD[@]:-}"; do
 done
 
 section "configure the reader (web UI > Settings > Voice Relay)"
+printf '  0. Setup page (host-only): http://127.0.0.1:8000/admin\n'
+printf '     Headless server: ssh -L 8000:127.0.0.1:8000 <user>@<server>, then open\n'
+printf '     http://127.0.0.1:8000/admin on your machine (shows URL/ID/token, copy buttons).\n'
 if [[ -n "$PUBLIC_URL" ]]; then
     DEVICE_URL="$PUBLIC_URL"
 elif [[ "$MODE" == "prod" ]]; then

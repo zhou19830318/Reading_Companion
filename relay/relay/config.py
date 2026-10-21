@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     relay_log_level: str = Field("INFO", alias="RELAY_LOG_LEVEL")
     # Release identifier surfaced by /healthz (set by the deploy script).
     relay_version: str = Field("0.1.0", alias="RELAY_VERSION")
+    # Optional reader-facing URL shown by /admin (set by install.sh when the
+    # host is reached through a domain / TLS proxy). Empty = derive from the
+    # detected LAN address and RELAY_PORT.
+    relay_public_url: str = Field("", alias="RELAY_PUBLIC_URL")
 
     # --- device auth -------------------------------------------------------
     # Single shared device token (first version) OR a per-device map,

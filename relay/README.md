@@ -5,6 +5,9 @@ ASR and streaming LLM. The ESP32-C61 onepage devices never see the cloud API
 key or endpoint; they speak a small JSON + PCM protocol over one WebSocket to
 this relay.
 
+Deployment: Ubuntu one-liner or Windows installer, both ending on the setup
+page (`/admin`) with the reader's URL / Device ID / Token — see `DEPLOY.md`.
+
 ```
 device ──WS /api/v1/voice/stream──▶ relay ── WSS ──▶ DashScope ASR (paraformer-realtime-v2)
                                       │

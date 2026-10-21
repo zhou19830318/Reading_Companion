@@ -3,6 +3,8 @@
 Routes (docs section 17.5):
   GET  /healthz                 liveness probe, no auth, no upstream checks
   GET  /readyz                  config readiness, no auth
+  GET  /admin                   setup page, host-only (loopback) + admin token
+  GET  /admin/status            JSON backing the setup page
   GET  /api/v1/device/config    device capabilities, device token
   WSS  /api/v1/voice/stream     the device's realtime channel
   POST /api/v1/chat             admin-only text debug (SSE or JSON)
@@ -23,7 +25,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel
 
 from . import SERVICE_NAME, __version__
-from . import dict_source, metrics, protocol, t2i
+from . import admin_page, dict_source, metrics, protocol, t2i
 from .auth import check_admin, check_device
 from .config import Settings, get_settings
 from .logging_setup import setup_logging
@@ -68,6 +70,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Reading Companion Voice Relay", version=__version__, lifespan=lifespan)
+admin_page.register_admin_routes(app)
 
 
 # --------------------------------------------------------------------------

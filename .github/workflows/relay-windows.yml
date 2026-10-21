@@ -1,0 +1,37 @@
+name: Relay Windows installer
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "relay/**"
+      - ".github/workflows/relay-windows.yml"
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        run: ./relay/deploy/windows/build.ps1 -Version "${{ github.ref_name }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: voice-relay-windows-installer
+          path: build/windows/out/*.exe
+          if-no-files-found: error
