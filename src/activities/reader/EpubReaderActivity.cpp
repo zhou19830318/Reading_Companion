@@ -34,6 +34,7 @@
 #include "KOReaderCredentialStore.h"
 #include "KOReaderSyncActivity.h"
 #include "MappedInputManager.h"
+#include "OpenBookProgress.h"
 #include "PowerMenuActivity.h"
 #include "ProgressMapper.h"
 #include "QrDisplayActivity.h"
@@ -1414,8 +1415,8 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       bool haveCache = false;
       if (nextChapterIndexer_.running()) {
         if (nextChapterIndexer_.spineIndex() == currentSpineIndex) {
-          const Rect indexingPopup = GUI.drawPopup(renderer, tr(STR_INDEXING), true);
-          GUI.fillPopupProgress(renderer, indexingPopup, 0, true);
+          // Keep the bar alive while we block on the background indexer.
+          OpenBookProgress::reportPhase(renderer, 0, /*isLayout=*/true);
           nextChapterIndexer_.join();
           haveCache = loadCachedSection();
           if (haveCache) {
@@ -1427,19 +1428,12 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       }
 
       if (!haveCache) {
-        // Drawn before createSectionFile so the popup covers the SD streaming
-        // phase; the parser then drives the bar with parse progress.
-        const Rect indexingPopup = GUI.drawPopup(renderer, tr(STR_INDEXING), true);
-        GUI.fillPopupProgress(renderer, indexingPopup, 0, true);
-
-        bool popupPendingRedraw = true;
-        const auto popupFn = [this, indexingPopup, &popupPendingRedraw](const int percent) {
+        // The popup shell is already up (drawn in ReaderActivity::onEnter or by
+        // the indexer wait above). createSectionFile drives the bar through
+        // popupFn, remapped into the layout slice of the shared axis.
+        const auto popupFn = [this](const int percent) {
           LOG_DBG("ERS", "Indexing progress: %d%%", percent);
-          if (popupPendingRedraw) {
-            popupPendingRedraw = false;
-            GUI.drawPopup(renderer, tr(STR_INDEXING), true);
-          }
-          GUI.fillPopupProgress(renderer, indexingPopup, percent, true);
+          OpenBookProgress::reportPhase(renderer, percent, /*isLayout=*/true);
         };
 
         if (!section->createSectionFile(SETTINGS.getReaderFontId(), SETTINGS.getReaderLineCompression(),
@@ -1455,6 +1449,11 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     } else {
       LOG_DBG("ERS", "Cache found, skipping build...");
     }
+
+    // Section is ready; retire the loading popup so it does not linger under
+    // the first rendered page. (finish() is a no-op if ReaderActivity never
+    // started a popup — e.g. a chapter-turn rebuild.)
+    OpenBookProgress::finish(renderer);
 
     if (pendingPageJump.has_value()) {
       if (*pendingPageJump >= section->pageCount && section->pageCount > 0) {

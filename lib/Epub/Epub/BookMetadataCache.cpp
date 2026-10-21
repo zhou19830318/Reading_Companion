@@ -12,6 +12,10 @@
 namespace {
 constexpr uint8_t BOOK_CACHE_VERSION = 8;  // v8: TOC/book titles stored NFC-composed
 constexpr char bookBinFile[] = "/book.bin";
+// book.bin is built at this path and renamed into place only when complete:
+// the final book.bin existing IS the index-complete marker (a crash mid-build
+// leaves a .tmp orphan that the next build truncates over).
+constexpr char bookBinTmpFile[] = "/book.bin.tmp";
 constexpr char tmpSpineBinFile[] = "/spine.bin.tmp";
 constexpr char tmpTocBinFile[] = "/toc.bin.tmp";
 }  // namespace
@@ -101,8 +105,19 @@ bool BookMetadataCache::endWrite() {
 }
 
 bool BookMetadataCache::buildBookBin(const std::string& epubPath, const BookMetadata& metadata) {
+  // Abort path (cancel or error): close every handle and drop the partial
+  // temp file so book.bin only ever appears at its final path fully written.
+  const auto abortBuild = [this]() {
+    // Explicit close() required: member variables persist beyond function scope
+    bookFile.close();
+    spineFile.close();
+    tocFile.close();
+    Storage.remove((cachePath + bookBinTmpFile).c_str());
+    return false;
+  };
+
   // Open all three files, writing to meta, reading from spine and toc
-  if (!Storage.openFileForWrite("BMC", cachePath + bookBinFile, bookFile)) {
+  if (!Storage.openFileForWrite("BMC", cachePath + bookBinTmpFile, bookFile)) {
     return false;
   }
 
@@ -140,6 +155,10 @@ bool BookMetadataCache::buildBookBin(const std::string& epubPath, const BookMeta
   serialization::writeString(bookFile, metadata.textReferenceHref);
 
   // Loop through spine entries, writing LUT positions
+  if (cancelled()) {
+    LOG_DBG("BMC", "buildBookBin cancelled before LUT pass");
+    return abortBuild();
+  }
   spineFile.seek(0);
   for (int i = 0; i < spineCount; i++) {
     uint32_t pos = spineFile.position();
@@ -170,6 +189,10 @@ bool BookMetadataCache::buildBookBin(const std::string& epubPath, const BookMeta
     }
   }
 
+  if (cancelled()) {
+    LOG_DBG("BMC", "buildBookBin cancelled before size pass");
+    return abortBuild();
+  }
   ZipFile zip(epubPath);
   // Pre-open zip file to speed up size calculations
   if (!zip.open()) {
@@ -227,6 +250,10 @@ bool BookMetadataCache::buildBookBin(const std::string& epubPath, const BookMeta
   spineFile.seek(0);
   int lastSpineTocIndex = -1;
   for (int i = 0; i < spineCount; i++) {
+    if (cancelled()) {
+      LOG_DBG("BMC", "buildBookBin cancelled in size pass at %d/%d", i, spineCount);
+      return abortBuild();
+    }
     auto spineEntry = readSpineEntry(spineFile);
 
     spineEntry.tocIndex = spineToTocIndex[i];
@@ -265,6 +292,10 @@ bool BookMetadataCache::buildBookBin(const std::string& epubPath, const BookMeta
   // Close opened zip file
   zip.close();
 
+  if (cancelled()) {
+    LOG_DBG("BMC", "buildBookBin cancelled before TOC write");
+    return abortBuild();
+  }
   // Loop through toc entries from toc file writing to book.bin
   tocFile.seek(0);
   for (int i = 0; i < tocCount; i++) {
@@ -277,11 +308,28 @@ bool BookMetadataCache::buildBookBin(const std::string& epubPath, const BookMeta
   spineFile.close();
   tocFile.close();
 
+  // Atomic handoff: only a fully written book ever appears at the final path.
+  // Overwrite semantics: SdFat rename() fails if the target exists, so drop a
+  // stale (version-invalid) book.bin first.
+  const std::string finalPath = cachePath + bookBinFile;
+  if (Storage.exists(finalPath.c_str())) {
+    Storage.remove(finalPath.c_str());
+  }
+  if (!Storage.rename((cachePath + bookBinTmpFile).c_str(), finalPath.c_str())) {
+    LOG_ERR("BMC", "Could not rename book.bin.tmp into place");
+    Storage.remove((cachePath + bookBinTmpFile).c_str());
+    return false;
+  }
+
   LOG_DBG("BMC", "Successfully built book.bin");
   return true;
 }
 
 bool BookMetadataCache::cleanupTmpFiles() const {
+  const auto bookBinTemp = cachePath + bookBinTmpFile;
+  if (Storage.exists(bookBinTemp.c_str())) {
+    Storage.remove(bookBinTemp.c_str());
+  }
   const auto spineBinFile = cachePath + tmpSpineBinFile;
   if (Storage.exists(spineBinFile.c_str())) {
     Storage.remove(spineBinFile.c_str());

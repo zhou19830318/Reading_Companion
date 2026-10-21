@@ -266,7 +266,7 @@ class BaseTheme {
   virtual Rect drawPopup(const GfxRenderer& renderer, const char* message, bool withProgressBar = false,
                          bool display = true) const;
   virtual void fillPopupProgress(const GfxRenderer& renderer, const Rect& layout, const int progress,
-                                 bool showPercentLabel = false) const;
+                                 bool showPercentLabel = false, bool display = true) const;
   void drawStatusBar(GfxRenderer& renderer, const float bookProgress, const int currentPage, const int pageCount,
                      std::string title, const int paddingBottom = 0, const int textYOffset = 0,
                      const bool fillMargin = true, const bool isPageBookmarked = false) const;

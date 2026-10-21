@@ -11,6 +11,13 @@ All POD fields are written in the ESP32 little-endian representation used by
 `book.bin` stores EPUB metadata plus lookup tables for spine and TOC entries.
 The current firmware writes this version from `BookMetadataCache`.
 
+**Atomic write:** `book.bin` is written to `book.bin.tmp` and renamed over the
+final path, so a power cut or a cancelled build (background `PreIndexer`, which
+writes this file while the device sits idle on Home/FileBrowser) never leaves a
+partial file at the final path. Presence of `book.bin` therefore means the
+metadata cache is complete; readers treat a missing file as "rebuild". The same
+tmp+rename applies to `css_rules.cache`.
+
 ImHex pattern:
 
 ```c++

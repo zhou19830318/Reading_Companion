@@ -2,6 +2,7 @@
 
 #include <Print.h>
 
+#include <atomic>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -35,6 +36,22 @@ class Epub {
   std::unique_ptr<CssParser> cssParser;
   // CSS files
   std::vector<std::string> cssFiles;
+  // Optional load-progress hook (plain function pointer: no std::function in
+  // the parse path). percent is 0-100 within load().
+  void (*progressFn)(int percent, void* ctx) = nullptr;
+  void* progressCtx = nullptr;
+  // Optional cancellation flag polled at stream-chunk / build-loop / stage
+  // boundaries inside load(). Set only by the background pre-indexer; the
+  // foreground reader leaves it null so every check compiles to one branch.
+  const std::atomic<bool>* cancelFlag = nullptr;
+
+  void reportProgress(int percent) const {
+    if (progressFn) {
+      progressFn(percent, progressCtx);
+    }
+  }
+
+  bool cancelled() const { return cancelFlag && cancelFlag->load(std::memory_order_relaxed); }
 
   bool findContentOpfFile(std::string* contentOpfFile) const;
   bool parseContentOpf(BookMetadataCache::BookMetadata& bookMetadata, bool writeSpineEntries = true);
@@ -50,6 +67,16 @@ class Epub {
   ~Epub();
   std::string& getBasePath() { return contentBasePath; }
   bool load(bool buildIfMissing = true, bool skipLoadingCss = false);
+  // Install a progress callback invoked at stage boundaries inside load().
+  // Pass nullptr to remove it (also done by the reader once load returns).
+  void setProgress(void (*fn)(int percent, void* ctx), void* ctx) {
+    progressFn = fn;
+    progressCtx = ctx;
+  }
+  // Install a cancellation flag polled inside load() at stream-chunk, build-
+  // loop and stage boundaries, so a background index run stops within ~ms of
+  // a reader taking over. Pass nullptr to remove (default: unset).
+  void setCancel(const std::atomic<bool>* flag) { cancelFlag = flag; }
   bool clearCache() const;
   void setupCacheDir() const;
   const std::string& getCachePath() const;

@@ -60,6 +60,9 @@ class Activity {
   // hold-to-talk utterance would put the device to sleep mid-speech.
   virtual bool suppressPowerSleep() const { return false; }
   virtual bool isReaderActivity() const { return false; }
+  // True for idle browsing screens where PreIndexer may run its background
+  // book indexing (also requires no reader anywhere on the activity stack).
+  virtual bool allowPreIndex() const { return false; }
   virtual ScreenshotInfo getScreenshotInfo() const { return {}; }
 
   // Start a new activity without destroying the current one

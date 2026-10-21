@@ -87,6 +87,10 @@ bool Epub::parseContentOpf(BookMetadataCache::BookMetadata& bookMetadata, const 
   }
 
   if (!readItemContentsToStream(contentOpfFilePath, opfParser, 1024)) {
+    if (cancelled()) {
+      LOG_DBG("EBP", "content.opf read cancelled");
+      return false;
+    }
     LOG_ERR("EBP", "Could not read content.opf");
     return false;
   }
@@ -320,6 +324,10 @@ void Epub::parseCssFiles() const {
 
   // No cache yet - parse CSS files
   for (const auto& cssPath : cssFiles) {
+    if (cancelled()) {
+      LOG_DBG("EBP", "CSS parse cancelled");
+      return;
+    }
     LOG_DBG("EBP", "Parsing CSS file: %s", cssPath.c_str());
 
     // Check heap before parsing - CSS parsing allocates heavily
@@ -348,10 +356,14 @@ void Epub::parseCssFiles() const {
       continue;
     }
     if (!readItemContentsToStream(cssPath, tempCssFile, 1024)) {
-      LOG_ERR("EBP", "Could not read CSS file: %s", cssPath.c_str());
       // Explicitly close() file before calling Storage.remove()
       tempCssFile.close();
       Storage.remove(tmpCssPath.c_str());
+      if (cancelled()) {
+        LOG_DBG("EBP", "CSS read cancelled");
+        return;
+      }
+      LOG_ERR("EBP", "Could not read CSS file: %s", cssPath.c_str());
       continue;
     }
     // Explicitly close() file before reopening for reading
@@ -370,7 +382,7 @@ void Epub::parseCssFiles() const {
   }
 
   // Save to cache for next time
-  if (!cssParser->saveToCache()) {
+  if (!cssParser->saveToCache(cancelFlag)) {
     LOG_ERR("EBP", "Failed to save CSS rules to cache");
   }
 
@@ -381,14 +393,20 @@ void Epub::parseCssFiles() const {
 // load in the meta data for the epub file
 bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss) {
   LOG_DBG("EBP", "Loading ePub: %s", filepath.c_str());
+  if (cancelled()) {
+    LOG_DBG("EBP", "Load cancelled before start");
+    return false;
+  }
 
   // Initialize spine/TOC cache
   bookMetadataCache.reset(new BookMetadataCache(cachePath));
+  bookMetadataCache->setCancel(cancelFlag);
   // Always create CssParser - needed for inline style parsing even without CSS files
   cssParser.reset(new CssParser(cachePath));
 
   // Try to load existing cache first
   if (bookMetadataCache->load()) {
+    reportProgress(80);  // metadata cache hit: only CSS may still be stale
     if (!skipLoadingCss) {
       // Rebuild CSS cache when missing or when cache version changed (loadFromCache removes stale file)
       if (!cssParser->hasCache() || !cssParser->loadFromCache()) {
@@ -405,6 +423,7 @@ bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss) {
         bookMetadataCache.reset();
         parseCssFiles();
         bookMetadataCache.reset(new BookMetadataCache(cachePath));
+        bookMetadataCache->setCancel(cancelFlag);
         if (!bookMetadataCache->load()) {
           LOG_ERR("EBP", "Failed to reload cache after CSS rebuild");
           return false;
@@ -414,6 +433,7 @@ bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss) {
       }
     }
     LOG_DBG("EBP", "Loaded ePub: %s", filepath.c_str());
+    reportProgress(100);
     return true;
   }
 
@@ -425,6 +445,10 @@ bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss) {
   // Cache doesn't exist or is invalid, build it
   LOG_DBG("EBP", "Cache not found, building spine/TOC cache");
   setupCacheDir();
+  if (cancelled()) {
+    LOG_DBG("EBP", "Index build cancelled");
+    return false;
+  }
 
   const uint32_t indexingStart = millis();
 
@@ -442,6 +466,10 @@ bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss) {
     return false;
   }
   if (!parseContentOpf(bookMetadata)) {
+    if (cancelled()) {
+      LOG_DBG("EBP", "OPF pass cancelled");
+      return false;
+    }
     LOG_ERR("EBP", "Could not parse content.opf");
     return false;
   }
@@ -451,6 +479,11 @@ bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss) {
     return false;
   }
   LOG_DBG("EBP", "OPF pass completed in %lu ms", millis() - opfStart);
+  reportProgress(30);
+  if (cancelled()) {
+    LOG_DBG("EBP", "Index build cancelled after OPF pass");
+    return false;
+  }
 
   // TOC Pass - try EPUB 3 nav first, fall back to NCX
   const uint32_t tocStart = millis();
@@ -474,6 +507,10 @@ bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss) {
   }
 
   if (!tocParsed) {
+    if (cancelled()) {
+      LOG_DBG("EBP", "TOC pass cancelled");
+      return false;
+    }
     LOG_ERR("EBP", "Warning: Could not parse any TOC format");
     // Continue anyway - book will work without TOC
   }
@@ -483,6 +520,11 @@ bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss) {
     return false;
   }
   LOG_DBG("EBP", "TOC pass completed in %lu ms", millis() - tocStart);
+  reportProgress(50);
+  if (cancelled()) {
+    LOG_DBG("EBP", "Index build cancelled after TOC pass");
+    return false;
+  }
 
   // Close the cache files
   if (!bookMetadataCache->endWrite()) {
@@ -498,6 +540,11 @@ bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss) {
   }
   LOG_DBG("EBP", "buildBookBin completed in %lu ms", millis() - buildStart);
   LOG_DBG("EBP", "Total indexing completed in %lu ms", millis() - indexingStart);
+  reportProgress(70);
+  if (cancelled()) {
+    LOG_DBG("EBP", "Index build cancelled before CSS");
+    return false;
+  }
 
   if (!bookMetadataCache->cleanupTmpFiles()) {
     LOG_DBG("EBP", "Could not cleanup tmp files - ignoring");
@@ -508,6 +555,7 @@ bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss) {
     bookMetadataCache.reset();
     parseCssFiles();
     Storage.removeDir((cachePath + "/sections").c_str());
+    reportProgress(85);
   }
 
   // Reload the cache from disk so it's in the correct state
@@ -518,6 +566,7 @@ bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss) {
   }
 
   LOG_DBG("EBP", "Loaded ePub: %s", filepath.c_str());
+  reportProgress(100);
   return true;
 }
 
@@ -792,7 +841,7 @@ bool Epub::readItemContentsToStream(const std::string& itemHref, Print& out, con
   }
 
   const std::string path = FsHelpers::normalisePath(itemHref);
-  return zip().readFileToStream(path.c_str(), out, chunkSize);
+  return zip().readFileToStream(path.c_str(), out, chunkSize, cancelFlag);
 }
 
 bool Epub::getItemSize(const std::string& itemHref, size_t* size) const {

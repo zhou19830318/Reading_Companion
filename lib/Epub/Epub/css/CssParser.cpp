@@ -684,15 +684,24 @@ bool CssParser::hasCache() const { return Storage.exists((cachePath + rulesCache
 
 void CssParser::deleteCache() const {
   if (hasCache()) Storage.remove((cachePath + rulesCache).c_str());
+  const std::string tmpPath = (cachePath + rulesCache) + ".tmp";
+  if (Storage.exists(tmpPath.c_str())) Storage.remove(tmpPath.c_str());
 }
 
-bool CssParser::saveToCache() const {
+bool CssParser::saveToCache(const std::atomic<bool>* cancel) const {
   if (cachePath.empty()) {
     return false;
   }
+  if (cancel && cancel->load(std::memory_order_relaxed)) {
+    LOG_DBG("CSS", "Cache save cancelled");
+    return false;
+  }
+
+  const std::string finalPath = cachePath + rulesCache;
+  const std::string tmpPath = finalPath + ".tmp";
 
   HalFile file;
-  if (!Storage.openFileForWrite("CSS", cachePath + rulesCache, file)) {
+  if (!Storage.openFileForWrite("CSS", tmpPath, file)) {
     return false;
   }
 
@@ -705,6 +714,11 @@ bool CssParser::saveToCache() const {
 
   // Write each rule: selector string + CssStyle fields
   for (const auto& pair : rulesBySelector_) {
+    if (cancel && cancel->load(std::memory_order_relaxed)) {
+      LOG_DBG("CSS", "Cache save cancelled mid-write");
+      // Local file closes via destructor; the partial .tmp is never renamed.
+      return false;
+    }
     // Write selector string (length-prefixed)
     const auto selectorLen = static_cast<uint16_t>(pair.first.size());
     file.write(reinterpret_cast<const uint8_t*>(&selectorLen), sizeof(selectorLen));
@@ -762,6 +776,17 @@ bool CssParser::saveToCache() const {
   }
 
   LOG_DBG("CSS", "Saved %u rules to cache", ruleCount);
+
+  // Close before rename: the final cache file only ever appears fully written.
+  file.close();
+  if (Storage.exists(finalPath.c_str())) {
+    Storage.remove(finalPath.c_str());
+  }
+  if (!Storage.rename(tmpPath.c_str(), finalPath.c_str())) {
+    LOG_ERR("CSS", "Could not rename css cache into place");
+    Storage.remove(tmpPath.c_str());
+    return false;
+  }
   return true;
 }
 

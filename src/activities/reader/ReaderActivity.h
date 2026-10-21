@@ -11,7 +11,7 @@ class Txt;
 class ReaderActivity final : public Activity {
   std::string initialBookPath;
   std::string currentBookPath;  // Track current book path for navigation
-  static std::unique_ptr<Epub> loadEpub(const std::string& path);
+  std::unique_ptr<Epub> loadEpub(const std::string& path);
   static std::unique_ptr<Xtc> loadXtc(const std::string& path);
   static std::unique_ptr<Txt> loadTxt(const std::string& path);
   static bool isXtcFile(const std::string& path);
@@ -25,6 +25,10 @@ class ReaderActivity final : public Activity {
   void onGoToBmpViewer(const std::string& path);
 
   void onGoBack();
+
+  // Progress trampoline handed to Epub::load; a member so it can reach the
+  // protected renderer of the enclosing Activity.
+  static void onEpubLoadProgress(int percent, void* ctx);
 
  public:
   explicit ReaderActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string initialBookPath)

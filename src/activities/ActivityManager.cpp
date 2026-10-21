@@ -6,6 +6,7 @@
 #include <algorithm>
 
 #include "OpdsServerStore.h"
+#include "PreIndexer.h"
 #include "ai/AiHubActivity.h"
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
@@ -142,6 +143,15 @@ void ActivityManager::loop() {
       currentActivity = std::move(pendingActivity);
 
       lock.unlock();  // onEnter may acquire its own lock
+
+      // Join the background pre-indexer before any onEnter(): the new activity
+      // may be (or may stack under) a reader that builds its own caches, and
+      // the two must never overlap. No-op when the worker is not running.
+      // After the unlock on purpose: the wait (bounded, see PreIndexer) must
+      // never run while holding the render lock, or a wedged worker freezes
+      // all rendering on top of the main loop.
+      PreIndexer::getInstance().suspend();
+
       currentActivity->onEnter();
 
       // onEnter may request another pending action, we will handle it in the next loop iteration
@@ -157,6 +167,12 @@ void ActivityManager::loop() {
       xTaskNotify(renderTaskHandle, 1, eIncrement);
     }
   }
+
+  // Background book pre-indexing: runs only on idle browsing screens with no
+  // reader anywhere on the stack; tick(suspend) inside also covers readers
+  // launched outside the pendingActivity path.
+  const bool preIndexAllowed = !isReaderActivity() && currentActivity && currentActivity->allowPreIndex();
+  PreIndexer::getInstance().tick(renderer, preIndexAllowed);
 }
 
 void ActivityManager::exitActivity(const RenderLock& lock) {
@@ -331,27 +347,44 @@ void ActivityManager::requestUpdateAndWait() {
 // RenderLock
 
 RenderLock::RenderLock() {
-  xSemaphoreTake(activityManager.renderingMutex, portMAX_DELAY);
+  // Reentrant take: the render task already owns the mutex for the whole
+  // render() call, and progress hooks inside a build (OpenBookProgress
+  // report/finish, any nested RenderLock) run on that same task. FreeRTOS
+  // mutexes are non-recursive — a second take would self-deadlock the render
+  // task forever (observed: cold open frozen at the 40% popup). Same-task
+  // re-entry therefore just joins the existing ownership; only the outermost
+  // instance gives the mutex back.
+  if (xSemaphoreGetMutexHolder(activityManager.renderingMutex) == xTaskGetCurrentTaskHandle()) {
+    isOwned = false;
+  } else {
+    xSemaphoreTake(activityManager.renderingMutex, portMAX_DELAY);
+    isOwned = true;
+  }
   isLocked = true;
 }
 
 RenderLock::RenderLock([[maybe_unused]] Activity&) {
-  xSemaphoreTake(activityManager.renderingMutex, portMAX_DELAY);
+  if (xSemaphoreGetMutexHolder(activityManager.renderingMutex) == xTaskGetCurrentTaskHandle()) {
+    isOwned = false;
+  } else {
+    xSemaphoreTake(activityManager.renderingMutex, portMAX_DELAY);
+    isOwned = true;
+  }
   isLocked = true;
 }
 
 RenderLock::~RenderLock() {
-  if (isLocked) {
+  if (isLocked && isOwned) {
     xSemaphoreGive(activityManager.renderingMutex);
-    isLocked = false;
   }
+  isLocked = false;
 }
 
 void RenderLock::unlock() {
-  if (isLocked) {
+  if (isLocked && isOwned) {
     xSemaphoreGive(activityManager.renderingMutex);
-    isLocked = false;
   }
+  isLocked = false;
 }
 
 /**

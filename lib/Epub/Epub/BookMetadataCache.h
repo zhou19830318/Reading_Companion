@@ -3,6 +3,7 @@
 #include <HalStorage.h>
 
 #include <algorithm>
+#include <atomic>
 #include <deque>
 #include <string>
 
@@ -55,6 +56,12 @@ class BookMetadataCache {
   HalFile spineFile;
   HalFile tocFile;
 
+  // Optional cancellation flag polled inside buildBookBin() loops (set by
+  // Epub::load from the background pre-indexer; null in the foreground).
+  const std::atomic<bool>* cancelFlag = nullptr;
+
+  bool cancelled() const { return cancelFlag && cancelFlag->load(std::memory_order_relaxed); }
+
   // Index for fast href→spineIndex lookup (used only for large EPUBs)
   struct SpineHrefIndexEntry {
     uint64_t hrefHash;  // FNV-1a 64-bit hash
@@ -98,6 +105,10 @@ class BookMetadataCache {
   bool endTocPass();
   bool endWrite();
   bool cleanupTmpFiles() const;
+
+  // Install a cancellation flag polled at buildBookBin() loop boundaries so a
+  // background index run stops within one spine/TOC entry of a reader opening.
+  void setCancel(const std::atomic<bool>* flag) { cancelFlag = flag; }
 
   // Post-processing to update mappings and sizes
   bool buildBookBin(const std::string& epubPath, const BookMetadata& metadata);

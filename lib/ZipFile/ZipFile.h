@@ -1,6 +1,7 @@
 #pragma once
 #include <HalStorage.h>
 
+#include <atomic>
 #include <deque>
 #include <string>
 #include <string_view>
@@ -81,7 +82,9 @@ class ZipFile {
   // Due to the memory required to run each of these, it is recommended to not preopen the zip file for multiple
   // These functions will open and close the zip as needed
   uint8_t* readFileToMemory(const char* filename, size_t* size = nullptr, bool trailingNullByte = false);
-  bool readFileToStream(const char* filename, Print& out, size_t chunkSize);
+  // cancel (optional): polled once per produced chunk so a background indexer
+  // can stop a long stream read within ~1 KB of progress; returns false when set.
+  bool readFileToStream(const char* filename, Print& out, size_t chunkSize, const std::atomic<bool>* cancel = nullptr);
 
   template <typename F>
   bool enumerateFilePaths(F&& callback) {

@@ -2,6 +2,7 @@
 
 #include <HalStorage.h>
 
+#include <atomic>
 #include <initializer_list>
 #include <string>
 #include <string_view>
@@ -93,10 +94,13 @@ class CssParser {
   void deleteCache() const;
 
   /**
-   * Save parsed CSS rules to a cache file.
+   * Save parsed CSS rules to a cache file. Written to a temp path and renamed
+   * into place, so the final cache file existing means "fully written".
+   * @param cancel optional flag polled per rule; when set, nothing is renamed
+   *                into place and false is returned (background pre-indexer).
    * @return true if cache was written successfully
    */
-  bool saveToCache() const;
+  bool saveToCache(const std::atomic<bool>* cancel = nullptr) const;
 
   /**
    * Load CSS rules from a cache file.

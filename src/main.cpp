@@ -30,6 +30,7 @@
 #include "KOReaderCredentialStore.h"
 #include "MappedInputManager.h"
 #include "OpdsServerStore.h"
+#include "PreIndexer.h"
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
 #include "activities/Activity.h"
@@ -633,6 +634,12 @@ void loop() {
         }
         logSerial.printf("SCREENSHOT_SENT:%u\n", static_cast<unsigned>(sent));
         logSerial.printf("SCREENSHOT_END\n");
+      } else if (cmd == "PRE_OFF") {
+        PreIndexer::getInstance().pause();
+      } else if (cmd == "PRE_ON") {
+        PreIndexer::getInstance().resume();
+      } else if (cmd == "PRE_DUMP") {
+        PreIndexer::getInstance().dumpState();
       } else if (cmd == "SDTEST") {
         // SD throughput vs CPU frequency. SdFat polls the wire byte by byte, so
         // the transfer rate may track the CPU rather than the SPI clock — and

@@ -7,6 +7,7 @@
 #include "CrossPointSettings.h"
 #include "Epub.h"
 #include "EpubReaderActivity.h"
+#include "OpenBookProgress.h"
 #include "SdCardFontSystem.h"
 #include "Txt.h"
 #include "TxtReaderActivity.h"
@@ -24,6 +25,11 @@ bool ReaderActivity::isTxtFile(const std::string& path) {
 
 bool ReaderActivity::isBmpFile(const std::string& path) { return FsHelpers::hasBmpExtension(path); }
 
+void ReaderActivity::onEpubLoadProgress(const int percent, void* ctx) {
+  auto* self = static_cast<ReaderActivity*>(ctx);
+  OpenBookProgress::reportPhase(self->renderer, percent, /*isLayout=*/false);
+}
+
 std::unique_ptr<Epub> ReaderActivity::loadEpub(const std::string& path) {
   if (!Storage.exists(path.c_str())) {
     LOG_ERR("READER", "File does not exist: %s", path.c_str());
@@ -35,6 +41,7 @@ std::unique_ptr<Epub> ReaderActivity::loadEpub(const std::string& path) {
     LOG_ERR("READER", "Failed to allocate EPUB object");
     return nullptr;
   }
+  epub->setProgress(&ReaderActivity::onEpubLoadProgress, this);
   if (epub->load(true, SETTINGS.embeddedStyle == 0)) {
     return epub;
   }
@@ -137,8 +144,14 @@ void ReaderActivity::onEnter() {
     }
     onGoToTxtReader(std::move(txt));
   } else {
+    // Show the loading popup at once so the (potentially multi-second) first
+    // parse does not look like a hang. Epub::load reports into it via the
+    // progress hook; the section-layout phase continues the same bar in
+    // EpubReaderActivity::render.
+    OpenBookProgress::begin(renderer, 0);
     auto epub = loadEpub(initialBookPath);
     if (!epub) {
+      OpenBookProgress::finish(renderer);
       onGoBack();
       return;
     }

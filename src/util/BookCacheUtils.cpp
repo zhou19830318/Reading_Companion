@@ -6,6 +6,8 @@
 #include <Txt.h>
 #include <Xtc.h>
 
+#include "PreIndexer.h"
+
 bool isBookCacheDirectoryName(const char* name) {
   if (!name) {
     return false;
@@ -23,6 +25,9 @@ bool isBookCacheDirectoryName(const char* name) {
 void clearBookCache(const std::string& path) {
   if (FsHelpers::hasEpubExtension(path)) {
     Epub(path, "/.crosspoint").clearCache();
+    // Cache just invalidated (upload/delete/settings): rebuild it in the
+    // background when idle. Jobs for deleted files skip via exists() check.
+    PreIndexer::getInstance().enqueue(path);
   } else if (FsHelpers::hasXtcExtension(path)) {
     Xtc(path, "/.crosspoint").clearCache();
   } else if (FsHelpers::hasTxtExtension(path)) {

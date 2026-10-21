@@ -878,7 +878,7 @@ Rect BaseTheme::drawPopup(const GfxRenderer& renderer, const char* message, cons
 }
 
 void BaseTheme::fillPopupProgress(const GfxRenderer& renderer, const Rect& layout, const int progress,
-                                  const bool showPercentLabel) const {
+                                  const bool showPercentLabel, const bool display) const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int barHeight = metrics.popupProgressBarHeight;
   const int barWidth =
@@ -889,7 +889,9 @@ void BaseTheme::fillPopupProgress(const GfxRenderer& renderer, const Rect& layou
   const int barY = layout.y + renderer.getLineHeight(UI_12_FONT_ID) + metrics.popupMarginY * 2 -
                    metrics.popupMarginY / 2 - barHeight / 2 - 1;
   if (barWidth <= 0 || barHeight <= 0) {
-    renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+    if (display) {
+      renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+    }
     return;
   }
 
@@ -918,7 +920,9 @@ void BaseTheme::fillPopupProgress(const GfxRenderer& renderer, const Rect& layou
                       metrics.popupTextInverted, popupFontFamily);
   }
 
-  renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+  if (display) {
+    renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+  }
 }
 
 void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, const int currentPage,
