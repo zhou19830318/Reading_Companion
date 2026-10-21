@@ -48,17 +48,17 @@ Name: "{group}\Uninstall Voice Relay / 卸载"; Filename: "{uninstallexe}"
 
 [Run]
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\write-env.ps1"" -EnvFile ""{commonappdata}\ReadingCompanion\voice-relay.env"" -DictDataDir ""{app}\voice-relay\dict-data"" -T2IAssetDir ""{commonappdata}\ReadingCompanion\run\t2i"" -Version ""{#AppVersion}"""; Flags: runhidden waituntilterminated; StatusMsg: "Generating config file..."
-Filename: "{app}\voice-relay-service.exe"; Parameters: "install"; Flags: runhidden waituntilterminated ignoreerrors; StatusMsg: "Registering service..."
-Filename: "{app}\voice-relay-service.exe"; Parameters: "start"; Flags: runhidden waituntilterminated ignoreerrors; StatusMsg: "Starting service..."
-Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Reading Companion Voice Relay"""; Flags: runhidden ignoreerrors
+Filename: "{app}\voice-relay-service.exe"; Parameters: "install"; Flags: runhidden waituntilterminated; StatusMsg: "Registering service..."
+Filename: "{app}\voice-relay-service.exe"; Parameters: "start"; Flags: runhidden waituntilterminated; StatusMsg: "Starting service..."
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Reading Companion Voice Relay"""; Flags: runhidden
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""Reading Companion Voice Relay"" dir=in action=allow protocol=TCP localport=8080 remoteip=localsubnet profile=private"; Flags: runhidden
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""for($i=0; $i -lt 30; $i++){ try { $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 http://127.0.0.1:8080/healthz; if ($r.StatusCode -eq 200) { New-Item -ItemType File -Force -Path '{tmp}\voice-relay-ready.txt' | Out-Null; exit 0 } } catch {} ; Start-Sleep -Seconds 1 }; exit 1"; Flags: runhidden waituntilterminated ignoreerrors; StatusMsg: "Waiting for the relay to become ready..."
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""for($i=0; $i -lt 30; $i++){ try { $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 http://127.0.0.1:8080/healthz; if ($r.StatusCode -eq 200) { New-Item -ItemType File -Force -Path '{tmp}\voice-relay-ready.txt' | Out-Null; exit 0 } } catch {} ; Start-Sleep -Seconds 1 }; exit 1"; Flags: runhidden waituntilterminated; StatusMsg: "Waiting for the relay to become ready..."
 Filename: "http://127.0.0.1:8080/admin"; Flags: shellexec nowait postinstall skipifsilent; Check: ServiceIsUp
 
 [UninstallRun]
-Filename: "{app}\voice-relay-service.exe"; Parameters: "stop"; Flags: runhidden waituntilterminated ignoreerrors; RunOnceId: "RelayStop"
-Filename: "{app}\voice-relay-service.exe"; Parameters: "uninstall"; Flags: runhidden waituntilterminated ignoreerrors; RunOnceId: "RelayUninstall"
-Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Reading Companion Voice Relay"""; Flags: runhidden ignoreerrors; RunOnceId: "RelayFirewall"
+Filename: "{app}\voice-relay-service.exe"; Parameters: "stop"; Flags: runhidden waituntilterminated; RunOnceId: "RelayStop"
+Filename: "{app}\voice-relay-service.exe"; Parameters: "uninstall"; Flags: runhidden waituntilterminated; RunOnceId: "RelayUninstall"
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Reading Companion Voice Relay"""; Flags: runhidden; RunOnceId: "RelayFirewall"
 
 [Code]
 var
