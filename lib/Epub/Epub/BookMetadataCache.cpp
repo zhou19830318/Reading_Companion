@@ -462,7 +462,11 @@ BookMetadataCache::SpineEntry BookMetadataCache::getSpineEntry(const int index) 
     return {};
   }
 
-  // Seek to spine LUT item, read from LUT and get out data
+  // Span the LUT seek + entry read with StorageLock: this handle is shared
+  // with other tasks (NCI background build, status-bar title, chapter list),
+  // and an interleaved seek between our own seek and read tears the entry
+  // position/length and aborts in std::string::resize.
+  HalStorage::StorageLock lock;
   bookFile.seek(lutOffset + sizeof(uint32_t) * index);
   uint32_t spineEntryPos;
   serialization::readPod(bookFile, spineEntryPos);
@@ -481,7 +485,9 @@ BookMetadataCache::TocEntry BookMetadataCache::getTocEntry(const int index) {
     return {};
   }
 
-  // Seek to TOC LUT item, read from LUT and get out data
+  // Same shared-handle hazard as getSpineEntry: keep LUT seek + read atomic
+  // against the other tasks that use bookFile.
+  HalStorage::StorageLock lock;
   bookFile.seek(lutOffset + sizeof(uint32_t) * spineCount + sizeof(uint32_t) * index);
   uint32_t tocEntryPos;
   serialization::readPod(bookFile, tocEntryPos);

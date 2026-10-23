@@ -47,7 +47,17 @@ class HalStorage {
 
   static HalStorage& getInstance() { return instance; }
 
-  class StorageLock;  // private class, used internally
+  // Hold across a multi-op HalFile sequence on a shared handle (seek → read →
+  // seek ...). HalFile methods take storageMutex individually, so without this
+  // an interleaving task can move the file position between our own seek and
+  // read and tear a length field.
+  class StorageLock {
+   public:
+    StorageLock();
+    ~StorageLock();
+    StorageLock(const StorageLock&) = delete;
+    StorageLock& operator=(const StorageLock&) = delete;
+  };
 
  private:
   static HalStorage instance;
