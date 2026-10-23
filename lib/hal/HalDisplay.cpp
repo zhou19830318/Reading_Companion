@@ -1,5 +1,6 @@
 #include <HalDisplay.h>
 #include <HalGPIO.h>
+#include <Logging.h>
 
 // Global HalDisplay instance
 HalDisplay display;
@@ -62,7 +63,10 @@ void HalDisplay::displayBuffer(HalDisplay::RefreshMode mode, bool turnOffScreen)
     einkDisplay.requestResync(1);
   }
 
+  const uint32_t t0 = millis();
   einkDisplay.displayBuffer(convertRefreshMode(mode), turnOffScreen);
+  // Panel-push duration (excludes the [GFX] draw time logged by the renderer).
+  LOG_INF("EPD", "buffer mode=%d ms=%lu", static_cast<int>(mode), millis() - t0);
 }
 
 void HalDisplay::refreshDisplay(HalDisplay::RefreshMode mode, bool turnOffScreen) {
@@ -70,7 +74,9 @@ void HalDisplay::refreshDisplay(HalDisplay::RefreshMode mode, bool turnOffScreen
     einkDisplay.requestResync(1);
   }
 
+  const uint32_t t0 = millis();
   einkDisplay.refreshDisplay(convertRefreshMode(mode), turnOffScreen);
+  LOG_INF("EPD", "refresh mode=%d ms=%lu", static_cast<int>(mode), millis() - t0);
 }
 
 void HalDisplay::displayWindow(uint16_t x, uint16_t y, uint16_t w, uint16_t h, HalDisplay::RefreshMode mode,
@@ -79,7 +85,9 @@ void HalDisplay::displayWindow(uint16_t x, uint16_t y, uint16_t w, uint16_t h, H
     einkDisplay.requestResync(1);
   }
 
+  const uint32_t t0 = millis();
   einkDisplay.displayWindow(x, y, w, h, convertRefreshMode(mode), turnOffScreen);
+  LOG_INF("EPD", "window mode=%d ms=%lu", static_cast<int>(mode), millis() - t0);
 }
 
 void HalDisplay::deepSleep() { einkDisplay.deepSleep(); }
