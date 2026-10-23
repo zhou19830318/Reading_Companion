@@ -29,7 +29,10 @@ if (!version || !bin) {
   process.exit(1);
 }
 
-const REPO = 'MoveCall/crosspoint-onepage';
+// The repo that runs the workflow owns the release assets. Hardcoding the
+// upstream org made every manifest on this fork point at a repo that never
+// received the releases (404 in the web flasher).
+const REPO = process.env.GITHUB_REPOSITORY || 'MoveCall/crosspoint-onepage';
 // Resolve to the .bin on THIS release. `latest/download/<bin>` also works, but
 // pinning the tag keeps a manifest reproducible if you ever inspect an old one.
 const binUrl = `https://github.com/${REPO}/releases/download/${version}/${bin}`;
