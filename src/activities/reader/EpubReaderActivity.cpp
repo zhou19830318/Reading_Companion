@@ -366,6 +366,7 @@ void EpubReaderActivity::launchVoiceNote() {
     const auto* jump = std::get_if<ProgressChangeResult>(&result.data);
     if (jump != nullptr) {
       RenderLock lock(*this);
+      clearPendingSpineCrossing();  // absolute jump supersedes a queued crossing
       currentSpineIndex = jump->spineIndex;
       nextPageNumber = jump->page;
       section.reset();
@@ -854,6 +855,7 @@ void EpubReaderActivity::loop() {
     if (nextTriggered) {
       onGoHome();
     } else {
+      clearPendingSpineCrossing();
       currentSpineIndex = epub->getSpineItemsCount() - 1;
       nextPageNumber = 0;
       pendingPageJump = std::numeric_limits<uint16_t>::max();
@@ -876,16 +878,14 @@ void EpubReaderActivity::loop() {
       return;
     }
 
-    // We don't want to delete the section mid-render, so grab the semaphore
-    {
-      RenderLock lock(*this);
-      nextPageNumber = 0;
-      if (nextTriggered) {
-        currentSpineIndex++;
-      } else if (currentSpineIndex > 0) {
-        currentSpineIndex--;
-      }
-      section.reset();
+    // Same deferred-crossing scheme as pageTurn(): queue the spine move and
+    // let the render task apply it under the lock it already owns. The
+    // RenderLock take that used to live here stalled the input loop whenever
+    // the render task was busy with an on-demand section build.
+    if (nextTriggered) {
+      pendingSpineDelta.fetch_add(1, std::memory_order_relaxed);
+    } else if (currentSpineIndex > 0) {
+      pendingSpineDelta.fetch_sub(1, std::memory_order_relaxed);
     }
     requestUpdate();
     return;
@@ -969,6 +969,7 @@ void EpubReaderActivity::jumpToPercent(int percent) {
   // Reset state so render() reloads and repositions on the target spine.
   {
     RenderLock lock(*this);
+    clearPendingSpineCrossing();  // absolute jump supersedes a queued crossing
     currentSpineIndex = targetSpineIndex;
     nextPageNumber = 0;
     pendingPercentJump = true;
@@ -983,6 +984,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       const auto& sync = std::get<ProgressChangeResult>(result.data);
       if (currentSpineIndex != sync.spineIndex || (section && section->currentPage != sync.page)) {
         RenderLock lock(*this);
+        clearPendingSpineCrossing();  // absolute jump supersedes a queued crossing
         currentSpineIndex = sync.spineIndex;
         nextPageNumber = sync.page;
         section.reset();
@@ -1000,6 +1002,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
             if (!result.isCancelled) {
               const auto& chapterResult = std::get<ChapterResult>(result.data);
               RenderLock lock(*this);
+              clearPendingSpineCrossing();  // absolute jump supersedes a queued crossing
 
               currentSpineIndex = chapterResult.spineIndex;
 
@@ -1088,6 +1091,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
     case EpubReaderMenuActivity::MenuAction::DELETE_CACHE: {
       {
         RenderLock lock(*this);
+        clearPendingSpineCrossing();  // cache goes away; a queued crossing is void
         if (epub && section) {
           uint16_t backupSpine = currentSpineIndex;
           uint16_t backupPage = section->currentPage;
@@ -1281,6 +1285,44 @@ void EpubReaderActivity::toggleAutoPageTurn(const uint8_t selectedPageTurnOption
   }
 }
 
+// Consumes the spine movement queued by the input-side crossing branches of
+// pageTurn()/chapter-skip. Must run with the render lock held (render() entry
+// is the only caller). Landing rules mirror the old under-lock code: a
+// forward crossing opens the new chapter's first page; a backward page-turn
+// reopens the previous chapter's last page (pendingPageJump = max, clamped by
+// the render path); a backward chapter-skip opens its page 0.
+void EpubReaderActivity::applyPendingSpineDelta() {
+  const int delta = pendingSpineDelta.exchange(0, std::memory_order_acq_rel);
+  if (delta == 0 || !epub) {
+    return;
+  }
+  const bool backToLastPage = pendingBackLandsOnLastPage.exchange(false, std::memory_order_acq_rel);
+  const long long lastSpine = static_cast<long long>(epub->getSpineItemsCount());
+  long long next = static_cast<long long>(currentSpineIndex) + delta;
+  if (next < 0) {
+    next = 0;
+  } else if (next > lastSpine) {
+    next = lastSpine;  // == count renders the end-of-book screen
+  }
+  currentSpineIndex = static_cast<int>(next);
+  if (delta < 0) {
+    if (backToLastPage) {
+      pendingPageJump = std::numeric_limits<uint16_t>::max();
+    } else {
+      nextPageNumber = 0;
+    }
+  } else {
+    nextPageNumber = 0;
+  }
+  section.reset();
+  LOG_DBG("ERS", "Applied pending spine delta %+d -> %d", delta, currentSpineIndex);
+}
+
+void EpubReaderActivity::clearPendingSpineCrossing() {
+  pendingSpineDelta.store(0, std::memory_order_relaxed);
+  pendingBackLandsOnLastPage.store(false, std::memory_order_relaxed);
+}
+
 void EpubReaderActivity::pageTurn(bool isForwardTurn) {
   if (!section) {
     // End-of-book holds no loaded section (render() returns before the load), so
@@ -1288,12 +1330,9 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
     // behaviour. Page-back reopens the last real chapter instead of leaving the
     // reader stuck on the end-of-book screen.
     if (!isForwardTurn && currentSpineIndex > 0) {
-      {
-        RenderLock lock(*this);
-        pendingPageJump = std::numeric_limits<uint16_t>::max();
-        currentSpineIndex--;
-        section.reset();
-      }
+      pendingPageJump = std::numeric_limits<uint16_t>::max();
+      pendingBackLandsOnLastPage.store(true, std::memory_order_relaxed);
+      pendingSpineDelta.fetch_sub(1, std::memory_order_relaxed);
       requestUpdate();
     }
     lastPageTurnTime = millis();
@@ -1303,26 +1342,18 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
     if (section->currentPage < section->pageCount - 1) {
       section->currentPage++;
     } else {
-      // We don't want to delete the section mid-render, so grab the semaphore
-      {
-        RenderLock lock(*this);
-        nextPageNumber = 0;
-        currentSpineIndex++;
-        section.reset();
-      }
+      // Crossing forward: queue the spine move for the render task instead of
+      // taking RenderLock here — the input loop must stay responsive while the
+      // render task performs the (up to ~9 s) on-demand section build.
+      pendingSpineDelta.fetch_add(1, std::memory_order_relaxed);
     }
   } else {
     if (section->currentPage > 0) {
       section->currentPage--;
     } else if (currentSpineIndex > 0) {
-      // We don't want to delete the section mid-render, so grab the semaphore
-      {
-        RenderLock lock(*this);
-        nextPageNumber = 0;
-        pendingPageJump = std::numeric_limits<uint16_t>::max();
-        currentSpineIndex--;
-        section.reset();
-      }
+      pendingPageJump = std::numeric_limits<uint16_t>::max();
+      pendingBackLandsOnLastPage.store(true, std::memory_order_relaxed);
+      pendingSpineDelta.fetch_sub(1, std::memory_order_relaxed);
     }
   }
   lastPageTurnTime = millis();
@@ -1334,6 +1365,11 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   if (!epub) {
     return;
   }
+
+  // Cross-chapter turns queued by pageTurn()/chapter-skip land here: this
+  // task already owns the render lock, so the spine move and section reload
+  // can never race a concurrent render.
+  applyPendingSpineDelta();
 
   const auto showPendingSyncSaveError = [this]() {
     if (!pendingSyncSaveError) return;
@@ -1667,19 +1703,36 @@ void EpubReaderActivity::silentIndexNextChapterIfNeeded(const uint16_t viewportW
     return;
   }
 
-  // Build the next chapter cache from the fourth-from-last page onward, so the
-  // work lands in the idle window before the reader crosses the chapter
-  // boundary. Two pages (the old trigger) left only ~2-6 s of margin against a
-  // ~10 s cold build (measured on this card), so a normally-paced reader kept
-  // arriving while the worker was still running; the background build makes an
-  // earlier start cheap (it never blocks a page turn) and the cache is usually
-  // ready by the time the boundary is reached.
-  if (section->currentPage + 4 < section->pageCount) {
-    return;
+  // Keep the background indexer one to two chapters ahead of the reader.
+  //
+  // The previous gate only armed from the fourth-from-last page of the current
+  // chapter. That fails two ways: short chapters (2-7 pages in multi-volume
+  // collections) give under 4 s of margin against a ~7.5-10 s cold build, and
+  // render coalescing can skip the near-end window entirely — a 40-press test
+  // batch produced only 13 renders, so most chapters were entered without a
+  // render pass having ever observed their final pages. Evaluating on every
+  // render pass and targeting the first un-built spine in a two-chapter window
+  // lets the worker finish N+1 during the current chapter's dwell and chain
+  // into N+2 without a cancellation (spineIndex() only re-arms after the
+  // previous build has been reaped).
+  //
+  // Cost per pass: at most two header-only section probes (~2-6 ms of SD I/O,
+  // Section::loadSectionFile reads the magic/version/params/pageCount and
+  // closes). A hit also doubles as a staleness check — a settings change makes
+  // the probe fail, clear the stale cache, and retarget the worker at it.
+  const int lastSpineIndex = static_cast<int>(epub->getSpineItemsCount()) - 1;
+  int nextSpineIndex = -1;
+  for (int i = currentSpineIndex + 1; i <= currentSpineIndex + 2 && i <= lastSpineIndex; ++i) {
+    Section probe(epub, i, renderer);
+    if (!probe.loadSectionFile(SETTINGS.getReaderFontId(), SETTINGS.getReaderLineCompression(),
+                               SETTINGS.extraParagraphSpacing, SETTINGS.paragraphAlignment, viewportWidth,
+                               viewportHeight, SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle,
+                               SETTINGS.imageRendering, SETTINGS.focusReadingEnabled)) {
+      nextSpineIndex = i;
+      break;
+    }
   }
-
-  const int nextSpineIndex = currentSpineIndex + 1;
-  if (nextSpineIndex < 0 || nextSpineIndex >= epub->getSpineItemsCount()) {
+  if (nextSpineIndex < 0) {
     return;
   }
 
@@ -1696,14 +1749,6 @@ void EpubReaderActivity::silentIndexNextChapterIfNeeded(const uint16_t viewportW
   // A chapter that already failed to parse once (corrupt markup, OOM) would
   // otherwise restart the build on every render pass for the whole visit.
   if (nextChapterIndexer_.lastFailedSpine() == nextSpineIndex) {
-    return;
-  }
-
-  Section nextSection(epub, nextSpineIndex, renderer);
-  if (nextSection.loadSectionFile(SETTINGS.getReaderFontId(), SETTINGS.getReaderLineCompression(),
-                                  SETTINGS.extraParagraphSpacing, SETTINGS.paragraphAlignment, viewportWidth,
-                                  viewportHeight, SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle,
-                                  SETTINGS.imageRendering, SETTINGS.focusReadingEnabled)) {
     return;
   }
 
@@ -2319,6 +2364,7 @@ void EpubReaderActivity::navigateToHref(const std::string& hrefStr, const bool s
 
   {
     RenderLock lock(*this);
+    clearPendingSpineCrossing();  // absolute jump supersedes a queued crossing
     pendingAnchor = std::move(anchor);
     currentSpineIndex = targetSpineIndex;
     nextPageNumber = 0;
@@ -2336,6 +2382,7 @@ void EpubReaderActivity::restoreSavedPosition() {
 
   {
     RenderLock lock(*this);
+    clearPendingSpineCrossing();  // absolute jump supersedes a queued crossing
     currentSpineIndex = pos.spineIndex;
     nextPageNumber = pos.pageNumber;
     section.reset();

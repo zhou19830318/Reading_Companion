@@ -3,6 +3,7 @@
 #include <Epub/FootnoteEntry.h>
 #include <Epub/Section.h>
 
+#include <atomic>
 #include <optional>
 
 #include "BookmarkEntry.h"
@@ -21,6 +22,16 @@ class EpubReaderActivity final : public Activity {
   NextChapterIndexer nextChapterIndexer_;
   int currentSpineIndex = 0;
   int nextPageNumber = 0;
+  // Cross-chapter turns queue the spine move here instead of taking
+  // RenderLock from the input path: that lock blocks the main loop for the
+  // whole on-demand section build (measured 9-15.7 s freezes). The render
+  // task exchanges the delta at render() entry, where it already owns the
+  // lock. Written by the main task only; read/cleared by the render task.
+  std::atomic<int> pendingSpineDelta{0};
+  // Direction landing for a pending backward delta: true = previous chapter's
+  // last page (normal page-turn), false = page 0 (chapter skip). Paired with
+  // the delta on apply; both are main-task writes.
+  std::atomic<bool> pendingBackLandsOnLastPage{false};
   std::optional<uint16_t> pendingPageJump;
   // Set when navigating to a footnote href with a fragment (e.g. #note1).
   // Cleared on the next render after the new section loads and resolves it to a page.
@@ -168,6 +179,12 @@ class EpubReaderActivity final : public Activity {
 
   void toggleAutoPageTurn(uint8_t selectedPageTurnOption);
   void pageTurn(bool isForwardTurn);
+  // Applies pendingSpineDelta (spine move + section reload) at render() entry,
+  // the only call site, which already owns the render lock.
+  void applyPendingSpineDelta();
+  // Drops a queued crossing: absolute spine writes (TOC jump, footnote href,
+  // sync restore, cache delete) supersede anything pageTurn() had queued.
+  void clearPendingSpineCrossing();
   void loadCachedBookmarks();
   void addBookmark();
   void flushBookmarks();
