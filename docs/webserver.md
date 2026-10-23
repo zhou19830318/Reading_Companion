@@ -1,192 +1,149 @@
-# Web Server Guide
+# Web 服务器指南
 
-This guide explains how to use the built-in web server for file transfer, device
-settings, Wi-Fi / Cloud Services / OPDS management, and SD-card font management.
+本指南介绍如何使用内置 Web 服务器进行文件传输、设备设置、Wi-Fi / 云服务 / OPDS 管理，以及 SD 卡字体管理。
 
-## Overview
+## 概述
 
-The web server is available while the device is in **File Transfer** or
-**Calibre Wireless** mode. It can:
+设备处于 **文件传输** 或 **Calibre 无线** 模式时，Web 服务器可用。它可以：
 
-- Upload, download, rename, move, and delete files on the SD card
-- Create folders
-- Edit device settings from a browser across six panels (Display, Reader,
-  Controls, System, KOReader Sync, Status Bar)
-- Manage saved Wi-Fi networks, the Cloud Services credentials (OpenClaw gateway +
-  MiMo speech-to-text), and OPDS servers
-- Restore factory settings and reboot the device
-- Serve the whole UI in Chinese or English with a one-click language switch
-- Upload and delete `.cpfont` SD-card font families
-- Accept WebDAV clients and Calibre wireless uploads
+- 上传、下载、重命名、移动和删除 SD 卡上的文件
+- 创建文件夹
+- 通过浏览器跨六个面板编辑设备设置（显示、阅读器、控件、系统、KOReader 同步、状态栏）
+- 管理已保存的 Wi-Fi 网络、云服务凭据（OpenClaw 网关 + MiMo 语音转文字）以及 OPDS 服务器
+- 恢复出厂设置并重启设备
+- 以中文或英文提供完整界面，支持一键切换语言
+- 上传和删除 `.cpfont` SD 卡字体家族
+- 接受 WebDAV 客户端和 Calibre 无线上传
 
-The server does not require authentication. Use it only on trusted private
-networks or in hotspot mode when you control who is connected.
+服务器不需要身份验证。请仅在受信任的专用网络上使用，或在热点模式下使用（此时你能控制谁已连接）。
 
-## Starting File Transfer
+## 启动文件传输
 
-1. From the Home screen, select **File Transfer**.
-2. Choose one of the available modes:
+1. 在主屏幕上，选择 **文件传输**。
+2. 选择一种可用模式：
 
-| Mode | Use when |
+| 模式 | 适用场景 |
 |------|----------|
-| **Join Network** | You want the reader to join an existing Wi-Fi network. |
-| **Calibre Wireless** | You want to receive books from the CrossPoint Calibre plugin workflow. |
-| **Create Hotspot** | You want the reader to create its own open Wi-Fi network. |
+| **加入网络** | 希望阅读器加入现有的 Wi-Fi 网络。 |
+| **Calibre 无线** | 希望通过 CrossPoint Calibre 插件工作流接收书籍。 |
+| **创建热点** | 希望阅读器创建自己的开放 Wi-Fi 网络。 |
 
-## Join Network Mode
+## 加入网络模式
 
-1. Select **Join Network**.
-2. Pick a 2.4 GHz Wi-Fi network from the scan results.
-3. Enter the password if prompted.
-4. Save credentials if you want the reader to reconnect automatically next time.
+1. 选择 **加入网络**。
+2. 从扫描结果中选择一个 2.4 GHz Wi-Fi 网络。
+3. 如有提示，输入密码。
+4. 如果希望阅读器下次自动重新连接，请保存凭据。
 
-After connection, the reader shows:
+连接后，阅读器会显示：
 
-- The connected SSID and Wi-Fi strength
-- A QR code for the web URL
-- The direct IP URL, for example `http://192.168.1.102/`
+- 已连接的 SSID 和 Wi-Fi 信号强度
+- 指向 Web URL 的二维码
+- 直接的 IP URL，例如 `http://192.168.1.102/`
 
-On the OnePage (ESP32-C61) build mDNS is stubbed out, so
-`http://crosspoint.local/` does **not** resolve — always use the IP URL printed
-on the screen (or encoded in the QR) from a phone, tablet, or computer on the
-same network.
+在 OnePage（ESP32-C61）构建中，mDNS 为空桩实现，因此 `http://crosspoint.local/` **无法** 解析——请始终使用同一网络中的手机、平板或电脑上屏幕上打印的 IP URL（或编码在二维码中的 URL）。
 
-## Create Hotspot Mode
+## 创建热点模式
 
-1. Select **Create Hotspot**.
-2. Connect your phone or computer to the open Wi-Fi network:
+1. 选择 **创建热点**。
+2. 将手机或电脑连接到开放的 Wi-Fi 网络：
 
 ```text
 CrossPoint-Reader
 ```
 
-3. Open the URL shown on the reader. On OnePage this is the hotspot IP,
-   typically `http://192.168.4.1/` — mDNS is not compiled in, so
-   `http://crosspoint.local/` will not resolve.
+3. 打开阅读器上显示的 URL。在 OnePage 上这是热点 IP，通常为 `http://192.168.4.1/`——mDNS 未编译进去，因此 `http://crosspoint.local/` 无法解析。
 
-The reader displays one QR code for joining the hotspot and another QR code for
-opening the web interface.
+阅读器会显示一个用于加入热点的二维码，以及另一个用于打开 Web 界面的二维码。
 
-## Calibre Wireless Mode
+## Calibre 无线模式
 
-Calibre Wireless starts the same web server in station mode, then displays setup
-instructions and upload progress on the reader. Use this mode with the
-CrossPoint Calibre plugin or other clients that speak the documented WebSocket
-upload protocol.
+Calibre 无线模式在 Station 模式下启动同一个 Web 服务器，然后在阅读器上显示设置说明和上传进度。请将此模式与 CrossPoint Calibre 插件或其他实现了文档化 WebSocket 上传协议的客户端配合使用。
 
-For Calibre OPDS browsing, add `/opds` to the catalog URL when configuring an
-OPDS server.
+对于 Calibre OPDS 浏览，配置 OPDS 服务器时请在目录 URL 后添加 `/opds`。
 
-## Web Interface
+## Web 界面
 
-The browser UI has four primary pages, reached from the header tabs (**Home**,
-**File Manager**, **Settings**, **Fonts**). Every page shares the same header,
-which carries a **中文 / EN** language button; the choice is remembered in the
-browser and sent to the API as `?lang=`.
+浏览器界面有四个主要页面，通过顶部标签页访问（**主页**、**文件管理器**、**设置**、**字体**）。每个页面共享相同的页眉，页眉带有 **中文 / EN** 语言按钮；所选语言会记录在浏览器中，并以 `?lang=` 发送给 API。
 
-### Home
+### 主页
 
-The Home page shows firmware status, network mode, IP address, device type,
-uptime, and free heap.
+主页显示固件状态、网络模式、IP 地址、设备类型、运行时间和可用堆内存。
 
-### File Manager
+### 文件管理器
 
-The File Manager page can:
+文件管理器页面可以：
 
-- Browse SD-card folders
-- Upload files, using WebSocket upload when available and HTTP upload as a fallback
-- Create folders
-- Download files
-- Rename files
-- Move files into existing folders
-- Delete one or more selected files or empty folders
+- 浏览 SD 卡文件夹
+- 上传文件（可用时使用 WebSocket 上传，HTTP 上传作为后备）
+- 创建文件夹
+- 下载文件
+- 重命名文件
+- 将文件移动到现有文件夹
+- 删除一个或多个选定的文件或空文件夹
 
-Existing files with the same name are overwritten by uploads. When EPUB files
-are overwritten, moved, renamed, or deleted through the web server, the matching
-book cache is cleared so stale metadata is not reused.
+同名的现有文件会被上传覆盖。当 EPUB 文件通过 Web 服务器被覆盖、移动、重命名或删除时，相应的书籍缓存会被清除，以免重用过时的元数据。
 
-### Settings
+### 设置
 
-The Settings page is organised with a second-level chip bar, mirroring the
-on-device settings menu:
+设置页面采用二级标签栏组织，与设备上的设置菜单相对应：
 
-| Panel | Contents |
+| 面板 | 内容 |
 |-------|----------|
-| **Display** | Sleep screen (mode, cover fit, filter), quick resume, battery display, refresh cadence, UI theme, sunlight fading fix |
-| **Reader** | Font family and size, line spacing, margins, paragraph alignment, embedded styles, focus reading, hyphenation, orientation, text anti-aliasing, ruled lines, image handling |
-| **Controls** | Side/front button roles, long-press behaviour and menu, short power-button action |
-| **System** | Time to sleep, hidden files, recent-book and finished-book behaviour |
-| **KOReader Sync** | Username, password, sync server URL, document matching method (web-only) |
-| **Status Bar** | Chapter/page count, progress bar and thickness, title, battery, clock and UTC offset, clock format, XTC status bar (web-only) |
-| **Wi-Fi** | Saved networks (up to 8): SSID, password, auto-connect, last-connected marker |
-| **Cloud Services** | OpenClaw gateway (host, port, path, TLS, protocol, CA path, token) with an approval/test card, plus the MiMo STT URL/key test card |
-| **OPDS** | Saved OPDS servers (up to 8): title, URL, credentials |
+| **显示** | 睡眠屏幕（模式、封面适配、滤镜）、快速恢复、电池显示、刷新频率、UI 主题、阳光褪色修复 |
+| **阅读器** | 字体家族和字号、行距、页边距、段落对齐、内嵌样式、聚焦阅读、自动断字、方向、文字抗锯齿、横线、图片处理 |
+| **控件** | 侧边/正面按钮角色、长按行为和菜单、短按电源键操作 |
+| **系统** | 进入睡眠时间、隐藏文件、最近书籍和已读完书籍行为 |
+| **KOReader 同步** | 用户名、密码、同步服务器 URL、文档匹配方式（仅限网页） |
+| **状态栏** | 章节/页码统计、进度条及其粗细、标题、电池、时钟和 UTC 偏移、时钟格式、XTC 状态栏（仅限网页） |
+| **Wi-Fi** | 已保存的网络（最多 8 个）：SSID、密码、自动连接、最近连接标记 |
+| **云服务** | OpenClaw 网关（主机、端口、路径、TLS、协议、CA 路径、令牌），附带批准/测试卡片，以及 MiMo STT URL/密钥测试卡片 |
+| **OPDS** | 已保存的 OPDS 服务器（最多 8 个）：标题、URL、凭据 |
 
-Below the chips, one card per category is shown at a time; each panel carries its
-own usage hint. The action bar under the cards provides:
+标签栏下方一次显示一个类别的卡片；每个面板都带有各自的使用提示。卡片下方的操作栏提供：
 
-- **Save Settings** — green primary button, enabled only when the current
-  category has unsaved changes
-- **Reset Defaults** — restores every `settings.json` field to its firmware
-  default (Wi-Fi / OPDS lists and the Cloud Services secrets are untouched), then
-  reloads the page
-- **Reboot Device** — restarts the reader once the response has been sent
+- **保存设置** —— 绿色主按钮，仅当当前类别有未保存的更改时才启用
+- **恢复默认值** —— 将 `settings.json` 的每个字段恢复为固件默认值（Wi-Fi / OPDS 列表和云服务机密不受影响），然后重新加载页面
+- **重启设备** —— 在响应发送完毕后重启阅读器
 
-Use the **中文 / EN** button in the header to flip the whole UI language; the
-settings cards are re-rendered in the selected language without losing edits.
+使用页眉中的 **中文 / EN** 按钮可切换整个界面语言；设置卡片会以所选语言重新渲染，且不会丢失编辑内容。
 
-Secrets behave consistently across the page: Wi-Fi and OPDS passwords and the
-Cloud Services token / STT key are accepted on save but never returned by the
-API — the browser only sees presence flags, and Cloud Services credentials are
-stored in NVS flash rather than on the SD card.
+机密在页面上的处理方式保持一致：Wi-Fi 和 OPDS 密码以及云服务令牌 / STT 密钥在保存时会被接受，但 API 永远不会返回它们——浏览器只能看到存在标志，且云服务凭据存储在 NVS 闪存中而非 SD 卡上。
 
-### Fonts
+### 字体
 
-The Fonts page lists installed SD-card font families and lets you upload
-`.cpfont` files. Upload files from one font family at a time. The server validates
-the font family name, filename, and `.cpfont` magic bytes before accepting the
-upload.
+字体页面列出已安装的 SD 卡字体家族，并允许你上传 `.cpfont` 文件。一次只上传一个字体家族的文件。服务器在接受上传之前会验证字体家族名称、文件名和 `.cpfont` 魔数。
 
-Installed fonts appear in **Settings > Reader > Font Family** after the font
-registry refreshes.
+字体注册表刷新后，已安装的字体会出现在 **设置 > 阅读器 > 字体家族** 中。
 
-## Command Line Use
+## 命令行使用
 
-Power users can use `curl`, WebDAV clients, or WebSocket clients while the web
-server is running.
+高级用户可以在 Web 服务器运行时使用 `curl`、WebDAV 客户端或 WebSocket 客户端。
 
-Endpoint details are documented in [webserver-endpoints.md](./webserver-endpoints.md).
+端点详情记录在 [webserver-endpoints.md](./webserver-endpoints.md) 中。
 
-## Security Notes
+## 安全注意事项
 
-- The HTTP server runs on port 80; the WebSocket upload server runs on port 81.
-- There is no authentication. Anyone on the same network can read and write the
-  SD card and change settings while the server is running.
-- The server stops when you exit File Transfer or Calibre Wireless mode.
-- Hotspot mode creates an open network for connectivity fallback; disconnect when done.
-- Secrets never leave the device: the settings, Wi-Fi, OPDS and `/api/cloud`
-  responses only report whether a credential is set (presence flags), not its
-  value. Entering a blank password during an edit keeps the stored one.
-- Cloud Services credentials live in NVS flash, not on the SD card, so they
-  survive a factory-reset of `settings.json` and are not copied with the card.
-- **Reset Defaults** clears `settings.json` only. Saved Wi-Fi networks, OPDS
-  servers, KOReader credentials and Cloud Services secrets are kept; the UI
-  asks for confirmation first.
+- HTTP 服务器运行在 80 端口；WebSocket 上传服务器运行在 81 端口。
+- 没有身份验证。服务器运行期间，同一网络上的任何人都可以读写 SD 卡并更改设置。
+- 退出文件传输或 Calibre 无线模式时，服务器会停止。
+- 热点模式会创建一个开放网络以备连接回退；使用完毕后请断开连接。
+- 机密永不离开设备：设置、Wi-Fi、OPDS 和 `/api/cloud` 的响应仅报告凭据是否已设置（存在标志），而不报告其值。编辑时输入空白密码会保留已存储的密码。
+- 云服务凭据存放在 NVS 闪存中而非 SD 卡上，因此它们能在 `settings.json` 恢复出厂设置后保留，且不会随 SD 卡被复制。
+- **恢复默认值** 仅清除 `settings.json`。已保存的 Wi-Fi 网络、OPDS 服务器、KOReader 凭据和云服务机密都会保留；UI 会先要求确认。
 
-## Tips
+## 提示
 
-1. Use **Create Hotspot** when no trusted network is available.
-2. Use the IP URL printed on the reader — `crosspoint.local` does not resolve on
-   the OnePage build (mDNS is not compiled in).
-3. Move closer to the router if upload progress stalls in Join Network mode.
-4. Upload custom fonts through the Fonts page or copy them to `/.fonts/` or `/fonts/` on the SD card.
-5. Switch the UI language with the **中文 / EN** button in the header; edits you
-   have not saved yet are preserved across the switch.
-6. Exit File Transfer mode when finished to conserve battery.
+1. 在没有可用的受信任网络时，使用 **创建热点**。
+2. 使用阅读器上打印的 IP URL —— `crosspoint.local` 在 OnePage 构建上无法解析（mDNS 未编译进去）。
+3. 如果在加入网络模式下上传进度停滞，请靠近路由器。
+4. 通过字体页面上传自定义字体，或将它们复制到 SD 卡上的 `/.fonts/` 或 `/fonts/`。
+5. 使用页眉中的 **中文 / EN** 按钮切换界面语言；尚未保存的编辑在切换后会保留。
+6. 完成后退出文件传输模式以节省电量。
 
-## Related Documentation
+## 相关文档
 
-- [User Guide](../USER_GUIDE.md)
-- [Webserver Endpoints](./webserver-endpoints.md)
-- [SD Card Fonts](./sd-card-fonts.md)
-- [Troubleshooting](./troubleshooting.md)
+- [用户指南](../USER_GUIDE.md)
+- [Web 服务器端点](./webserver-endpoints.md)
+- [SD 卡字体](./sd-card-fonts.md)
+- [故障排除](./troubleshooting.md)

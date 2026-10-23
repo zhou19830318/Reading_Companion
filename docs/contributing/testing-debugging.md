@@ -23,7 +23,7 @@ pio run -e onepage --target upload
 ```
 
 If the upload stage fails on a Puya-flash board, flash manually with
-`esptool --no-stub` (see the [README](../../README.md#install-firmware)).
+`esptool --no-stub` (see the [README](../../README.md#安装固件)).
 
 Open serial monitor:
 

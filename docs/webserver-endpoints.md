@@ -1,28 +1,28 @@
-# Webserver Endpoints
+# Web 服务器端点
 
-This document describes the HTTP, WebSocket, WebDAV, and discovery endpoints
-available while CrossPoint Reader is in File Transfer or Calibre Wireless mode.
+本文档描述 CrossPoint Reader 处于文件传输模式或 Calibre 无线模式时，
+可用的 HTTP、WebSocket、WebDAV 和发现端点。
 
-- HTTP server: port 80
-- WebSocket upload server: port 81
-- UDP discovery listener: port 8134
-- WebDAV: port 80, handled by the same HTTP server
+- HTTP 服务器：端口 80
+- WebSocket 上传服务器：端口 81
+- UDP 发现监听器：端口 8134
+- WebDAV：端口 80，由同一 HTTP 服务器处理
 
-Examples use `crosspoint.local`. On the OnePage (ESP32-C61) build mDNS is not
-compiled in, so that hostname never resolves — replace it with the IP address
-shown on the device screen in every example below.
+示例使用 `crosspoint.local`。在 OnePage (ESP32-C61) 构建中未编译 mDNS，
+因此该主机名永远不会解析成功 —— 请在下面每个示例中将其替换为设备屏幕上
+显示的 IP 地址。
 
-## HTTP Pages
+## HTTP 页面
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| `GET` | `/` | Home/status page |
-| `GET` | `/files` | File manager page |
-| `GET` | `/settings` | Web settings page |
-| `GET` | `/fonts` | SD-card font manager page |
-| `GET` | `/js/jszip.min.js` | JavaScript asset used by the file manager |
+| 方法 | 路径 | 用途 |
+|------|------|------|
+| `GET` | `/` | 主页/状态页 |
+| `GET` | `/files` | 文件管理器页面 |
+| `GET` | `/settings` | Web 设置页面 |
+| `GET` | `/fonts` | SD 卡字体管理器页面 |
+| `GET` | `/js/jszip.min.js` | 文件管理器使用的 JavaScript 资源 |
 
-## Device Status
+## 设备状态
 
 ### `GET /api/status`
 
@@ -30,7 +30,7 @@ shown on the device screen in every example below.
 curl http://crosspoint.local/api/status
 ```
 
-Response:
+响应：
 
 ```json
 {
@@ -44,33 +44,33 @@ Response:
 }
 ```
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `version` | string | Firmware version |
-| `ip` | string | Device IP address |
-| `mode` | string | `"STA"` for joined Wi-Fi or `"AP"` for hotspot mode |
-| `rssi` | number | Wi-Fi RSSI in dBm; `0` in AP mode |
-| `freeHeap` | number | Free heap in bytes |
-| `uptime` | number | Seconds since boot |
-| `device` | string | Hardware id: `"X3"` or `"X4"`. The OnePage build skips the I2C fingerprint probe and always reports `"X4"` (it reuses the X4 layout metrics) |
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `version` | string | 固件版本 |
+| `ip` | string | 设备 IP 地址 |
+| `mode` | string | 已加入 Wi-Fi 时为 `"STA"`，热点模式时为 `"AP"` |
+| `rssi` | number | Wi-Fi RSSI（dBm）；AP 模式下为 `0` |
+| `freeHeap` | number | 空闲堆内存（字节） |
+| `uptime` | number | 开机以来的秒数 |
+| `device` | string | 硬件 id：`"X3"` 或 `"X4"`。OnePage 构建跳过 I2C 指纹探测并始终报告 `"X4"`（它复用 X4 的布局度量） |
 
-## File Management
+## 文件管理
 
 ### `GET /api/files`
 
-Lists files and folders under a directory.
+列出目录下的文件和文件夹。
 
 ```bash
 curl "http://crosspoint.local/api/files?path=/Books"
 ```
 
-Query parameters:
+查询参数：
 
-| Parameter | Required | Default | Description |
-|-----------|----------|---------|-------------|
-| `path` | No | `/` | Directory to list |
+| 参数 | 必需 | 默认值 | 说明 |
+|------|------|--------|------|
+| `path` | 否 | `/` | 要列出的目录 |
 
-Response:
+响应：
 
 ```json
 [
@@ -79,140 +79,136 @@ Response:
 ]
 ```
 
-Hidden dotfiles are omitted unless the device setting `showHiddenFiles` is
-enabled. `System Volume Information` and `XTCache` are always hidden/protected.
+除非设备设置 `showHiddenFiles` 已启用，否则隐藏的点文件会被省略。
+`System Volume Information` 和 `XTCache` 始终是隐藏/受保护的。
 
 ### `GET /download`
 
-Downloads a file from the SD card.
+从 SD 卡下载文件。
 
 ```bash
 curl -OJ "http://crosspoint.local/download?path=/Books/MyBook.epub"
 ```
 
-Query parameters:
+查询参数：
 
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `path` | Yes | File path to download |
+| 参数 | 必需 | 说明 |
+|------|------|------|
+| `path` | 是 | 要下载的文件路径 |
 
-Protected dotfiles, `System Volume Information`, and `XTCache` cannot be
-downloaded. EPUB files are served as `application/epub+zip`; other files use
-`application/octet-stream`.
+受保护的点文件、`System Volume Information` 和 `XTCache` 无法下载。
+EPUB 文件以 `application/epub+zip` 提供；其他文件使用
+`application/octet-stream`。
 
 ### `POST /upload`
 
-Uploads a file with HTTP multipart form data.
+使用 HTTP multipart 表单数据上传文件。
 
 ```bash
 curl -X POST -F "file=@mybook.epub" "http://crosspoint.local/upload?path=/Books"
 ```
 
-Query parameters:
+查询参数：
 
-| Parameter | Required | Default | Description |
-|-----------|----------|---------|-------------|
-| `path` | No | `/` | Destination directory |
+| 参数 | 必需 | 默认值 | 说明 |
+|------|------|--------|------|
+| `path` | 否 | `/` | 目标目录 |
 
-Successful response:
+成功响应：
 
 ```text
 File uploaded successfully: mybook.epub
 ```
 
-Notes:
+注意：
 
-- Existing files with the same name are overwritten.
-- EPUB cache data for the uploaded path is cleared after a successful upload.
-- HTTP upload uses a 4 KB write buffer before flushing to the SD card.
+- 同名的现有文件会被覆盖。
+- 上传成功后会清除上传路径对应的 EPUB 缓存数据。
+- HTTP 上传在刷写到 SD 卡之前使用 4 KB 写缓冲区。
 
 ### `POST /mkdir`
 
-Creates a folder.
+创建文件夹。
 
 ```bash
 curl -X POST -d "name=NewFolder&path=/" http://crosspoint.local/mkdir
 ```
 
-Form parameters:
+表单参数：
 
-| Parameter | Required | Default | Description |
-|-----------|----------|---------|-------------|
-| `name` | Yes | - | New folder name |
-| `path` | No | `/` | Parent folder |
+| 参数 | 必需 | 默认值 | 说明 |
+|------|------|--------|------|
+| `name` | 是 | - | 新文件夹名称 |
+| `path` | 否 | `/` | 父文件夹 |
 
 ### `POST /rename`
 
-Renames a file.
+重命名文件。
 
 ```bash
 curl -X POST -d "path=/Books/old.epub&name=new.epub" http://crosspoint.local/rename
 ```
 
-Form parameters:
+表单参数：
 
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `path` | Yes | Existing file path |
-| `name` | Yes | New file name, not a path |
+| 参数 | 必需 | 说明 |
+|------|------|------|
+| `path` | 是 | 现有文件路径 |
+| `name` | 是 | 新文件名（不是路径） |
 
-Only files can be renamed through this endpoint. The old EPUB cache path is
-cleared before the rename.
+此端点只能重命名文件。重命名前会清除旧的 EPUB 缓存路径。
 
 ### `POST /move`
 
-Moves a file into an existing folder.
+将文件移动到现有文件夹中。
 
 ```bash
 curl -X POST -d "path=/Books/mybook.epub&dest=/Read" http://crosspoint.local/move
 ```
 
-Form parameters:
+表单参数：
 
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `path` | Yes | Existing file path |
-| `dest` | Yes | Existing destination folder |
+| 参数 | 必需 | 说明 |
+|------|------|------|
+| `path` | 是 | 现有文件路径 |
+| `dest` | 是 | 现有目标文件夹 |
 
-Only files can be moved through this endpoint. The old EPUB cache path is
-cleared before the move.
+此端点只能移动文件。移动前会清除旧的 EPUB 缓存路径。
 
 ### `POST /delete`
 
-Deletes one or more files or empty folders.
+删除一个或多个文件或空文件夹。
 
 ```bash
 curl -X POST -d "path=/Books/mybook.epub" http://crosspoint.local/delete
 curl -X POST -d 'paths=["/Books/old.epub","/OldFolder"]' http://crosspoint.local/delete
 ```
 
-Form parameters:
+表单参数：
 
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `path` | Yes, unless `paths` is provided | Single path to delete |
-| `paths` | Yes, unless `path` is provided | JSON array of paths to delete |
+| 参数 | 必需 | 说明 |
+|------|------|------|
+| `path` | 是（除非提供 `paths`） | 要删除的单个路径 |
+| `paths` | 是（除非提供 `path`） | 要删除的路径的 JSON 数组 |
 
-Protected items cannot be deleted. Non-empty folders are rejected. EPUB cache
-data for deleted files is cleared.
+受保护的项目无法删除。非空文件夹会被拒绝。已删除文件的 EPUB 缓存
+数据会被清除。
 
-## Settings API
+## 设置 API
 
 ### `GET /api/settings`
 
-Returns a streamed JSON array of editable settings. Each item contains common
-fields plus type-specific fields.
+返回可编辑设置的流式 JSON 数组。每一项包含公共字段以及类型特定的字段。
 
 ```bash
 curl "http://crosspoint.local/api/settings?lang=en"
 ```
 
-`lang` accepts `en` or `zh-Hans` and localizes the `name` and option labels; it
-defaults to the device's own language when omitted. The response is not
-cache-busted by the server, so browsers may need `?_=<timestamp>` to refetch
-after a change.
+`lang` 接受 `en` 或 `zh-Hans`，会对 `name` 和选项标签进行本地化；
+省略时默认使用设备自身的语言。服务器不对响应做缓存清除，因此
+浏览器在更改后可能需要 `?_=<timestamp>` 来重新获取。
 
-Example item:
+示例项：
 
 ```json
 {
@@ -225,20 +221,20 @@ Example item:
 }
 ```
 
-Types:
+类型：
 
-| Type | Extra fields |
-|------|--------------|
-| `toggle` | `value` (`0` or `1`) |
-| `enum` | `value`, `options` |
-| `value` | `value`, `min`, `max`, `step` |
+| 类型 | 附加字段 |
+|------|----------|
+| `toggle` | `value`（`0` 或 `1`） |
+| `enum` | `value`、`options` |
+| `value` | `value`、`min`、`max`、`step` |
 | `string` | `value` |
 
-The font-family setting includes SD-card font families when they are installed.
+字体系列设置在 SD 卡字体族安装后会包含它们。
 
 ### `POST /api/settings`
 
-Applies a partial settings update from a JSON object.
+从 JSON 对象应用部分设置更新。
 
 ```bash
 curl -X POST \
@@ -247,7 +243,7 @@ curl -X POST \
   http://crosspoint.local/api/settings
 ```
 
-Successful response:
+成功响应：
 
 ```text
 Applied 2 setting(s)
@@ -255,36 +251,36 @@ Applied 2 setting(s)
 
 ### `POST /api/settings/reset`
 
-Restores every `settings.json` field to its compile-time factory default and
-saves it. Wi-Fi networks, OPDS servers and cloud credentials live in separate
-stores and are kept. The device UI language also returns to English.
+将 `settings.json` 的每个字段恢复为编译时的出厂默认值并保存。
+Wi-Fi 网络、OPDS 服务器和云凭据存储在单独的存储中，会被保留。
+设备 UI 语言也会恢复为英文。
 
 ```bash
 curl -X POST http://crosspoint.local/api/settings/reset
 ```
 
-Response: `{"ok":true}` (200), or 500 with a plain-text reason if saving failed.
+响应：`{"ok":true}`（200），或保存失败时返回 500 及纯文本原因。
 
 ### `POST /api/reboot`
 
-Reboots the device. The `Rebooting` response is sent first, then the firmware
-restarts after ~0.5 s, so the request may still report a dropped connection.
+重启设备。`Rebooting` 响应会先发送，然后固件在约 0.5 秒后重启，
+因此该请求仍可能报告连接中断。
 
 ```bash
 curl -X POST http://crosspoint.local/api/reboot
 ```
 
-## Font Management API
+## 字体管理 API
 
 ### `GET /api/fonts`
 
-Lists installed SD-card font families.
+列出已安装的 SD 卡字体族。
 
 ```bash
 curl http://crosspoint.local/api/fonts
 ```
 
-Response:
+响应：
 
 ```json
 {
@@ -303,7 +299,7 @@ Response:
 
 ### `POST /api/fonts/upload`
 
-Uploads one `.cpfont` file into a family folder.
+将一个 `.cpfont` 文件上传到字体族文件夹中。
 
 ```bash
 curl -X POST \
@@ -312,10 +308,10 @@ curl -X POST \
   http://crosspoint.local/api/fonts/upload
 ```
 
-The handler validates the family name, `.cpfont` filename, and `CPFONT` magic
-bytes before accepting the file.
+处理程序在接受文件之前会校验字体族名称、`.cpfont` 文件名以及
+`CPFONT` 魔数。
 
-Successful response:
+成功响应：
 
 ```json
 {"ok":true}
@@ -323,7 +319,7 @@ Successful response:
 
 ### `POST /api/fonts/delete`
 
-Deletes an installed font family.
+删除已安装的字体族。
 
 ```bash
 curl -X POST \
@@ -332,23 +328,23 @@ curl -X POST \
   http://crosspoint.local/api/fonts/delete
 ```
 
-Successful response:
+成功响应：
 
 ```json
 {"ok":true}
 ```
 
-## OPDS Server API
+## OPDS 服务器 API
 
 ### `GET /api/opds`
 
-Lists saved OPDS servers. Passwords are never returned.
+列出已保存的 OPDS 服务器。密码永不返回。
 
 ```bash
 curl http://crosspoint.local/api/opds
 ```
 
-Response:
+响应：
 
 ```json
 [
@@ -364,8 +360,8 @@ Response:
 
 ### `POST /api/opds`
 
-Adds or updates an OPDS server. Include `index` to update an existing entry.
-If `password` is omitted during an update, the existing password is preserved.
+添加或更新 OPDS 服务器。包含 `index` 即更新现有条目。
+更新时若省略 `password`，则保留现有密码。
 
 ```bash
 curl -X POST \
@@ -376,7 +372,7 @@ curl -X POST \
 
 ### `POST /api/opds/delete`
 
-Deletes an OPDS server by index.
+按索引删除 OPDS 服务器。
 
 ```bash
 curl -X POST \
@@ -385,17 +381,17 @@ curl -X POST \
   http://crosspoint.local/api/opds/delete
 ```
 
-## Wi-Fi Credential API
+## Wi-Fi 凭据 API
 
 ### `GET /api/wifi`
 
-Lists saved Wi-Fi networks. Passwords are never returned.
+列出已保存的 Wi-Fi 网络。密码永不返回。
 
 ```bash
 curl http://crosspoint.local/api/wifi
 ```
 
-Response:
+响应：
 
 ```json
 [
@@ -410,9 +406,8 @@ Response:
 
 ### `POST /api/wifi`
 
-Adds or updates a saved Wi-Fi network. Include `index` to update an existing
-entry. If `password` is omitted during an update, the existing password is
-preserved.
+添加或更新已保存的 Wi-Fi 网络。包含 `index` 即更新现有条目。
+更新时若省略 `password`，则保留现有密码。
 
 ```bash
 curl -X POST \
@@ -423,7 +418,7 @@ curl -X POST \
 
 ### `POST /api/wifi/delete`
 
-Deletes a saved Wi-Fi network by index.
+按索引删除已保存的 Wi-Fi 网络。
 
 ```bash
 curl -X POST \
@@ -432,18 +427,18 @@ curl -X POST \
   http://crosspoint.local/api/wifi/delete
 ```
 
-## Cloud Services API (NVS)
+## 云服务 API (NVS)
 
 ### `GET /api/cloud`
 
-Returns the OpenClaw gateway config and MiMo speech-to-text config. Secrets are
-never returned — only presence flags `hasToken` / `hasSttKey`.
+返回 OpenClaw 网关配置和 MiMo 语音转文字配置。密钥永不返回 ——
+仅返回存在标志 `hasToken` / `hasSttKey`。
 
 ```bash
 curl http://crosspoint.local/api/cloud
 ```
 
-Response:
+响应：
 
 ```json
 {
@@ -461,8 +456,8 @@ Response:
 
 ### `POST /api/cloud`
 
-Partial update: fields omitted from the body keep their stored NVS values; a
-secret (`token` / `sttKey`) sent as `""` clears it, omitted means unchanged.
+部分更新：请求体中省略的字段保持其存储的 NVS 值；密钥
+（`token` / `sttKey`）发送 `""` 即清除，省略则表示不变。
 
 ```bash
 curl -X POST \
@@ -473,42 +468,42 @@ curl -X POST \
 
 ### `POST /api/openclaw/test`
 
-One-shot WebSocket reachability + handshake probe against the gateway (uses the
-body values, not the saved ones; an omitted `token` falls back to the stored
-one). Does not persist anything. Response JSON: `ok`, `stage`, `detail`, `ms`,
-`url`, `firstFrame` (when the handshake got one) and `requestId` when the
-gateway replies *pairing pending* — the settings page shows the matching
-`openclaw devices approve <id>` command.
+对网关进行一次性的 WebSocket 可达性 + 握手探测（使用请求体中的
+值，而非已保存的值；省略的 `token` 会回退到存储的值）。不会持久化
+任何内容。响应 JSON：`ok`、`stage`、`detail`、`ms`、`url`、
+`firstFrame`（当握手收到一帧时）以及网关回复 *pairing pending* 时的
+`requestId` —— 设置页面会显示对应的
+`openclaw devices approve <id>` 命令。
 
 ### `POST /api/stt/test`
 
-Sends one minimal request to the MiMo STT endpoint with the given `sttKey` /
-`sttUrl` (omitted fields fall back to stored/default). Response JSON: `ok`,
-`accepted` (any non-401/403 status means the key was accepted), `httpStatus`,
-`stage`, `detail`, `ms`.
+使用给定的 `sttKey` / `sttUrl` 向 MiMo STT 端点发送一个最小请求
+（省略的字段回退到存储值/默认值）。响应 JSON：`ok`、
+`accepted`（任何非 401/403 状态都表示密钥被接受）、`httpStatus`、
+`stage`、`detail`、`ms`。
 
-## WebSocket Upload
+## WebSocket 上传
 
-### Port 81
+### 端口 81
 
-The WebSocket path is used for fast binary uploads from the file manager and
-Calibre plugin workflows.
+WebSocket 路径用于来自文件管理器和 Calibre 插件工作流的快速二进制
+上传。
 
-Connection:
+连接：
 
 ```text
 ws://crosspoint.local:81/
 ```
 
-Protocol:
+协议：
 
-1. Client sends text: `START:<filename>:<size>:<path>`
-2. Server replies `READY`
-3. Client sends binary chunks
-4. Server sends `PROGRESS:<received>:<total>` every 64 KB or at completion
-5. Server sends `DONE` when complete or `ERROR:<message>` on failure
+1. 客户端发送文本：`START:<filename>:<size>:<path>`
+2. 服务器回复 `READY`
+3. 客户端发送二进制分块
+4. 服务器每 64 KB 或完成时发送 `PROGRESS:<received>:<total>`
+5. 完成时服务器发送 `DONE`，失败时发送 `ERROR:<message>`
 
-Example session:
+示例会话：
 
 ```text
 Client -> START:mybook.epub:1234567:/Books
@@ -519,64 +514,63 @@ Server -> PROGRESS:65536:1234567
 Server -> DONE
 ```
 
-Error messages include:
+错误消息包括：
 
-| Message | Cause |
-|---------|-------|
-| `ERROR:Upload already in progress` | A second upload was started before the first completed |
-| `ERROR:Invalid START format` | Malformed START message or invalid size token |
-| `ERROR:Failed to create file` | Destination file could not be opened |
-| `ERROR:No upload in progress` | Binary data arrived without a matching START |
-| `ERROR:Upload overflow` | Client sent more bytes than declared |
-| `ERROR:Write failed - disk full?` | SD write failed |
+| 消息 | 原因 |
+|------|------|
+| `ERROR:Upload already in progress` | 第一次上传尚未完成就启动了第二次上传 |
+| `ERROR:Invalid START format` | START 消息格式错误或 size 令牌无效 |
+| `ERROR:Failed to create file` | 无法打开目标文件 |
+| `ERROR:No upload in progress` | 收到二进制数据但没有匹配的 START |
+| `ERROR:Upload overflow` | 客户端发送的字节数超过声明值 |
+| `ERROR:Write failed - disk full?` | SD 写入失败 |
 
-Incomplete WebSocket uploads are deleted on disconnect or error.
+未完成的 WebSocket 上传会在断开连接或出错时被删除。
 
 ## WebDAV
 
-The same HTTP server registers a WebDAV-compatible handler for file manager clients.
+同一 HTTP 服务器为文件管理器客户端注册了 WebDAV 兼容的处理程序。
 
-Supported methods:
+支持的方法：
 
 ```text
 OPTIONS, GET, HEAD, PUT, DELETE, PROPFIND, MKCOL, MOVE, COPY, LOCK, UNLOCK
 ```
 
-Notes:
+注意：
 
-- `PUT` writes to a temporary `.davtmp` file first, then renames it into place.
-- Protected paths are rejected.
-- `LOCK` and `UNLOCK` are accepted for client compatibility only. The server
-  does not implement full WebDAV Class 2 locking semantics such as persistent
-  locks or lock discovery.
+- `PUT` 先写入临时的 `.davtmp` 文件，然后重命名到目标位置。
+- 受保护的路径会被拒绝。
+- `LOCK` 和 `UNLOCK` 仅为客户端兼容性而被接受。服务器未实现完整的
+  WebDAV Class 2 锁定语义，例如持久锁或锁发现。
 
-## UDP Discovery
+## UDP 发现
 
-The server listens on UDP port `8134`. When it receives the text payload
-`hello`, it replies to the sender with:
+服务器监听 UDP 端口 `8134`。当它收到文本负载
+`hello` 时，会向发送方回复：
 
 ```text
 crosspoint (on <hostname>);81
 ```
 
-The final field is the WebSocket upload port.
+最后一个字段是 WebSocket 上传端口。
 
-## Network Modes
+## 网络模式
 
-### Station Mode (STA)
+### 站点模式 (STA)
 
-- Device joins an existing 2.4 GHz Wi-Fi network.
-- `crosspoint.local` is advertised with mDNS when available.
-- `/api/status` returns `"mode": "STA"` and RSSI in dBm.
+- 设备加入现有的 2.4 GHz Wi-Fi 网络。
+- 可用时通过 mDNS 广播 `crosspoint.local`。
+- `/api/status` 返回 `"mode": "STA"` 和 dBm 表示的 RSSI。
 
-### Access Point Mode (AP)
+### 接入点模式 (AP)
 
-- Device creates an open hotspot named `CrossPoint-Reader`.
-- The device shows a Wi-Fi QR code and URL QR code.
-- The fallback IP is typically `192.168.4.1`.
-- `/api/status` returns `"mode": "AP"` and `"rssi": 0`.
+- 设备创建一个名为 `CrossPoint-Reader` 的开放热点。
+- 设备显示 Wi-Fi 二维码和 URL 二维码。
+- 备用 IP 通常为 `192.168.4.1`。
+- `/api/status` 返回 `"mode": "AP"` 和 `"rssi": 0`。
 
-### Calibre Wireless
+### Calibre 无线
 
-Calibre Wireless starts the same web server in STA mode and displays setup
-instructions plus WebSocket upload progress on the device screen.
+Calibre 无线在 STA 模式下启动相同的 web 服务器，并在设备屏幕上
+显示设置说明以及 WebSocket 上传进度。

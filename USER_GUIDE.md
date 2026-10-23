@@ -1,371 +1,371 @@
-# OnePage Reader — User Guide
+# OnePage Reader — 用户指南
 
-Welcome to the **OnePage** firmware (a CrossPoint-based port for the
-self-designed ESP32-C61 reader). This guide outlines the hardware controls,
-navigation, and reading features of the device. Sections marked **OnePage**
-describe this port; everything else is inherited from CrossPoint and applies to
-the upstream X3/X4 hardware as well.
+欢迎使用 **OnePage** 固件（一款基于 CrossPoint、面向自研 ESP32-C61
+阅读器的移植版本）。本指南介绍设备的硬件按键操作、导航方式与阅读
+功能。标注 **OnePage** 的章节说明本移植版本的特性；其余内容继承自
+CrossPoint，同样适用于上游的
+X3/X4 硬件。
 
-- [OnePage Reader — User Guide](#onepage-reader--user-guide)
-  - [1. Hardware Overview](#1-hardware-overview)
-    - [Button Layout](#button-layout)
-  - [2. Power \& Startup](#2-power--startup)
-    - [Power On / Off](#power-on--off)
-    - [First Launch](#first-launch)
-  - [3. Screens](#3-screens)
-    - [3.1 Home Screen](#31-home-screen)
-    - [3.2 Reading Mode](#32-reading-mode)
-    - [3.3 Browse Files Screen](#33-browse-files-screen)
-    - [3.4 Recent Books Screen](#34-recent-books-screen)
-    - [3.5 File Transfer Screen](#35-file-transfer-screen)
-      - [3.5.1 Calibre Wireless Transfers](#351-calibre-wireless-transfers)
-    - [3.6 Settings](#36-settings)
-      - [3.6.1 Display](#361-display)
-      - [3.6.2 Reader](#362-reader)
-      - [3.6.3 Controls](#363-controls)
-      - [3.6.4 System](#364-system)
-      - [3.6.5 OPDS Servers (Multiple Libraries)](#365-opds-servers-multiple-libraries)
-      - [3.6.6 Web Settings (Categories, Wi-Fi, Cloud, OPDS)](#366-web-settings-categories-wi-fi-cloud-opds)
-      - [3.6.7 KOReader Sync Quick Setup](#367-koreader-sync-quick-setup)
-    - [3.7 Sleep Screen](#37-sleep-screen)
-    - [3.8 Custom Fonts (SD Card)](#38-custom-fonts-sd-card)
-    - [3.9 AI Voice Assistant](#39-ai-voice-assistant)
-    - [3.10 Workbench](#310-workbench)
-  - [4. Reading Mode](#4-reading-mode)
-      - [Page Turning](#page-turning)
-      - [Chapter Navigation](#chapter-navigation)
-      - [Auto Page Turn](#auto-page-turn)
-      - [Tilt Page Turn (X3 only)](#tilt-page-turn-x3-only)
-      - [Footnote Navigation](#footnote-navigation)
-      - [System Navigation](#system-navigation)
-      - [Supported Languages](#supported-languages)
-  - [5. Reader Menu](#5-reader-menu)
-      - [5.1 Chapter Selection](#51-chapter-selection)
-      - [5.2 Bookmarks](#52-bookmarks)
-  - [6. Current Limitations & Roadmap](#6-current-limitations--roadmap)
-  - [7. Troubleshooting Issues & Escaping Bootloop](#7-troubleshooting-issues--escaping-bootloop)
+- [OnePage Reader — 用户指南](#onepage-reader--用户指南)
+  - [1. 硬件概述](#1-硬件概述)
+    - [按键布局](#按键布局)
+  - [2. 电源与启动](#2-电源与启动)
+    - [开机 / 关机](#开机--关机)
+    - [首次启动](#首次启动)
+  - [3. 界面](#3-界面)
+    - [3.1 主页](#31-主页)
+    - [3.2 阅读模式](#32-阅读模式)
+    - [3.3 浏览文件界面](#33-浏览文件界面)
+    - [3.4 最近阅读界面](#34-最近阅读界面)
+    - [3.5 文件传输界面](#35-文件传输界面)
+      - [3.5.1 Calibre 无线传输](#351-calibre-无线传输)
+    - [3.6 设置](#36-设置)
+      - [3.6.1 显示](#361-显示)
+      - [3.6.2 阅读](#362-阅读)
+      - [3.6.3 控制](#363-控制)
+      - [3.6.4 系统](#364-系统)
+      - [3.6.5 OPDS 服务器（多库）](#365-opds-服务器多库)
+      - [3.6.6 网页设置（分类、Wi-Fi、云、OPDS）](#366-网页设置分类wi-fi云opds)
+      - [3.6.7 KOReader 同步快速配置](#367-koreader-同步快速配置)
+    - [3.7 睡眠界面](#37-睡眠界面)
+    - [3.8 自定义字体（SD 卡）](#38-自定义字体sd-卡)
+    - [3.9 AI 语音助手](#39-ai-语音助手)
+    - [3.10 工作台](#310-工作台)
+  - [4. 阅读模式](#4-阅读模式)
+      - [翻页](#翻页)
+      - [章节导航](#章节导航)
+      - [自动翻页](#自动翻页)
+      - [倾斜翻页（仅 X3）](#倾斜翻页仅-x3)
+      - [脚注导航](#脚注导航)
+      - [系统导航](#系统导航)
+      - [支持的语言](#支持的语言)
+  - [5. 阅读菜单](#5-阅读菜单)
+      - [5.1 章节选择](#51-章节选择)
+      - [5.2 书签](#52-书签)
+  - [6. 当前限制与路线图](#6-当前限制与路线图)
+  - [7. 问题排查与退出启动循环](#7-问题排查与退出启动循环)
 
-## 1. Hardware Overview
+## 1. 硬件概述
 
-The device is the self-designed **OnePage reader (ESP32-C61)** with four front buttons and a side power button (default roles shown below; all remappable):
+本设备为自研的 **OnePage 阅读器（ESP32-C61）**，正面有四个按键，侧面有一个电源按键（下方为默认功能，全部可重新映射）：
 
-### Button Layout
+### 按键布局
 
-| Location       | Buttons                        |
-| -------------- | ------------------------------ |
-| **Front row**  | **Back**, **Up**, **Down**, **Confirm (Select)** |
-| **Side**       | **Power**                      |
+| 位置           | 按键                                   |
+| -------------- | -------------------------------------- |
+| **正面一排**   | **返回**、**上**、**下**、**确认（选择）** |
+| **侧面**       | **电源**                               |
 
-Button layout can be customized in the **[Controls Settings](#363-controls)**.
+按键布局可在 **[控制设置](#363-控制)** 中自定义。
 
-### Taking a Screenshot
+### 截图
 
-Press the **Power** button and the **Down** button at the same time to take a screenshot; it is saved in the folder `screenshots/`.
+同时按**电源键**和**下键**即可截图，截图保存在 `screenshots/` 文件夹中。
 
-Alternatively, while reading a book, press the **Confirm** button to open the reader menu and select **Take screenshot**.
+也可以在阅读时按**确认键**打开阅读菜单，然后选择**截取屏幕截图**。
 
 ---
 
-## 2. Power & Startup
+## 2. 电源与启动
 
-### Power On / Off
+### 开机 / 关机
 
-To turn the device on or off, **press and hold the Power button for approximately half a second**.
-In the **[Controls Settings](#363-controls)** you can configure the power button to turn the device off with a short press instead of a long one.
+开机或关机时，**长按电源键约半秒**。
+在 **[控制设置](#363-控制)** 中，您可以将电源键设置为短按即可关机，而不必长按。
 
-To reboot the device (for example after a firmware update or if it's frozen), press and release the Reset button, and then quickly press and hold the Power button for a few seconds.
+若要重启设备（例如固件更新后，或设备卡死时），请短按并松开 Reset 键，然后迅速长按电源键数秒。
 
-### First Launch
+### 首次启动
 
-Upon turning the device on for the first time, you will be placed on the **[Home](#31-home-screen)** screen.
+首次开机后，您会进入 **[主页](#31-主页)** 界面。
 
 > [!NOTE]
-> On subsequent restarts, the firmware will automatically reopen the last book you were reading.
+> 此后的每次重启，固件都会自动重新打开您上次阅读的书籍。
 
 ---
 
-## 3. Screens
+## 3. 界面
 
-### 3.1 Home Screen
+### 3.1 主页
 
-The Home screen is the main entry point to the firmware. From top to bottom it offers: **[Reading Mode](#4-reading-mode)** with the most recently read book (shown as a cover card), **[Browse Files](#33-browse-files-screen)**, **[Recent Books](#34-recent-books-screen)**, **[AI Assistant](#39-ai-voice-assistant)**, **[My Workbench](#310-workbench)**, **[File Transfer](#35-file-transfer-screen)**, and **[Settings](#36-settings)**.
+主页是进入固件的主入口。自上而下依次提供：带有最近阅读书籍（以封面卡片形式显示）的**[阅读模式](#4-阅读模式)**、**[浏览文件](#33-浏览文件界面)**、**[最近阅读](#34-最近阅读界面)**、**[AI 助手](#39-ai-语音助手)**、**[我的工作台](#310-工作台)**、**[文件传输](#35-文件传输界面)**以及**[设置](#36-设置)**。
 
-### 3.2 Reading Mode
+### 3.2 阅读模式
 
-See [Reading Mode](#4-reading-mode) below for more information.
+更多信息请参见下文的 [阅读模式](#4-阅读模式)。
 
-### 3.3 Browse Files Screen
+### 3.3 浏览文件界面
 
-The Browse Files screen acts as a file and folder browser. The full path to the current directory is shown at the top of the screen. File extensions are displayed alongside each filename, and directories are shown with brackets (e.g. `[folder-name]`). Hidden directories (those beginning with `.`) are also visible.
+浏览文件界面充当文件与文件夹浏览器。屏幕顶部显示当前目录的完整路径。每个文件名旁会显示文件扩展名，目录则以方括号显示（例如 `[folder-name]`）。隐藏目录（以 `.` 开头的目录）同样可见。
 
-* **Navigate List:** Use **Up** or **Down** to move the selection cursor through folders and books. You can also long-press these buttons to scroll a full page up or down.
-* **Open Selection:** Press **Confirm** to open a folder or start reading a selected book. Selecting a `.bmp` file will open the image viewer.
-* **Delete Files or Folders:** Hold and release **Confirm** to delete the selected file or folder. You will be given an option to either confirm or cancel. Multiple files can be selected for deletion in a single operation.
-* **Rename or Move:** Files can be renamed or moved to a different folder from within the browse screen.
+* **移动列表光标：** 使用**上键**或**下键**在文件夹与书籍之间移动选择光标。也可以长按这些按键，整页向上或向下滚动。
+* **打开所选项目：** 按**确认键**打开文件夹，或开始阅读选中的书籍。选择 `.bmp` 文件会打开图片查看器。
+* **删除文件或文件夹：** 长按并松开**确认键**即可删除所选的文件或文件夹，系统会提示您确认或取消。一次操作中可以同时选中多个文件进行删除。
+* **重命名或移动：** 可以在浏览界面中重命名文件，或将文件移动到其他文件夹。
 
-### 3.4 Recent Books Screen
+### 3.4 最近阅读界面
 
-The Recent Books screen lists the most recently opened books in a chronological view, displaying title and author.
+最近阅读界面按时间顺序列出最近打开的书籍，并显示书名与作者。
 
-### 3.5 File Transfer Screen
+### 3.5 文件传输界面
 
-The File Transfer screen allows you to upload and manage files on the device. When you enter the screen, choose **Join a Network**, **Calibre Wireless**, or **Create Hotspot**. The reader then starts the web server for the selected mode.
+文件传输界面用于上传和管理设备上的文件。进入该界面后，请选择**加入网络**、**Calibre 无线传输**或**创建热点**。阅读器随后会为所选模式启动 Web 服务器。
 
-See the [web server docs](./docs/webserver.md) for more information on how to connect to the web server and upload files.
+有关如何连接 Web 服务器并上传文件的更多信息，请参见 [Web 服务器文档](./docs/webserver.md)。
 
-The web interface also supports **WebDAV**, allowing you to mount the device as a network drive and manage files directly from your computer's file manager.
+Web 界面还支持 **WebDAV**，您可以将设备挂载为网络驱动器，直接通过电脑的文件管理器管理文件。
 
-Download links for files already on the device are available in the web interface, so you can retrieve books or screenshots over Wi-Fi without connecting a cable.
+设备上已有文件的下载链接可在 Web 界面中获取，因此无需连接数据线，即可通过 Wi-Fi 取回书籍或截图。
 
-A **Wi-Fi signal strength indicator** (dBm) is displayed on-screen during joined-network web server sessions.
+在加入网络的 Web 服务器会话期间，屏幕上会显示 **Wi-Fi 信号强度指示**（dBm）。
 
 > [!TIP]
-> Advanced users can also manage files programmatically or via the command line using `curl`. See the [web server docs](./docs/webserver.md) for details.
+> 高级用户也可以使用 `curl`，以编程方式或通过命令行管理文件。详情请参见 [Web 服务器文档](./docs/webserver.md)。
 > [!TIP]
-> If your EPUBs have compatibility issues, you can run the built-in **EPUB Optimizer** directly from the device to clean up and reprocess books for better rendering.
+> 如果您的 EPUB 存在兼容性问题，可以直接在设备上运行内置的 **EPUB 优化器**，对书籍进行清理和重新处理，以获得更好的渲染效果。
 
-### 3.5.1 Calibre Wireless Transfers
+### 3.5.1 Calibre 无线传输
 
-CrossPoint supports sending books from Calibre using the CrossPoint Reader device plugin.
+CrossPoint 支持通过 CrossPoint Reader 设备插件从 Calibre 发送书籍。
 
-#### Installing the Plugin in Calibre
+#### 在 Calibre 中安装插件
 
-If you don't already have the plugin installed:
+如果您尚未安装该插件：
 
-1. Head to https://github.com/crosspoint-reader/calibre-plugins/releases to download the latest version of the crosspoint_reader plugin.
-2. Download the zip file.
-3. Open Calibre → Preferences → Plugins → Load plugin from file → Select the zip file.
-4. Restart Calibre.
+1. 前往 https://github.com/crosspoint-reader/calibre-plugins/releases 下载最新版本的 crosspoint_reader 插件。
+2. 下载 zip 文件。
+3. 打开 Calibre → 首选项 → 插件 → 从文件加载插件 → 选择该 zip 文件。
+4. 重启 Calibre。
 
-#### Configuring the CrossPoint Plugin in Calibre
-1. In Calibre select Preferences.
-2. In the Preferences dialog select Plugins.
-3. In Plugins search for "crosspoint".
-4. Click on "Customize plugin".
-5. Update the value for "Host" to match the IP for your device.
-6. Leave the other settings as they are.
-7. [optional] Modify the "Upload path" to point to a subfolder other than the root "/" folder. Enter this as a path relative to the root folder. Example: `/mybooks`
-8. Restart Calibre.
+#### 在 Calibre 中配置 CrossPoint 插件
+1. 在 Calibre 中选择“首选项”。
+2. 在“首选项”对话框中选择“插件”。
+3. 在插件中搜索 "crosspoint"。
+4. 点击“自定义插件”。
+5. 将 "Host" 的值更新为与您设备一致的 IP 地址。
+6. 其他设置保持不变。
+7. [可选] 修改 "Upload path"，使其指向根目录 "/" 以外的子文件夹。请输入相对于根文件夹的路径，例如：`/mybooks`
+8. 重启 Calibre。
 
 <img width="420" height="385" alt="Image" src="https://github.com/user-attachments/assets/01fc7e33-a9a7-48ba-9e26-2e68d1f9daec" />
 
-#### Uploading Books
+#### 上传书籍
 
-To upload a book using the CrossPoint plugin in Calibre:
+使用 Calibre 中的 CrossPoint 插件上传书籍：
 
-1. On the device: File Transfer -> Calibre Wireless, then join a network.
-2. Select one or more books.
-3. Right-click on that selection.
-4. Select "Send to Device" > "Send to main memory"
+1. 在设备上：文件传输 -> Calibre 无线传输，然后加入网络。
+2. 选择一本或多本书。
+3. 在所选内容上点击右键。
+4. 选择“发送到设备” > “发送到主存储”
 
-The CrossPoint plugin will connect to your device, create a folder for the book's author in the root folder (or the folder you configured for the plugin), then copy the book into that folder.
+CrossPoint 插件会连接到您的设备，在根文件夹（或您为插件配置的文件夹）下为书籍的作者创建一个文件夹，然后把书籍复制到该文件夹中。
 
 <img width="783" height="310" alt="Image" src="https://github.com/user-attachments/assets/741b0909-2e1d-4f16-8af0-2c43fbda5ce6" />
 
-#### Removing a Book
+#### 移除书籍
 
-Books cannot be removed from your device through Calibre. Use the web interface instead.
+无法通过 Calibre 从设备中移除书籍，请改用 Web 界面。
 
-### 3.6 Settings
+### 3.6 设置
 
-The Settings screen allows you to configure the device's behavior. There are a few settings you can adjust:
+设置界面用于配置设备的行为。您可以调整以下几项设置：
 
-#### 3.6.1 Display
+#### 3.6.1 显示
 
-- **Sleep Screen**: Which sleep screen to display when the device sleeps:
+- **睡眠界面**：设备休眠时显示哪一种睡眠画面：
   
-  - "Dark" (default) - The default dark Crosspoint logo sleep screen
-  - "Light" - The same default sleep screen, on a white background
-  - "Custom" - Custom images from the SD card; see [Sleep Screen](#37-sleep-screen) below for more information
-  - "Cover" - The book cover image (Note: this is experimental and may not work as expected)
-  - "None" - A blank screen
-  - "Cover + Custom" - The book cover image while actively reading, falls back to "Custom" behavior otherwise
+  - “深色”（默认）- 默认的深色 CrossPoint 徽标睡眠画面
+  - “浅色”- 同样的默认睡眠画面，改为白色背景
+  - “自定义”- 来自 SD 卡的自定义图片；更多信息请参见下文的[睡眠界面](#37-睡眠界面)
+  - “封面”- 书籍封面图片（注意：这是实验性功能，可能无法按预期工作）
+  - “无”- 空白屏幕
+  - “封面 + 自定义”- 正在阅读时显示书籍封面图片，其他情况下回退为“自定义”的行为
 
-- **Sleep Screen Cover Mode**: How to display the book cover when "Cover" sleep screen is selected:
+- **睡眠界面封面模式**：选择“封面”睡眠界面时，书籍封面的显示方式：
   
-  - "Fit" (default) - Scale the image down to fit centered on the screen, padding with white borders as necessary
-  - "Crop" - Scale the image down and crop as necessary to try to fill the screen (Note: this is experimental and may not work as expected)
+  - “适配”（默认）- 将图片缩小并居中适配屏幕，必要时以白色边框补齐
+  - “裁剪”- 缩小图片并按需裁剪，尽量填满屏幕（注意：这是实验性功能，可能无法按预期工作）
 
-- **Sleep Screen Cover Filter**: What filter will be applied to the book cover when "Cover" sleep screen is selected:
+- **睡眠界面封面滤镜**：选择“封面”睡眠界面时，对书籍封面应用的滤镜：
   
-  - "None" (default) - The cover image will be converted to a grayscale image and displayed as it is
-  - "Contrast" - The image will be displayed as a black & white image without grayscale conversion
-  - "Inverted" - The image will be inverted as in white & black and will be displayed without grayscale conversion
+  - “无”（默认）- 将封面图片转换为灰度图并原样显示
+  - “对比度”- 图片以黑白方式显示，不进行灰度转换
+  - “反色”- 图片以黑白反色方式显示，不进行灰度转换
 
-- **Status Bar**: Configure the status bar displayed while reading:
+- **状态栏**：配置阅读时显示的状态栏：
   
-  - "None" - No status bar
-  - "No Progress" - Show status bar without reading progress
-  - "Full w/ Percentage" - Show status bar with book progress (as percentage)
-  - "Full w/ Book Bar" - Show status bar with book progress (as bar)
-  - "Book Bar Only" - Show book progress (as bar)
-  - "Full w/ Chapter Bar" - Show status bar with chapter progress (as bar)
+  - “无”- 不显示状态栏
+  - “无进度”- 显示状态栏，但不显示阅读进度
+  - “完整（百分比）”- 显示状态栏及书籍进度（百分比形式）
+  - “完整（进度条）”- 显示状态栏及书籍进度（进度条形式）
+  - “仅书籍进度条”- 仅显示书籍进度（进度条形式）
+  - “完整（章节进度条）”- 显示状态栏及章节进度（进度条形式）
 
-- **Hide Battery %**: Configure where to suppress the battery percentage display in the status bar; the battery icon will still be shown:
+- **隐藏电池百分比**：配置在状态栏的哪些位置隐藏电池百分比显示；电池图标仍会显示：
   
-  - "Never" (default) - Always show battery percentage
-  - "In Reader" - Show battery percentage everywhere except in reading mode
-  - "Always" - Always hide battery percentage
+  - “从不”（默认）- 始终显示电池百分比
+  - “阅读时”- 除阅读模式外，其他位置均显示电池百分比
+  - “始终”- 始终隐藏电池百分比
 
-- **Refresh Frequency**: Set how often the screen does a full refresh while reading to reduce ghosting; options are every 1, 5, 10, 15, or 30 pages.
+- **刷新频率**：设置阅读时屏幕进行全刷的频率，以减少残影；可选每 1、5、10、15 或 30 页一次。
 
-- **UI Theme**: Set which UI theme to use:
+- **UI 主题**：选择要使用的 UI 主题：
   
-  - "Classic" - The original Crosspoint theme
-  - "Lyra" - The new theme for Crosspoint featuring rounded elements and menu icons
-  - "Lyra Extended" - Lyra, but displays 3 books instead of 1 on the **[Home Screen](#31-home-screen)**
-  - "RoundedRaff" - A rounded theme with additional visual styling
+  - “经典”- 原有的 CrossPoint 主题
+  - “Lyra”- CrossPoint 的全新主题，采用圆角元素与菜单图标
+  - “Lyra 扩展”- 与 Lyra 相同，但在**[主页](#31-主页)**上显示 3 本书而不是 1 本
+  - “RoundedRaff”- 带有额外视觉样式的圆角主题
 
-- **Sunlight Fading Fix**: Configure whether to enable a software-fix for the issue where white X4 models may fade when used in direct sunlight:
+- **阳光褪色修复**：配置是否启用针对白色款 X4 在阳光直射下可能褪色这一问题的软件修复：
   
-  - "OFF" (default) - Disable the fix
-  - "ON" - Enable the fix
+  - “关闭”（默认）- 禁用该修复
+  - “开启”- 启用该修复
 
 > [!NOTE]
-> A battery charging indicator is shown on the battery icon whenever the device is actively charging.
+> 设备正在充电时，电池图标上会显示充电指示。
 
-#### 3.6.2 Reader
+#### 3.6.2 阅读
 
-- **Reader Font Family**: Choose the font used for reading:
+- **阅读字体族**：选择阅读时使用的字体：
   
-  - "Noto Serif" (default) - Google's serif font
-  - "Noto Sans" - Google's sans-serif font
+  - “Noto Serif”（默认）- Google 的衬线字体
+  - “Noto Sans”- Google 的无衬线字体
 
-- **Reader Font Size**: Adjust the text size for reading; options are "Small", "Medium" (default), "Large", or "X Large".
+- **阅读字号**：调整阅读时的文字大小；可选“小”、“中”（默认）、“大”或“特大”。
 
-- **Reader Line Spacing**: Adjust the spacing between lines; options are "Tight", "Normal" (default), or "Wide".
+- **阅读行距**：调整行与行之间的间距；可选“紧凑”、“标准”（默认）或“宽松”。
 
-- **Reader Screen Margin**: Controls the screen margins in Reading Mode between 5 and 40 pixels in 5-pixel increments.
+- **阅读屏幕边距**：控制阅读模式下的屏幕边距，范围为 5 到 40 像素，以 5 像素为增量。
 
-- **Reader Paragraph Alignment**: Set the alignment of paragraphs; options are "Justified" (default), "Left", "Center", or "Right".
+- **阅读段落对齐**：设置段落的对齐方式；可选“两端对齐”（默认）、“左对齐”、“居中”或“右对齐”。
 
-- **Embedded Style**: Whether to use the EPUB file's embedded HTML and CSS stylisation and formatting; options are "ON" or "OFF".
+- **内嵌样式**：是否使用 EPUB 文件内嵌的 HTML 与 CSS 样式及排版；可选“开启”或“关闭”。
 
-- **Hyphenation**: Whether to hyphenate text in Reading Mode; options are "ON" or "OFF".
+- **断字连字符**：是否在阅读模式中对文本进行连字符断词；可选“开启”或“关闭”。
 
-- **Reading Orientation**: Set the screen orientation for reading EPUB files:
+- **阅读方向**：设置阅读 EPUB 文件时的屏幕方向：
   
-  - "Portrait" (default) - Standard portrait orientation
-  - "Landscape CW" - Landscape, rotated clockwise
-  - "Inverted" - Portrait, upside down
-  - "Landscape CCW" - Landscape, rotated counter-clockwise
+  - “竖屏”（默认）- 标准竖屏方向
+  - “横屏（顺时针）”- 横屏，顺时针旋转
+  - “倒置”- 竖屏，上下颠倒
+  - “横屏（逆时针）”- 横屏，逆时针旋转
 
-- **Extra Paragraph Spacing**: Set how to handle paragraph breaks:
+- **额外段落间距**：设置段落分隔的处理方式：
   
-  - "ON" - Vertical space will be added between paragraphs in Reading Mode
-  - "OFF" - Paragraphs will not have vertical space added, but will have first-line indentation
+  - “开启”- 阅读模式中会在段落之间增加垂直间距
+  - “关闭”- 段落之间不增加垂直间距，但会进行首行缩进
 
-- **Text Anti-Aliasing**: Whether to show smooth grey edges (anti-aliasing) on text in reading mode. Note this slows down page turns slightly.
+- **文字抗锯齿**：是否在阅读模式中为文字显示平滑的灰色边缘（抗锯齿）。请注意，这会让翻页略微变慢。
 
-- **Images**: Whether to display embedded images (JPG/PNG) found in EPUB files; options are "ON" (default) or "OFF".
+- **图片**：是否显示 EPUB 文件中的内嵌图片（JPG/PNG）；可选“开启”（默认）或“关闭”。
 
-- **Focus Reading**: Bolds the first part of each word to create visual fixation points, similar to Bionic Reading. This can help improve reading speed and focus; options are "ON" or "OFF" (default).
+- **聚焦阅读**：将每个单词的前半部分加粗以形成视觉注视点，类似于 Bionic Reading。这有助于提高阅读速度和专注度；可选“开启”或“关闭”（默认）。
 
-#### 3.6.3 Controls
+#### 3.6.3 控制
 
-- **Remap Front Buttons**: A menu for customising the function of each bottom edge button.
+- **重新映射正面按键**：用于自定义底部每个按键功能的菜单。
 
-- **Side Button Layout (reader)**: Swap the order of the up and down volume buttons from "Prev/Next" (default) to "Next/Prev". You can also disable them entirely. This change is only in effect when reading.
+- **侧键布局（阅读）**：将音量键的顺序从“上一个/下一个”（默认）调换为“下一个/上一个”。也可以完全禁用它们。此更改仅在阅读时生效。
 
-- **Long-press Chapter Skip**: Set whether long-pressing page turn buttons skips to the next/previous chapter:
+- **长按跳转章节**：设置长按翻页键是否跳转到下一章/上一章：
   
-  - "Chapter Skip" (default) - Long-pressing skips to next/previous chapter
-  - "Page Scroll" - Long-pressing scrolls a page up/down
-- **Long-press Menu**: Selects the function bound to holding the menu button (Confirm) while reading an EPUB. **Cycles through the available functions** each time the setting is selected — additional functions may be added in future releases, so this is not a binary on/off toggle. A short press of Confirm always opens the reader menu as normal:
-  - "Bookmark" (default) - Hold Confirm (~0.4 second) to drop a bookmark at the current page.
-  - "KOSync" - Hold Confirm (~1 second) to launch KOReader sync directly.
-  - "Disabled" - Long-press is ignored; only short-press opens the reader menu.
+  - “跳转章节”（默认）- 长按跳转到下一章/上一章
+  - “页面滚动”- 长按向上/向下滚动一页
+- **长按菜单**：选择阅读 EPUB 时长按菜单键（确认键）所触发的功能。每次选中该设置时都会**在可用功能之间循环**——后续版本可能会加入更多功能，因此它不是简单的开/关切换。短按确认键始终会像平常一样打开阅读菜单：
+  - “书签”（默认）- 长按确认键（约 0.4 秒）在当前页面添加书签。
+  - “KOSync”- 长按确认键（约 1 秒）直接启动 KOReader 同步。
+  - “已禁用”- 忽略长按；只有短按才会打开阅读菜单。
 
-- **Short Power Button Click**: Controls the effect of a short click of the power button:
+- **电源键短按**：控制电源键短按的效果：
   
-  - "Ignore" (default) - Require a long press to turn off the device
-  - "Sleep" - A short press puts the device into sleep mode
-  - "Page Turn" - A short press in reading mode turns to the next page; a long press turns the device off
-  - "Footnotes" - A short press in reading mode opens the footnotes submenu; if only one footnote is present on the page, the referenced page is opened directly. The short press on the power button can be used to select the footnote in the submenu, and to go back to the original page after finish reading the footnote (like the back button).
-  - "Refresh" - A short press triggers a manual full-screen refresh, useful for clearing ghosting
-- **Quick-return from footnotes**: Toggles on and off the quick return functionality from the footnotes. When the functionality it's active, a short press of the power button will act as the back button from the footnotes page.
+  - “忽略”（默认）- 需要长按才能关闭设备
+  - “休眠”- 短按使设备进入休眠模式
+  - “翻页”- 阅读模式下短按翻到下一页；长按关闭设备
+  - “脚注”- 阅读模式下短按打开脚注子菜单；如果当前页面只有一个脚注，则直接打开所引用的页面。短按电源键还可以用于在子菜单中选择脚注，以及在读完脚注后返回原页面（相当于返回键）。
+  - “刷新”- 短按触发手动全屏刷新，有助于清除残影
+- **脚注快速返回**：开启或关闭从脚注快速返回的功能。该功能生效时，短按电源键将充当脚注页面的返回键。
 
-#### 3.6.4 System
+#### 3.6.4 系统
 
-- **Time to Sleep**: Set the duration of inactivity before the device automatically goes to sleep; options are 1, 3, 5, 10 (default), 15 or 30 minutes.
+- **自动休眠时间**：设置设备在无操作多久后自动休眠；可选 1、3、5、10（默认）、15 或 30 分钟。
 
-- **Wi-Fi Networks**: Connect to Wi-Fi networks for file transfers and firmware updates.
+- **Wi-Fi 网络**：连接 Wi-Fi 网络，用于文件传输和固件更新。
 
-- **KOReader Sync**: Options for setting up KOReader for syncing book progress.
+- **KOReader 同步**：用于设置 KOReader 以同步书籍进度的选项。
 
-- **OPDS Servers**: Manage one or more OPDS [(Open Publication Distribution System)](https://en.wikipedia.org/wiki/Open_Publication_Distribution_System) libraries for browsing and downloading books. See [OPDS Servers (Multiple Libraries)](#365-opds-servers-multiple-libraries) below.
+- **OPDS 服务器**：管理一个或多个 OPDS [(Open Publication Distribution System)](https://en.wikipedia.org/wiki/Open_Publication_Distribution_System) 资源库，用于浏览和下载书籍。请参见下文的 [OPDS 服务器（多库）](#365-opds-服务器多库)。
 
-- **Clear Reading Cache**: Clear the internal SD card cache.
+- **清除阅读缓存**：清除 SD 卡上的内部缓存。
 
-- **Check for updates**: Check for Crosspoint firmware updates over Wi-Fi. Firmware can also be updated without a USB connection by placing a `firmware.bin` file on the SD card.
+- **检查更新**：通过 Wi-Fi 检查 CrossPoint 固件更新。也可以把 `firmware.bin` 文件放到 SD 卡上，在不连接 USB 的情况下更新固件。
 
-- **Language**: Set the UI language. CrossPoint supports 24 languages: English, Spanish, French, German, Czech, Brazilian Portuguese, Russian, Swedish, Romanian, Catalan, Ukrainian, Belarusian, Italian, Polish, Finnish, Danish, Dutch, Turkish, Kazakh, Hungarian, Lithuanian, Slovenian, Valencian, and Hebrew.
+- **语言**：设置界面语言。CrossPoint 支持 24 种语言：英语、西班牙语、法语、德语、捷克语、巴西葡萄牙语、俄语、瑞典语、罗马尼亚语、加泰罗尼亚语、乌克兰语、白俄罗斯语、意大利语、波兰语、芬兰语、丹麦语、荷兰语、土耳其语、哈萨克语、匈牙利语、立陶宛语、斯洛文尼亚语、瓦伦西亚语和希伯来语。
 
-- **Manage Fonts**: Browse, download, and manage custom font families installed from the SD card. See [Custom Fonts (SD Card)](#38-custom-fonts-sd-card) for more information.
+- **字体管理**：浏览、下载并管理从 SD 卡安装的自定义字体族。更多信息请参见 [自定义字体（SD 卡）](#38-自定义字体sd-卡)。
 
-#### 3.6.5 OPDS Servers (Multiple Libraries)
+#### 3.6.5 OPDS 服务器（多库）
 
-CrossPoint supports saving multiple OPDS servers and switching between them when browsing catalogs.
+CrossPoint 支持保存多个 OPDS 服务器，并在浏览目录时在它们之间切换。
 
-1. Open **Settings -> System -> OPDS Servers**.
+1. 打开 **设置 -> 系统 -> OPDS 服务器**。
 
-2. Select **Add Server** to create a new entry, or select an existing server to edit it.
+2. 选择**添加服务器**创建新条目，或选择已有服务器进行编辑。
 
-3. Configure these fields:
+3. 配置以下字段：
    
-   - **Server Name**: Optional display name (for example, "Home Calibre" or "Public Catalog").
+   - **服务器名称**：可选的显示名称（例如 “Home Calibre” 或 “Public Catalog”）。
    
-   - **OPDS Server URL**: Full catalog root URL (for Calibre Content Server, usually ends with `/opds`).
+   - **OPDS 服务器 URL**：完整的目录根 URL（对于 Calibre 内容服务器，通常以 `/opds` 结尾）。
    
-   - **Username / Password**: Optional credentials for authenticated servers.
+   - **用户名 / 密码**：需要身份验证的服务器所使用的可选凭据。
 
-4. Use **Delete Server** inside a server entry to remove it.
+4. 在服务器条目中使用**删除服务器**将其移除。
 
-Behavior notes:
+行为说明：
 
-- You can store up to 8 OPDS servers.
-- OPDS authentication supports HTTP Basic auth. If you use Calibre Content Server with authentication enabled, set it to Basic (not Digest).
+- 最多可保存 8 个 OPDS 服务器。
+- OPDS 身份验证支持 HTTP Basic 认证。如果您使用启用了身份验证的 Calibre 内容服务器，请将其设置为 Basic（而不是 Digest）。
 
-You can also manage OPDS servers from the web interface while in File Transfer mode:
+您也可以在文件传输模式下通过 Web 界面管理 OPDS 服务器：
 
-1. Connect to the device web UI.
-2. Open `http://<device-ip>/settings`.
-3. Use the **OPDS Servers** card to add, edit, or delete entries.
+1. 连接到设备的 Web 界面。
+2. 打开 `http://<device-ip>/settings`。
+3. 使用 **OPDS 服务器**卡片添加、编辑或删除条目。
 
-For web-based Wi-Fi network management, see [Web Settings (Categories, Wi-Fi, Cloud, OPDS)](#366-web-settings-categories-wi-fi-cloud-opds).
+有关基于网页的 Wi-Fi 网络管理，请参见 [网页设置（分类、Wi-Fi、云、OPDS）](#366-网页设置分类wi-fi云opds)。
 
-#### 3.6.6 Web Settings (Categories, Wi-Fi, Cloud, OPDS)
+#### 3.6.6 网页设置（分类、Wi-Fi、云、OPDS）
 
-While in **File Transfer** mode, the web settings page (`/settings`) exposes the full settings form plus management panels, all reachable from a second-level chip bar so the page never becomes one long scroll:
+在**文件传输**模式下，网页设置页面（`/settings`）会提供完整的设置表单以及管理面板，全部可以通过二级标签栏访问，因此页面永远不会变成一条长长的滚动条：
 
-- **Settings categories** — one chip per group (Display, Reader, Controls, System, KOReader Sync, Customise Status Bar; names follow the selected language). Numeric settings with a small range render as sliders with a live value readout.
-- **Wi-Fi Networks** — add, edit, or delete saved network entries (SSID + optional password).
-- **Cloud Services** — OpenClaw gateway card (host, port, path, protocol, TLS, CA file, token), MiMo speech-recognition card (API key, endpoint URL, one-click key test), and an OpenClaw connection test card that surfaces the `openclaw devices approve …` command when the gateway is still waiting for device approval.
-- **OPDS Servers** — add, edit, or delete OPDS catalogs.
+- **设置分类** —— 每个分组一个标签（显示、阅读、控制、系统、KOReader 同步、自定义状态栏；名称随所选语言变化）。取值范围较小的数值设置会渲染为带实时数值显示的滑块。
+- **Wi-Fi 网络** —— 添加、编辑或删除已保存的网络条目（SSID 加可选密码）。
+- **云服务** —— OpenClaw 网关卡片（host、port、path、protocol、TLS、CA 文件、token）、MiMo 语音识别卡片（API key、endpoint URL、一键密钥测试），以及 OpenClaw 连接测试卡片；当网关仍在等待设备批准时，该卡片会显示 `openclaw devices approve …` 命令。
+- **OPDS 服务器** —— 添加、编辑或删除 OPDS 目录。
 
-Action bar under the panels:
+面板下方的操作栏：
 
-- **Save Settings** — applies the changed values (shown on the settings-category chips; the other panels save per card).
-- **Reset Defaults** — restores every `settings.json` field to its factory default after a confirmation; Wi-Fi, OPDS and cloud credentials are kept.
-- **Reboot Device** — restarts the reader over the web server after a confirmation.
+- **保存设置** —— 应用已更改的值（显示在设置分类标签上；其他面板按卡片分别保存）。
+- **恢复默认** —— 经确认后，将 `settings.json` 中的每个字段恢复为出厂默认值；Wi-Fi、OPDS 和云服务凭据会保留。
+- **重启设备** —— 经确认后，通过 Web 服务器重启阅读器。
 
-The page header has a **中文 / EN** switch; the whole UI (labels, settings list, help lines) flips language, and the settings list is refetched in the chosen language.
+页面顶部提供 **中文 / EN** 切换；整个界面（标签、设置列表、帮助说明）都会随之切换语言，设置列表也会以所选语言重新获取。
 
-Behavior notes:
+行为说明：
 
-- Passwords and API tokens are never shown back in the web UI after saving; the fields only report whether a value is stored.
-- Leaving a password/token field blank while editing keeps the existing stored value unchanged.
-- Configuration help is distributed: each panel ends with a short hint line describing exactly the settings it contains.
-- The web UI can save hidden-network SSIDs, but connecting to hidden networks still depends on the device-side Wi-Fi connection flow.
+- 密码和 API 令牌保存后不会在 Web 界面中回显；字段只会报告是否已存储了某个值。
+- 编辑时将密码/令牌字段留空，会保持已存储的值不变。
+- 配置帮助是分散的：每个面板的末尾都有一行简短提示，准确说明它所包含的设置。
+- Web 界面可以保存隐藏网络的 SSID，但连接隐藏网络仍取决于设备端的 Wi-Fi 连接流程。
 
-#### 3.6.7 KOReader Sync Quick Setup
+#### 3.6.7 KOReader 同步快速配置
 
-CrossPoint can sync reading progress with KOReader-compatible sync servers.
-It also interoperates with KOReader apps/devices when they use the same server and credentials.
+CrossPoint 可以与兼容 KOReader 的同步服务器同步阅读进度。
+当 KOReader 应用/设备使用相同的服务器和凭据时，两者还可以互操作。
 
-##### Option A: Free Public Server (`sync.koreader.rocks`)
+##### 方案 A：免费公共服务器（`sync.koreader.rocks`）
 
-1. Register a user once (only if needed):
+1. 注册一个用户（仅在需要时执行一次）：
 
 ```bash
 USERNAME="user"
@@ -378,29 +378,29 @@ curl -i "https://sync.koreader.rocks/users/create" \
   --data "{\"username\":\"$USERNAME\",\"password\":\"$PASSWORD_MD5\"}"
 ```
 
-Already have KOReader Sync credentials? Skip registration; basic sync only requires using the same existing username/password on all devices.
+已经拥有 KOReader Sync 凭据？跳过注册即可；基本同步只需要在所有设备上使用相同的既有用户名/密码。
 
-When this returns `HTTP 402` with `{"code":2002,"message":"Username is already registered."}`, pick a different username or use that existing account.
+如果返回 `HTTP 402` 以及 `{"code":2002,"message":"Username is already registered."}`，请换一个用户名，或使用该既有账户。
 
-2. On each CrossPoint device:
+2. 在每台 CrossPoint 设备上：
    
-   - Go to **Settings -> System -> KOReader Sync**.
+   - 进入 **设置 -> 系统 -> KOReader 同步**。
    
-   - Set **Username** and **Password** (enter the plain password; CrossPoint computes MD5 internally, and use the same values on all devices).
+   - 设置**用户名**和**密码**（输入明文密码；CrossPoint 会在内部计算 MD5，并在所有设备上使用相同的值）。
    
-   - Set **Sync Server URL** to `https://sync.koreader.rocks`, or leave it empty (both use the same default KOReader sync server).
+   - 将**同步服务器 URL** 设置为 `https://sync.koreader.rocks`，或留空（两者使用的是同一个默认 KOReader 同步服务器）。
    
-   - Run **Authenticate**.
+   - 执行**身份验证**。
 
-3. While reading, press **Confirm** to open the reader menu, then select **Sync Progress**.
+3. 阅读时按**确认键**打开阅读菜单，然后选择**同步进度**。
    
-   - Choose **Apply Remote** to jump to remote progress.
+   - 选择**应用远程进度**即可跳转到远程进度。
    
-   - Choose **Upload Local** to push current progress.
+   - 选择**上传本地进度**即可推送当前进度。
 
-##### Option B: Self-Hosted Server (Docker Compose)
+##### 方案 B：自建服务器（Docker Compose）
 
-1. Start a sync server:
+1. 启动同步服务器：
 
 ```bash
 mkdir -p kosync-quickstart
@@ -428,23 +428,23 @@ podman compose up -d
 ```
 
 > [!NOTE]
-> `ENABLE_USER_REGISTRATION=true` is convenient for first setup. After creating your users, set it to `false` (or remove it) to avoid unexpected registrations.
+> `ENABLE_USER_REGISTRATION=true` 便于首次配置。创建好用户后，请将其设为 `false`（或移除该项），以避免出现意料之外的注册。
 
-2. Verify the server:
+2. 验证服务器：
 
 ```bash
 curl -H "Accept: application/vnd.koreader.v1+json" "http://<server-ip>:17200/healthcheck"
 # Expected: {"state":"OK"}
 ```
 
-3. Register a user once.
-   CrossPoint authenticates against KOReader Sync (`koreader/kosync`) using an MD5 key, so register using the MD5 of your password:
+3. 注册一个用户（只需一次）。
+   CrossPoint 使用 MD5 密钥向 KOReader Sync（`koreader/kosync`）进行身份验证，因此请使用您密码的 MD5 值来注册：
 
 > [!WARNING]
-> Sending a reusable MD5-derived password over plain HTTP is insecure.
-> Create unique sync-only credentials and do not reuse main account passwords.
-> Prefer `https://<server-ip>:7200` whenever traffic leaves a fully trusted LAN or when using untrusted networks.
-> Use `curl -k` only for self-signed certificate testing.
+> 通过明文 HTTP 发送可重复使用的 MD5 派生密码并不安全。
+> 请创建专用的同步凭据，不要重复使用主账户密码。
+> 只要流量会离开完全可信的局域网，或正在使用不受信任的网络，请优先使用 `https://<server-ip>:7200`。
+> `curl -k` 仅用于测试自签名证书。
 
 ```bash
 USERNAME="user"
@@ -457,225 +457,225 @@ curl -i "http://<server-ip>:17200/users/create" \
   --data "{\"username\":\"$USERNAME\",\"password\":\"$PASSWORD_MD5\"}"
 ```
 
-If this returns `HTTP 402` with `{"code":2002,"message":"Username is already registered."}`, the account already exists.
+如果返回 `HTTP 402` 以及 `{"code":2002,"message":"Username is already registered."}`，说明该账户已经存在。
 
-4. On each CrossPoint device:
+4. 在每台 CrossPoint 设备上：
    
-   - Go to **Settings -> System -> KOReader Sync**.
+   - 进入 **设置 -> 系统 -> KOReader 同步**。
    
-   - Set **Username** and **Password** (enter the plain password; CrossPoint computes MD5 internally, and use the same values on all devices).
+   - 设置**用户名**和**密码**（输入明文密码；CrossPoint 会在内部计算 MD5，并在所有设备上使用相同的值）。
    
-   - Set **Sync Server URL** to `http://<server-ip>:17200`.
+   - 将**同步服务器 URL** 设置为 `http://<server-ip>:17200`。
    
-   - Run **Authenticate**.
+   - 执行**身份验证**。
 
-If you use the HTTPS listener, use `https://<server-ip>:7200` (`curl -k` only for self-signed certificate testing).
+如果使用 HTTPS 监听器，请使用 `https://<server-ip>:7200`（`curl -k` 仅用于测试自签名证书）。
 
-5. While reading, press **Confirm** to open the reader menu, then select **Sync Progress**.
+5. 阅读时按**确认键**打开阅读菜单，然后选择**同步进度**。
    
-   - Choose **Apply Remote** to jump to remote progress.
+   - 选择**应用远程进度**即可跳转到远程进度。
    
-   - Choose **Upload Local** to push current progress.
+   - 选择**上传本地进度**即可推送当前进度。
 
-### 3.7 Sleep Screen
+### 3.7 睡眠界面
 
-The **Sleep Screen** setting controls what is displayed when the device goes to sleep:
+**睡眠界面**设置控制设备休眠时显示的内容：
 
-| Mode               | Behavior                                                                                                                     |
+| 模式               | 行为                                                                                                                     |
 | ------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
-| **Dark** (default) | The CrossPoint logo on a dark background.                                                                                    |
-| **Light**          | The CrossPoint logo on a white background.                                                                                   |
-| **Custom**         | A custom image from the SD card (see below). Falls back to **Dark** if no custom image is found.                             |
-| **Cover**          | The cover of the currently open book. Falls back to **Dark** if no book is open.                                             |
-| **Cover + Custom** | The cover of the currently open book, shown only while actively reading. Falls back to **Custom** behavior when not reading. |
-| **None**           | A blank screen.                                                                                                              |
+| **深色**（默认） | 深色背景上的 CrossPoint 徽标。                                                                                    |
+| **浅色**          | 白色背景上的 CrossPoint 徽标。                                                                                   |
+| **自定义**         | 来自 SD 卡的自定义图片（见下文）。若未找到自定义图片，则回退为**深色**。                             |
+| **封面**          | 当前打开书籍的封面。若没有打开任何书籍，则回退为**深色**。                                             |
+| **封面 + 自定义** | 当前打开书籍的封面，仅在阅读过程中显示；不在阅读时回退为**自定义**的行为。 |
+| **无**           | 空白屏幕。                                                                                                              |
 
-#### Cover settings
+#### 封面设置
 
-When using **Cover** or **Cover + Custom**, two additional settings apply:
+使用**封面**或**封面 + 自定义**时，还有两项额外设置会生效：
 
-- **Sleep Screen Cover Mode**: **Fit** (scale to fit, white borders) or **Crop** (scale and crop to fill the screen).
-- **Sleep Screen Cover Filter**: **None** (grayscale), **Contrast** (black & white), or **Inverted** (inverted black & white).
+- **睡眠界面封面模式**：**适配**（缩放至适配，白色边框）或**裁剪**（缩放并裁剪以填满屏幕）。
+- **睡眠界面封面滤镜**：**无**（灰度）、**对比度**（黑白）或**反色**（黑白反色）。
 
-#### Custom images
+#### 自定义图片
 
-To use custom sleep images, set the sleep screen mode to **Custom** or **Cover + Custom**, then place images on the SD card:
+要使用自定义睡眠图片，请将睡眠界面模式设置为**自定义**或**封面 + 自定义**，然后把图片放到 SD 卡上：
 
-- **Multiple Images (recommended):** Create a `.sleep` directory in the root of the SD card and place any number of `.bmp` images inside. One will be randomly selected each time the device sleeps. (A directory named `sleep` is also accepted as a fallback.)
-- **Single Image:** Place a file named `sleep.bmp` in the root directory. This is used as a fallback if no valid images are found in the `.sleep`/`sleep` directory.
+- **多张图片（推荐）：** 在 SD 卡根目录下创建 `.sleep` 目录，并在其中放入任意数量的 `.bmp` 图片。设备每次休眠时会随机选择一张。（也接受名为 `sleep` 的目录作为回退。）
+- **单张图片：** 在根目录下放置名为 `sleep.bmp` 的文件。如果在 `.sleep`/`sleep` 目录中未找到有效图片，则以此作为回退。
 
 > [!TIP]
-> For best results:
+> 为获得最佳效果：
 > 
-> - Use uncompressed BMP files with 24-bit color depth
-> - OnePage: use a resolution of 480x800 pixels to match the device's portrait screen (the panel framebuffer is 800x480 and the UI renders rotated)
-> - X4: Use a resolution of 480x800 pixels to match the device's screen resolution.
-> - X3: Use a resolution of 528x792 pixels to match the device's screen resolution.
+> - 使用 24 位色深的未压缩 BMP 文件
+> - OnePage：使用 480x800 像素的分辨率，以匹配设备的竖屏方向（面板帧缓冲为 800x480，UI 以旋转后的方向渲染）
+> - X4：使用 480x800 像素的分辨率，以匹配设备的屏幕分辨率。
+> - X3：使用 528x792 像素的分辨率，以匹配设备的屏幕分辨率。
 
 > [!TIP]
-> You can set an image as the sleep screen cover directly from the BMP image viewer in the **[Browse Files](#33-browse-files-screen)** screen.
+> 可以在**[浏览文件](#33-浏览文件界面)**界面的 BMP 图片查看器中，直接把图片设为睡眠界面封面。
 
 ---
 
-### 3.8 Custom Fonts (SD Card)
+### 3.8 自定义字体（SD 卡）
 
-CrossPoint supports loading additional fonts from the SD card, extending beyond the two built-in families (Noto Serif, Noto Sans). Custom fonts can include extended Unicode coverage, enabling CJK (Chinese, Japanese, Korean) and other scripts.
+CrossPoint 支持从 SD 卡加载更多字体，超出内置的两个字体族（Noto Serif、Noto Sans）。自定义字体可以包含更完整的 Unicode 覆盖，从而支持 CJK（中文、日文、韩文）等文字。
 
-There are three ways to install fonts:
+安装字体有三种方式：
 
-1. **Download from device (recommended):** Go to **Settings -> System -> Manage Fonts**, browse the available font families, and select one to download over Wi-Fi.
-2. **Upload via web interface:** While in **File Transfer** mode, open the web UI in a browser and navigate to the **Fonts** tab to upload `.cpfont` files.
-3. **Manual SD card copy:** Download font files from the [crosspoint-fonts repository](https://github.com/crosspoint-reader/crosspoint-fonts) and copy them to `/.fonts/` (preferred) or `/fonts/` on your SD card.
+1. **从设备下载（推荐）：** 进入 **设置 -> 系统 -> 字体管理**，浏览可用的字体族，并选择一个通过 Wi-Fi 下载。
+2. **通过 Web 界面上传：** 在**文件传输**模式下，用浏览器打开 Web 界面，进入 **字体** 标签页上传 `.cpfont` 文件。
+3. **手动复制到 SD 卡：** 从 [crosspoint-fonts 仓库](https://github.com/crosspoint-reader/crosspoint-fonts) 下载字体文件，并复制到 SD 卡的 `/.fonts/`（推荐）或 `/fonts/` 目录。
 
-Once installed, custom fonts appear in **Settings → Reader → Font Family** alongside the built-in fonts.
+安装后，自定义字体会与内置字体一起出现在 **设置 → 阅读 → 字体族** 中。
 
-See [docs/sd-card-fonts.md](./docs/sd-card-fonts.md) for full installation details and SD card folder structure.
+完整的安装细节和 SD 卡目录结构请参见 [docs/sd-card-fonts.md](./docs/sd-card-fonts.md)。
 
-### 3.9 AI Voice Assistant
+### 3.9 AI 语音助手
 
-The AI Assistant screen turns the reader into a microphone-and-chat client for your self-hosted **OpenClaw** gateway:
+AI 助手界面把阅读器变成麦克风与聊天客户端，配合您自建的 **OpenClaw** 网关使用：
 
-1. Configure the gateway and the MiMo speech-to-text key on the web UI (**Settings → Cloud Services**, see [3.6.6](#366-web-settings-categories-wi-fi-cloud-opds)) and make sure the device is approved by the gateway.
-2. From Home, open **AI Assistant**.
-3. Press **Confirm** to record; the transcript is sent to the gateway and the answer is rendered on screen. The **Send mode** setting (manual / auto) decides whether Confirm is needed after the transcript arrives.
-4. Chat history is kept on the device; scroll with **Up** / **Down**, exit with **Back**.
+1. 在 Web 界面上配置网关和 MiMo 语音转文字密钥（**设置 → 云服务**，参见 [3.6.6](#366-网页设置分类wi-fi云opds)），并确保设备已被网关批准。
+2. 从主页打开 **AI 助手**。
+3. 按**确认键**开始录音；转写文本会发送到网关，回答会渲染在屏幕上。**发送模式**设置（手动 / 自动）决定转写文本到达后是否还需要按确认键。
+4. 聊天记录保存在设备上；使用**上键** / **下键**滚动，按**返回键**退出。
 
-### 3.10 Workbench
+### 3.10 工作台
 
-**My Workbench** is a dashboard of cards synced from the configured OpenClaw gateway: **Todos** (with add and today/tomorrow grouping), **Now Reading** (current book and progress), **Weather**, and gateway status (running / idle, uptime). Switch cards with **Left** / **Right**, trigger a refresh with **Sync**.
+**我的工作台**是一个卡片仪表盘，展示从已配置的 OpenClaw 网关同步而来的内容：**待办事项**（支持添加以及今天/明天分组）、**正在阅读**（当前书籍与进度）、**天气**，以及网关状态（运行中 / 空闲、运行时长）。使用**左** / **右**切换卡片，按**同步**触发刷新。
 
 ---
 
-## 4. Reading Mode
+## 4. 阅读模式
 
-Once you have opened a book, the button layout changes to facilitate reading.
+打开书籍后，按键布局会切换为便于阅读的形式。
 
-> **OnePage note:** the tables below use the *logical* roles (Left / Right / Confirm / Back). On the OnePage device the Left/Right roles are bound to the front **Up** / **Down** buttons by default and can be remapped in **[Controls Settings](#363-controls)**.
+> **OnePage 说明：** 下表使用*逻辑*角色（左 / 右 / 确认 / 返回）。在 OnePage 设备上，左/右角色默认绑定到正面的**上键** / **下键**，并可在 **[控制设置](#363-控制)** 中重新映射。
 
-### Page Turning
+### 翻页
 
-| Action            | Buttons                              |
+| 操作            | 按键                              |
 | ----------------- | ------------------------------------ |
-| **Previous Page** | Press **Left**                       |
-| **Next Page**     | Press **Right**                      |
+| **上一页** | 按**左**                       |
+| **下一页**     | 按**右**                      |
 
-The role of the volume (side) buttons can be swapped in the **[Controls Settings](#363-controls)**.
+音量（侧面）按键的顺序可以在 **[控制设置](#363-控制)** 中调换。
 
-If the **Short Power Button Click** setting is set to "Page Turn", you can also turn to the next page by briefly pressing the Power button.
+如果**电源键短按**设置为“翻页”，您也可以通过短按电源键翻到下一页。
 
-### Chapter Navigation
+### 章节导航
 
-* **Next Chapter:** Press and **hold** the **Right** (or **Volume Down**) button briefly, then release.
-* **Previous Chapter:** Press and **hold** the **Left** (or **Volume Up**) button briefly, then release.
+* **下一章：** 按住**右**键（或**音量减**键）片刻后松开。
+* **上一章：** 按住**左**键（或**音量加**键）片刻后松开。
 
-This feature can be disabled in the **[Controls Settings](#363-controls)** to help avoid changing chapters by mistake.
+可以在 **[控制设置](#363-控制)** 中禁用此功能，以避免误操作切换章节。
 
-### Auto Page Turn
+### 自动翻页
 
-Auto Page Turn automatically advances pages at a set interval, useful for hands-free reading. This feature can be enabled and configured from the **[Reader Menu](#5-reader-menu)** while reading an EPUB.
+自动翻页会按设定的时间间隔自动翻页，便于免去手动翻页。阅读 EPUB 时，可以在 **[阅读菜单](#5-阅读菜单)** 中启用并配置此功能。
 
-### Tilt Page Turn (X3 only)
+### 倾斜翻页（仅 X3）
 
-On the **Xteink X3**, the gyroscope can be used to turn pages by tilting the
-device. This feature is available in the Controls settings.
+在 **Xteink X3** 上，可以通过倾斜设备、利用陀螺仪来翻页。该功能位于
+控制设置中。
 
-> **OnePage:** not available — this board has no IMU, so the sensor is never
-> initialised and the option has no effect.
+> **OnePage：** 不可用 —— 该主板没有 IMU，因此传感器永远不会被
+> 初始化，该选项也不会产生任何效果。
 
-### Footnote Navigation
+### 脚注导航
 
-When reading an EPUB that contains footnotes, you can navigate to the footnote text by selecting the footnote reference in the book. From the footnote, you can return to your original reading position.
+阅读包含脚注的 EPUB 时，可以通过选中书中的脚注引用来跳转到脚注正文。从脚注处可以返回原来的阅读位置。
 
-If the device goes to sleep or you close the book while viewing a footnote, the book reopens to your original reading position, not the footnote.
+如果在查看脚注时设备休眠或您关闭了书籍，重新打开书籍时会回到原来的阅读位置，而不是脚注处。
 
-### System Navigation
+### 系统导航
 
-* **Return to Home:** Press the **Back** button to close the book and return to the **[Home](#31-home-screen)** screen.
-* **Return to Browse Files:** Press and hold the **Back** button to close the book and return to the **[Browse Files](#33-browse-files-screen)** screen.
-* **Reader Menu:** Press **Confirm** to open the **[Reader Menu](#5-reader-menu)**, which includes chapter navigation, reading options, and more.
-* **Long-press Confirm (configurable):** Holding **Confirm** runs the function chosen by the **Long-press Menu** setting in **[Controls Settings](#363-controls)** — "Bookmark" (default) drops a bookmark, "KOSync" launches KOReader Sync, "Disabled" does nothing. A short press always opens the Reader Menu.
+* **返回主页：** 按**返回键**关闭书籍并回到 **[主页](#31-主页)** 界面。
+* **返回浏览文件：** 按住**返回键**关闭书籍并回到 **[浏览文件](#33-浏览文件界面)** 界面。
+* **阅读菜单：** 按**确认键**打开 **[阅读菜单](#5-阅读菜单)**，其中包含章节导航、阅读选项等内容。
+* **长按确认键（可配置）：** 按住**确认键**会执行 **[控制设置](#363-控制)** 中**长按菜单**设置所选的功能 —— “书签”（默认）添加书签，“KOSync”启动 KOReader 同步，“已禁用”则不执行任何操作。短按始终会打开阅读菜单。
 
-### Supported Languages
+### 支持的语言
 
-CrossPoint renders text using the following Unicode character blocks, enabling support for a wide range of languages:
+CrossPoint 使用以下 Unicode 字符块渲染文本，从而支持多种语言：
 
-* **Latin Script (Basic, Supplement, Extended-A/B):** Covers English, German, French, Spanish, Portuguese, Italian, Dutch, Swedish, Norwegian, Danish, Finnish, Polish, Czech, Hungarian, Romanian, Slovak, Slovenian, Turkish, Catalan, and others.
-* **Cyrillic Script (Standard and Extended):** Covers Russian, Ukrainian, Belarusian, Bulgarian, Serbian, Macedonian, Kazakh, Kyrgyz, Mongolian, and others.
-* **Vietnamese:** Supported via extended Latin glyph coverage in the built-in reader fonts.
+* **拉丁文字（基本区、补充区、扩展 A/B）：** 覆盖英语、德语、法语、西班牙语、葡萄牙语、意大利语、荷兰语、瑞典语、挪威语、丹麦语、芬兰语、波兰语、捷克语、匈牙利语、罗马尼亚语、斯洛伐克语、斯洛文尼亚语、土耳其语、加泰罗尼亚语等。
+* **西里尔文字（标准与扩展）：** 覆盖俄语、乌克兰语、白俄罗斯语、保加利亚语、塞尔维亚语、马其顿语、哈萨克语、吉尔吉斯语、蒙古语等。
+* **越南语：** 通过内置阅读字体中扩展的拉丁字形提供支持。
 
-What is not supported with built-in reader fonts: Chinese, Japanese, Korean, Arabic, Greek, Hebrew, and Farsi. However, **CJK, Hebrew, Greek, and other extended scripts can be enabled by installing custom SD card fonts** — see [Custom Fonts (SD Card)](#38-custom-fonts-sd-card).
-
----
-
-## 5. Reader Menu
-
-Press **Confirm** while reading to open the Reader Menu. From here you can access reading utilities and navigation options without leaving the book.
-
-Available options include:
-
-- **Select Chapter** – Open the table of contents to jump to a specific chapter (see [Chapter Selection](#51-chapter-selection) below).
-- **Footnotes** – Navigate to the footnotes for the current section *(only shown in books that contain footnotes)*.
-- **Reading Orientation** – Cycle through screen orientations without leaving the reader.
-- **Auto Turn (Pages Per Minute)** – Cycle through automatic page turn speed options for hands-free reading.
-- **Go to %** – Jump to a specific position in the book by percentage.
-- **Take screenshot** – Save a screenshot of the current page to the `screenshots/` folder.
-- **Show page as QR** – Display a QR code encoding the current reading position.
-- **Go Home** – Close the book and return to the Home screen.
-- **Sync Progress** – Push or pull reading progress with a KOReader sync server (see [KOReader Sync Quick Setup](#367-koreader-sync-quick-setup)).
-- **Delete Book Cache** – Clear the cached layout data for the current book, forcing a re-index on next open.
-
-Press **Back** at any time to close the menu and return to your current page.
-
-### 5.1 Chapter Selection
-
-Accessible by selecting **Chapters** from the Reader Menu.
-
-1. Use **Left** (or **Volume Up**), or **Right** (or **Volume Down**) to highlight the desired chapter.
-2. Press **Confirm** to jump to that chapter.
-3. *Alternatively, press **Back** to cancel and return to your current page.*
+内置阅读字体不支持：中文、日文、韩文、阿拉伯语、希腊语、希伯来语和波斯语。不过，**通过安装 SD 卡自定义字体可以启用 CJK、希伯来语、希腊语及其他扩展文字** —— 参见 [自定义字体（SD 卡）](#38-自定义字体sd-卡)。
 
 ---
 
-### 5.2 Bookmarks
+## 5. 阅读菜单
 
-Bookmarks can be created to quickly save and restore your place in a book.
+阅读时按**确认键**可打开阅读菜单。在这里，您可以不离开书籍，直接使用阅读工具和导航选项。
 
-To create a bookmark, hold **Confirm** for about half a second while inside a book. A popup will appear letting you know a bookmark was created. The popup message will automatically disappear in a couple of seconds.
+可用选项包括：
 
-To open bookmarks, press **Confirm** while inside a book. Then navigate to the **Bookmarks** menu. Bookmarks can be opened by navigating to them and pressing **Confirm**, which will redirect you to that place in the book. You can delete bookmarks by holding **Confirm** for about 0.7 seconds, and then pressing **Confirm** again to confirm deletion, or **Back** to cancel.
+- **选择章节** – 打开目录并跳转到指定章节（参见下文的 [章节选择](#51-章节选择)）。
+- **脚注** – 跳转到当前小节的脚注*（仅在包含脚注的书籍中显示）*。
+- **阅读方向** – 不离开阅读器即可循环切换屏幕方向。
+- **自动翻页（每分钟页数）** – 循环切换自动翻页速度选项，实现免手动阅读。
+- **跳转到 %** – 按百分比跳转到书籍中的指定位置。
+- **截取屏幕截图** – 把当前页面的截图保存到 `screenshots/` 文件夹。
+- **将页面显示为二维码** – 显示编码当前阅读位置的二维码。
+- **回到主页** – 关闭书籍并回到主页界面。
+- **同步进度** – 与 KOReader 同步服务器推送或拉取阅读进度（参见 [KOReader 同步快速配置](#367-koreader-同步快速配置)）。
+- **删除书籍缓存** – 清除当前书籍已缓存的排版数据，下次打开时强制重新建立索引。
 
-Bookmarks are stored in the `.crosspoint/bookmarks` folder in the JSON format.
+随时按**返回键**可关闭菜单并回到当前页面。
 
-## 6. Current Limitations & Roadmap
+### 5.1 章节选择
 
-Please note that this firmware is currently in active development. The following features are **not yet supported** but are planned for future updates:
+通过在阅读菜单中选择**章节**进入。
 
-* **Cover Images:** Large cover images embedded into EPUBs require several seconds (~10s for ~2000 pixel tall image) to convert for sleep screen and home screen thumbnail. Consider optimizing the EPUB with e.g. https://github.com/bigbag/epub-to-xtc-converter to speed this up.
-* **Unsupported Image Formats:** Most JPG and PNG images in EPUBs render correctly. GIFs and progressive JPEGs are not supported and will fall back to an `[Image]` placeholder.
-* **Dictionary Lookup:** Inline word lookup is not yet implemented.
-
-OnePage-specific limitations in this port:
-
-* **OTA updates:** **Settings → System → Check for updates** still queries the *upstream* CrossPoint releases, whose `firmware.bin` is an ESP32-C3 image. Do not use it on OnePage — update by flashing over USB (see the [README](./README.md#install-firmware)).
-* **Tilt page turn:** the OnePage board has no IMU, so the gesture is unavailable; the option only appears on upstream X3 hardware.
-* **`crosspoint.local`:** mDNS is not compiled into the C61 build, so the web UI is reachable only by the IP address printed on screen.
-* **Web UI has no authentication:** anyone on the same network can read and write the SD card while File Transfer is running.
+1. 使用**左**（或**音量加**），或**右**（或**音量减**）高亮想要的章节。
+2. 按**确认键**跳转到该章节。
+3. *也可以按**返回键**取消并回到当前页面。*
 
 ---
 
-## 7. Troubleshooting Issues & Escaping Bootloop
+### 5.2 书签
 
-If an issue or crash is encountered while using Crosspoint, feel free to raise an issue ticket and attach the logs.
+可以创建书签，以便快速保存和恢复您在书籍中的位置。
 
-**Crash reports on SD card:** After a crash, CrossPoint automatically saves a crash report to the SD card (no USB connection needed). Check the root of the SD card for a crash log file and include it with any bug report.
+在书籍中时，长按**确认键**约半秒即可创建书签。屏幕上会弹出提示，告知您书签已创建，弹窗会在几秒钟后自动消失。
 
-**Serial monitor logs:** For more detailed debugging, connect the device to a computer and run the custom debugging monitor script (requires Python 3 with `pyserial`, `colorama`, and `matplotlib`; install via `pip3 install pyserial colorama matplotlib`):
+要打开书签，在书籍中按**确认键**，然后进入**书签**菜单。移动到某个书签并按**确认键**即可打开，页面会跳转到书中的相应位置。删除书签时，长按**确认键**约 0.7 秒，然后再次按**确认键**确认删除，或按**返回键**取消。
+
+书签以 JSON 格式存储在 SD 卡的 `.crosspoint/bookmarks` 文件夹中。
+
+## 6. 当前限制与路线图
+
+请注意，本固件目前仍在积极开发中。以下功能**尚未支持**，但已列入后续更新的计划：
+
+* **封面图片：** EPUB 中内嵌的大尺寸封面图片需要数秒（约 2000 像素高的图片约 10 秒）才能转换为睡眠界面和主页缩略图。可以考虑使用 https://github.com/bigbag/epub-to-xtc-converter 等工具优化 EPUB，以加快这一过程。
+* **不支持的图片格式：** EPUB 中的大多数 JPG 和 PNG 图片可以正常渲染。GIF 和渐进式 JPEG 不受支持，会回退显示为 `[Image]` 占位符。
+* **词典查询：** 尚未实现行内查词。
+
+本移植版本中 OnePage 特有的限制：
+
+* **OTA 更新：** **设置 → 系统 → 检查更新** 查询的仍是*上游* CrossPoint 的发布版本，其 `firmware.bin` 是 ESP32-C3 镜像。请勿在 OnePage 上使用 —— 请通过 USB 刷写更新（参见 [README](./README.md#安装固件)）。
+* **倾斜翻页：** OnePage 主板没有 IMU，因此该手势不可用；该选项仅出现在上游 X3 硬件上。
+* **`crosspoint.local`：** C61 构建未编译 mDNS，因此只能通过屏幕上显示的 IP 地址访问 Web 界面。
+* **Web 界面没有身份验证：** 文件传输运行期间，同一网络中的任何人都可以读写 SD 卡。
+
+---
+
+## 7. 问题排查与退出启动循环
+
+如果在使用 Crosspoint 时遇到问题或崩溃，请随时提交 issue 并附上日志。
+
+**SD 卡上的崩溃报告：** 崩溃后，CrossPoint 会自动把崩溃报告保存到 SD 卡（无需连接 USB）。请在 SD 卡根目录中查找崩溃日志文件，并在反馈问题时附上它。
+
+**串口监视器日志：** 如需更详细的调试，请将设备连接到电脑，并运行自定义调试监视器脚本（需要 Python 3 以及 `pyserial`、`colorama`、`matplotlib`；可通过 `pip3 install pyserial colorama matplotlib` 安装）：
 
 ```
 python3 scripts/debugging_monitor.py
 ```
 
-The script auto-detects the serial port. You can also specify one explicitly:
+脚本会自动检测串口。您也可以显式指定一个串口：
 
 ```
 python3 scripts/debugging_monitor.py /dev/ttyACM0        # Linux
@@ -683,22 +683,22 @@ python3 scripts/debugging_monitor.py /dev/tty.usbmodem1  # macOS
 python3 scripts/debugging_monitor.py COM7                # Windows
 ```
 
-**Features:**
+**功能：**
 
-- Color-coded log output by category (errors, memory, display, EPUB parsing, etc.)
-- Live memory usage graph (free RAM, total RAM, max contiguous allocation) updated every second
-- Interactive command prompt — type a command and press Enter to send it to the device
-- Screenshot capture — saves the current display to `screenshot.bmp` when triggered by the device
+- 按类别着色的日志输出（错误、内存、显示、EPUB 解析等）
+- 实时内存使用图表（可用内存、总内存、最大连续可分配块），每秒更新一次
+- 交互式命令提示符 —— 输入命令并按 Enter 即可发送到设备
+- 截图捕获 —— 设备触发时把当前显示内容保存为 `screenshot.bmp`
 
-**Options:**
+**选项：**
 
-| Option               | Description                                               |
+| 选项               | 说明                                               |
 | -------------------- | --------------------------------------------------------- |
-| `--baud RATE`        | Baud rate (default: 115200)                               |
-| `--filter KEYWORD`   | Show only lines containing the keyword (case-insensitive) |
-| `--suppress KEYWORD` | Hide lines containing the keyword (case-insensitive)      |
+| `--baud RATE`        | 波特率（默认：115200）                               |
+| `--filter KEYWORD`   | 仅显示包含该关键字的行（不区分大小写） |
+| `--suppress KEYWORD` | 隐藏包含该关键字的行（不区分大小写）      |
 
-**Examples:**
+**示例：**
 
 ```
 # Show only memory-related log lines
@@ -708,8 +708,8 @@ python3 scripts/debugging_monitor.py --filter MEM
 python3 scripts/debugging_monitor.py --suppress "[SD]"
 ```
 
-Press **Ctrl-C** or close the graph window to exit.
+按 **Ctrl-C** 或关闭图表窗口即可退出。
 
-If the device is stuck in a bootloop, press and release the Reset button. Then, press and hold on to the configured Back button and the Power Button to boot to the Home Screen.
+如果设备卡在启动循环中，请短按并松开 Reset 键，然后长按已配置的返回键和电源键，以进入主页界面。
 
-There can be issues with broken cache or config. In this case, delete the `.crosspoint` directory on your SD card (or consider deleting only `settings.json`, `state.json`, or `epub_*` cache directories in the `.crosspoint/` folder).
+缓存或配置可能已损坏。此时请删除 SD 卡上的 `.crosspoint` 目录（或者考虑只删除 `.crosspoint/` 文件夹中的 `settings.json`、`state.json` 或 `epub_*` 缓存目录）。

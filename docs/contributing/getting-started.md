@@ -78,7 +78,7 @@ pio run -e onepage --target upload
 ```
 
 If PlatformIO's upload stage fails on a Puya-flash board, flash manually with
-`esptool --no-stub` — see the [Install firmware](../../README.md#install-firmware)
+`esptool --no-stub` — see the [Install firmware](../../README.md#安装固件)
 section, which documents the Winbond vs Puya split.
 
 ## Web UI pages

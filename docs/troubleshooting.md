@@ -1,101 +1,90 @@
-# Troubleshooting
+# 故障排除
 
-This document shows common issues and possible solutions while using the device features.
+本文档列出使用设备功能时的常见问题及可能的解决方案。
 
-- [Troubleshooting](#troubleshooting)
-    - [Cannot See the Device on the Network](#cannot-see-the-device-on-the-network)
-    - [Connection Drops or Times Out](#connection-drops-or-times-out)
-    - [Upload Fails](#upload-fails)
-    - [Saved Password Not Working](#saved-password-not-working)
-    - [OnePage-specific issues](#onepage-specific-issues)
+- [故障排除](#故障排除)
+    - [在网络中看不到设备](#在网络中看不到设备)
+    - [连接中断或超时](#连接中断或超时)
+    - [上传失败](#上传失败)
+    - [已保存的密码不起作用](#已保存的密码不起作用)
+    - [OnePage 专有问题](#onepage-专有问题)
 
-### Cannot See the Device on the Network
+### 在网络中看不到设备
 
-**Problem:** Browser shows "Cannot connect" or "Site can't be reached"
+**问题：** 浏览器显示“无法连接”或“无法访问此网站”
 
-**Solutions:**
+**解决方案：**
 
-1. Verify both devices are on the correct network
-   - Check your computer/phone Wi-Fi settings
-   - In **Join Network** mode, your computer/phone and CrossPoint Reader must be on the same Wi-Fi network
-   - In **Create Hotspot** mode, your computer/phone must be connected to the `CrossPoint-Reader` hotspot
-2. Double-check the IP address
-   - Make sure you typed it correctly
-   - Include `http://` at the beginning
-   - On OnePage, always use the IP address printed on screen — mDNS is not
-     compiled into the C61 build, so `http://crosspoint.local/` never resolves
-3. Try disabling VPN if you're using one
-4. Some networks have "client isolation" enabled - use Create Hotspot mode or check with your network administrator
+1. 确认两台设备都在正确的网络上
+   - 检查你的电脑/手机的 Wi-Fi 设置
+   - 在 **加入网络** 模式下，你的电脑/手机和 CrossPoint 阅读器必须在同一个 Wi-Fi 网络上
+   - 在 **创建热点** 模式下，你的电脑/手机必须已连接到 `CrossPoint-Reader` 热点
+2. 仔细检查 IP 地址
+   - 确保输入正确
+   - 开头要包含 `http://`
+   - 在 OnePage 上，请始终使用屏幕上打印的 IP 地址——mDNS 未编译进 C61 构建，因此 `http://crosspoint.local/` 永远无法解析
+3. 如果你正在使用 VPN，尝试将其禁用
+4. 某些网络启用了“客户端隔离”——请使用创建热点模式，或与你的网络管理员确认
 
-### Connection Drops or Times Out
+### 连接中断或超时
 
-**Problem:** Wi-Fi connection is unstable
+**问题：** Wi-Fi 连接不稳定
 
-**Solutions:**
+**解决方案：**
 
-1. Move closer to the Wi-Fi router, or use Create Hotspot mode for a direct connection
-2. Check signal strength on the device (should be at least `||` or better)
-3. Avoid interference from other devices
-4. Try a different Wi-Fi network if available
+1. 靠近 Wi-Fi 路由器，或使用创建热点模式进行直连
+2. 检查设备上的信号强度（应至少为 `||` 或更好）
+3. 避免其他设备的干扰
+4. 如果可用，尝试其他的 Wi-Fi 网络
 
-### Upload Fails
+### 上传失败
 
-**Problem:** File upload doesn't complete or shows an error
+**问题：** 文件上传无法完成或显示错误
 
-**Solutions:**
+**解决方案：**
 
-1. Check that the SD card has enough free space
-2. Check that the filename is valid for the SD card filesystem
-3. Try uploading a smaller file first to test
-4. Refresh the browser page and try again
-5. If WebSocket upload fails repeatedly, refresh the page and retry with the HTTP fallback path
+1. 检查 SD 卡是否有足够的可用空间
+2. 检查文件名对 SD 卡文件系统是否有效
+3. 先尝试上传较小的文件进行测试
+4. 刷新浏览器页面并重试
+5. 如果 WebSocket 上传反复失败，请刷新页面并通过 HTTP 后备路径重试
 
-### Saved Password Not Working
+### 已保存的密码不起作用
 
-**Problem:** Device fails to connect with saved credentials
+**问题：** 设备使用已保存的凭据无法连接
 
-**Solutions:**
+**解决方案：**
 
-1. When connection fails, you'll be prompted to "Forget Network"
-2. Select **Yes** to remove the saved password
-3. Reconnect and enter the password again
-4. Choose to save the new password
+1. 连接失败时，系统会提示你“忘记网络”
+2. 选择 **是** 以移除已保存的密码
+3. 重新连接并再次输入密码
+4. 选择保存新密码
 
-## OnePage-specific issues
+## OnePage 专有问题
 
-### Settings page shows stale values after saving
+### 保存后设置页面显示过时的值
 
-**Problem:** A saved change (or a factory reset) does not appear when the
-Settings page reloads.
+**问题：** 保存的更改（或恢复出厂设置）在设置页面重新加载后没有显示生效。
 
-**Solutions:**
+**解决方案：**
 
-1. Hard-refresh the page (Ctrl/Cmd+Shift+R) — `GET /api/settings` has no cache
-   headers, so the browser may replay an old response
-2. When scripting against the API, append a cache-buster:
+1. 强制刷新页面（Ctrl/Cmd+Shift+R）——`GET /api/settings` 没有缓存头，因此浏览器可能重放旧响应
+2. 针对 API 编写脚本时，附加一个缓存穿透参数：
    `/api/settings?lang=en&_=<timestamp>`
 
-### Voice assistant / workbench does not respond
+### 语音助手 / 工作台无响应
 
-**Problem:** **AI Assistant** or **My Workbench** cannot reach the gateway.
+**问题：** **AI 助手** 或 **我的工作台** 无法连接到网关。
 
-**Solutions:**
+**解决方案：**
 
-1. Open **Settings → Cloud Services** on the web UI and check the gateway host,
-   port, path and TLS settings, then use the test card — it reports whether the
-   gateway is reachable and whether this device is still *pending approval*
-2. Approve the device on the gateway side; an unapproved device is refused even
-   when the token is correct
-3. Confirm the MiMo speech-to-text URL/key card passes its test before relying
-   on voice capture; the STT key and gateway token are stored in NVS and are
-   never echoed back to the browser
-4. The reader must stay in **File Transfer → Join Network** mode (or otherwise
-   be online) for gateway traffic
+1. 在 Web 界面打开 **设置 → 云服务**，检查网关主机、端口、路径和 TLS 设置，然后使用测试卡片——它会报告网关是否可达，以及此设备是否仍处于*待批准*状态
+2. 在网关侧批准该设备；未经批准的设备即使令牌正确也会被拒绝
+3. 在依赖语音采集之前，确认 MiMo 语音转文字 URL/密钥卡片通过了测试；STT 密钥和网关令牌存储在 NVS 中，永远不会回显给浏览器
+4. 阅读器必须保持在 **文件传输 → 加入网络** 模式（或以其他方式保持在线），网关流量才能通行
 
-### Firmware update should not be used
+### 不应使用固件更新
 
-**Problem:** **Settings → System → Check for updates** offers a download.
+**问题：** **设置 → 系统 → 检查更新** 提供了下载。
 
-That entry still polls the upstream CrossPoint releases, which ship an
-ESP32-C3 image. It is not compatible with OnePage (ESP32-C61) — ignore it and
-flash over USB instead; see the [README](../README.md#install-firmware).
+该条目仍在轮询上游 CrossPoint 版本发布，其发布的是 ESP32-C3 镜像。它与 OnePage（ESP32-C61）不兼容——请忽略它，改为通过 USB 刷写；参见 [README](../README.md#安装固件)。
