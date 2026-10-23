@@ -60,7 +60,7 @@ const uint8_t* iconForName(UIIcon icon, int size) {
       case UIIcon::File:
         return File24Icon;
       case UIIcon::Mic:
-        // 24 px lists (no subtitle) had no Mic bitmap, so the AI对话 row
+        // 24 px lists (no subtitle) had no Mic bitmap, so the 对话 row
         // rendered label-only — the user-visible missing icon.
         return Mic24Icon;
       default:
