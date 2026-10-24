@@ -81,6 +81,10 @@ class HalGPIO {
   // the BLE page-turner). Passthrough to InputManager::injectPressedEvents;
   // must be called from the main-loop task right after update().
   void injectPress(uint8_t buttonIndex);
+  // Synthetic press held for durationMs (debug: long-press/repeat testing via
+  // CMD:KEYHOLD). Passthrough to InputManager::injectHoldEvents; same context
+  // rules as injectPress — main-loop task only.
+  void injectHold(uint8_t buttonIndex, uint32_t durationMs);
   bool wasAnyPressed() const;
   bool wasReleased(uint8_t buttonIndex) const;
   bool wasAnyReleased() const;

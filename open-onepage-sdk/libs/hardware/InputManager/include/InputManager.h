@@ -30,6 +30,20 @@ class InputManager {
   void injectPressedEvents(uint8_t buttonMask);
 
   /**
+   * Inject a synthetic press that is HELD for `durationMs` instead of a single
+   * frame: delivers one press edge immediately, then keeps the bits down
+   * (isPressed() true, no further press edges, releases swallowed) until the
+   * deadline, after which the normal release edge fires. Used by the firmware's
+   * CMD:KEYHOLD debug command so long-press and repeat gesture paths can be
+   * exercised on-device without hands on the buttons. Same context rules as
+   * injectPressedEvents(): main-loop task only, not ISR/other-task safe.
+   *
+   * @param buttonMask OR of (1 << BTN_*) bits to hold down
+   * @param durationMs how long the synthetic press stays down
+   */
+  void injectHoldEvents(uint8_t buttonMask, uint32_t durationMs);
+
+  /**
    * Returns true if the button was being held at the time of the last #update() call.
    *
    * @param buttonIndex the button indexes
@@ -124,6 +138,8 @@ class InputManager {
   unsigned long buttonPressFinish;
   unsigned long powerButtonPressStart;
   unsigned long powerButtonPressFinish;
+  uint8_t holdMask;
+  uint32_t holdDeadline;
 
   static constexpr int NUM_BUTTONS_1 = 4;
   static const int ADC_RANGES_1[];

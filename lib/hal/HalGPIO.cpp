@@ -267,6 +267,10 @@ bool HalGPIO::wasPressed(uint8_t buttonIndex) const { return inputMgr.wasPressed
 
 void HalGPIO::injectPress(uint8_t buttonIndex) { inputMgr.injectPressedEvents(1 << buttonIndex); }
 
+void HalGPIO::injectHold(uint8_t buttonIndex, uint32_t durationMs) {
+  inputMgr.injectHoldEvents(1 << buttonIndex, durationMs);
+}
+
 bool HalGPIO::wasAnyPressed() const { return inputMgr.wasAnyPressed(); }
 
 bool HalGPIO::wasReleased(uint8_t buttonIndex) const { return inputMgr.wasReleased(buttonIndex); }

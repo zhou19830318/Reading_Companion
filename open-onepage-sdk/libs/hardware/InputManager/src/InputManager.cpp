@@ -27,7 +27,9 @@ InputManager::InputManager()
       buttonPressStart(0),
       buttonPressFinish(0),
       powerButtonPressStart(0),
-      powerButtonPressFinish(0) {}
+      powerButtonPressFinish(0),
+      holdMask(0),
+      holdDeadline(0) {}
 
 void InputManager::begin() {
 #ifdef ONEPAGE_C61
@@ -141,6 +143,23 @@ void InputManager::update() {
       currentState = state;
     }
   }
+
+  // Synthetic hold in progress (injectHoldEvents): while the deadline has not
+  // passed, keep the injected bits down and swallow the per-frame release that
+  // the hardware recompute above produces (the pins read all-zero during an
+  // injection, so state != currentState holds every held frame and would
+  // otherwise emit a release edge on frame two). No new press edge is emitted
+  // here — consumers see exactly one press (from injectPressedEvents) and one
+  // release (the frame after expiry). Expiry clears holdMask so the release
+  // edge computed above stands.
+  if (holdMask != 0) {
+    if (static_cast<int32_t>(currentTime - holdDeadline) >= 0) {
+      holdMask = 0;
+    } else {
+      releasedEvents &= static_cast<uint8_t>(~holdMask);
+      currentState |= holdMask;
+    }
+  }
 }
 
 bool InputManager::isPressed(const uint8_t buttonIndex) const { return currentState & (1 << buttonIndex); }
@@ -171,6 +190,14 @@ void InputManager::injectPressedEvents(const uint8_t buttonMask) {
   if ((buttonMask & (1u << BTN_POWER)) != 0) {
     powerButtonPressStart = millis();
   }
+}
+
+void InputManager::injectHoldEvents(const uint8_t buttonMask, const uint32_t durationMs) {
+  // Deliver the press edge now, then arm the hold so update() keeps the bits
+  // down until the deadline (see the hold block in update()).
+  injectPressedEvents(buttonMask);
+  holdMask = buttonMask;
+  holdDeadline = millis() + durationMs;
 }
 
 bool InputManager::wasAnyPressed() const { return pressedEvents > 0; }

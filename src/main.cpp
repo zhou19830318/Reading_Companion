@@ -549,6 +549,32 @@ void setup() {
   allowSleepAt = millis() + 2000;
 }
 
+// Serial debug key names -> hardware button index (CMD:KEY / CMD:KEYHOLD).
+static int keyNameToIndex(const String& key) {
+  if (key == "back") {
+    return HalGPIO::BTN_BACK;
+  }
+  if (key == "ok") {
+    return HalGPIO::BTN_CONFIRM;
+  }
+  if (key == "left") {
+    return HalGPIO::BTN_LEFT;
+  }
+  if (key == "right") {
+    return HalGPIO::BTN_RIGHT;
+  }
+  if (key == "up") {
+    return HalGPIO::BTN_UP;
+  }
+  if (key == "down") {
+    return HalGPIO::BTN_DOWN;
+  }
+  if (key == "power") {
+    return HalGPIO::BTN_POWER;
+  }
+  return -1;
+}
+
 void loop() {
   static unsigned long maxLoopDuration = 0;
   const unsigned long loopStartTime = millis();
@@ -788,27 +814,29 @@ void loop() {
         // (short-press → SmartAsk menu) and nothing else.
         String key = cmd.substring(4);
         key.trim();
-        int buttonIndex = -1;
-        if (key == "back") {
-          buttonIndex = HalGPIO::BTN_BACK;
-        } else if (key == "ok") {
-          buttonIndex = HalGPIO::BTN_CONFIRM;
-        } else if (key == "left") {
-          buttonIndex = HalGPIO::BTN_LEFT;
-        } else if (key == "right") {
-          buttonIndex = HalGPIO::BTN_RIGHT;
-        } else if (key == "up") {
-          buttonIndex = HalGPIO::BTN_UP;
-        } else if (key == "down") {
-          buttonIndex = HalGPIO::BTN_DOWN;
-        } else if (key == "power") {
-          buttonIndex = HalGPIO::BTN_POWER;
-        }
+        const int buttonIndex = keyNameToIndex(key);
         if (buttonIndex >= 0) {
           gpio.injectPress(static_cast<uint8_t>(buttonIndex));
           logSerial.printf("KEY %s injected\n", key.c_str());
         } else {
           logSerial.printf("KEY %s unknown (back|ok|left|right|up|down|power)\n", key.c_str());
+        }
+      } else if (cmd.startsWith("KEYHOLD ")) {
+        // Debug: hold an injected press for N ms so long-press and repeat
+        // gesture paths can be tested without hands on the buttons.
+        // Usage: CMD:KEYHOLD <key> <durationMs>  (duration defaults to 1000)
+        String args = cmd.substring(8);
+        args.trim();
+        const int spaceIdx = args.indexOf(' ');
+        const String key = spaceIdx > 0 ? args.substring(0, spaceIdx) : args;
+        const unsigned long durationMs =
+            spaceIdx > 0 ? static_cast<unsigned long>(args.substring(spaceIdx + 1).toInt()) : 1000UL;
+        const int buttonIndex = keyNameToIndex(key);
+        if (buttonIndex >= 0) {
+          gpio.injectHold(static_cast<uint8_t>(buttonIndex), static_cast<uint32_t>(durationMs));
+          logSerial.printf("KEYHOLD %s %lu ms injected\n", key.c_str(), durationMs);
+        } else {
+          logSerial.printf("KEYHOLD %s unknown (back|ok|left|right|up|down|power)\n", key.c_str());
         }
       }
     }
