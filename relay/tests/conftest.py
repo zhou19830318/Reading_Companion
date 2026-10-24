@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -20,3 +21,6 @@ os.environ.setdefault("MOCK_ASR_PARTIAL_INTERVAL_MS", "200")
 os.environ.setdefault("MOCK_ASR_FINAL_DELAY_MS", "50")
 os.environ.setdefault("MOCK_LLM_DELTA_INTERVAL_MS", "10")
 os.environ.setdefault("MOCK_LLM_DELTA_CHARS", "4")
+# Session-scoped scratch dir: the learning store opens in every TestClient
+# lifespan, and the default run/learning would land in the checkout.
+os.environ.setdefault("RELAY_LEARNING_DIR", tempfile.mkdtemp(prefix="relay-learning-test-"))

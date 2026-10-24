@@ -25,7 +25,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel
 
 from . import SERVICE_NAME, __version__
-from . import admin_page, dict_source, metrics, protocol, t2i
+from . import admin_page, dict_source, learning_store, metrics, protocol, t2i
 from .auth import check_admin, check_device
 from .config import Settings, get_settings
 from .logging_setup import setup_logging
@@ -61,12 +61,20 @@ async def lifespan(app: FastAPI):
     )
     app.state.sessions = set()
     app.state.ws_connections = 0
+    # Vocabulary learning: one SQLite connection for the process (schema is
+    # created idempotently; the directory must exist before the unit's
+    # sandboxed write happens, which LearningStore handles).
+    learning = learning_store.LearningStore(settings.learning_db_path)
+    learning.open()
+    app.state.learning = learning
+    log.info("learning store ready", extra={"db": str(learning.db_path)})
     yield
     # Graceful shutdown: stop accepting, cancel upstream work in bounded time.
     sessions: set[VoiceSession] = app.state.sessions
     if sessions:
         log.info("cancelling sessions at shutdown", extra={"count": len(sessions)})
         await asyncio.gather(*(s.abort("server_shutdown") for s in list(sessions)), return_exceptions=True)
+    learning.close()
 
 
 app = FastAPI(title="Reading Companion Voice Relay", version=__version__, lifespan=lifespan)

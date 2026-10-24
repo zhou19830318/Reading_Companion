@@ -17,6 +17,8 @@ lib/I18n/I18nStrings.cpp
 /manifest.json
 onepage-firmware-*.bin
 build
+# Relay runtime state (SQLite learning DB, t2i assets) — never committed.
+relay/run/
 **/__pycache__/
 .pytest_cache/
 /compile_commands.json

@@ -8,6 +8,7 @@ device or written to a log.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -78,6 +79,14 @@ class Settings(BaseSettings):
     dict_source: str = Field("local", alias="DICT_SOURCE")
     # Empty = auto: $RELEASE/dict-data, then relay/dict-data in a checkout.
     dict_data_dir: str = Field("", alias="DICT_DATA_DIR")
+
+    # --- vocabulary learning (百词斩) --------------------------------------
+    # Directory holding learning.db (SQLite, stdlib). Empty = "run/learning"
+    # under the working directory. Production pins this to
+    # /opt/reading-companion-relay/run/learning: run/ lives outside the
+    # swapped release tree and is already in the unit's ReadWritePaths, so
+    # the database survives upgrades and rollbacks without a unit change.
+    relay_learning_dir: str = Field("", alias="RELAY_LEARNING_DIR")
 
     # --- text-to-image cards ------------------------------------------------
     # "mock" (default): draw a placeholder locally, no cloud call and no cost —
@@ -195,6 +204,11 @@ class Settings(BaseSettings):
         return v
 
     # ------------------------------------------------------------------ helpers
+    @property
+    def learning_db_path(self) -> Path:
+        base = Path(self.relay_learning_dir) if self.relay_learning_dir else Path("run/learning")
+        return base / "learning.db"
+
     @property
     def allowed_devices(self) -> list[str]:
         return [d.strip() for d in self.allowed_device_ids.split(",") if d.strip()]
