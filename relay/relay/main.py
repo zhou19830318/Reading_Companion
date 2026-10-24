@@ -8,6 +8,9 @@ Routes (docs section 17.5):
   GET  /api/v1/device/config    device capabilities, device token
   WSS  /api/v1/voice/stream     the device's realtime channel
   POST /api/v1/chat             admin-only text debug (SSE or JSON)
+  GET  /api/v1/learning/words   device token: word book listing
+  POST /api/v1/learning/words   device token: word book batch add
+  POST /api/v1/learning/review  device token: review event (idempotent)
   GET  /metrics                 prometheus, internal exposure only
 """
 
@@ -542,6 +545,87 @@ async def image_asset(asset_id: str, request: Request):
         media_type="image/bmp",
         headers={"Cache-Control": "private, max-age=3600"},
     )
+
+
+# --------------------------------------------------------------------------
+# vocabulary learning (device token; word book + review event sync)
+# --------------------------------------------------------------------------
+
+LEARNING_MAX_WORD_BATCH = 200
+
+
+def _learning_device(settings: Settings, request: Request) -> tuple[str | None, JSONResponse | None]:
+    """Auth for /learning/*: device token only (the device is the sole client).
+
+    Returns (device_id, None) on success or (None, error_response).
+    """
+    try:
+        device_id = check_device(settings, request.headers.get("authorization"), request.headers.get("x-device-id"))
+        return device_id, None
+    except ProtocolError as exc:
+        return None, JSONResponse(
+            status_code=401 if exc.code == ErrorCode.UNAUTHORIZED else 403,
+            content={"error": exc.code.value},
+        )
+
+
+class LearningWordsRequest(BaseModel):
+    words: list[str]
+    source: str = "lookup"
+
+
+class LearningReviewRequest(BaseModel):
+    word: str
+    rating: int
+    clientEventId: str
+    occurredAt: str = ""
+
+
+@app.get("/api/v1/learning/words")
+async def learning_words(request: Request, state: str = "", limit: int = 500):
+    settings = get_settings()
+    device_id, error = _learning_device(settings, request)
+    if error is not None:
+        return error
+    rows = app.state.learning.list_words(device_id, state or None, max(1, min(limit, 500)))
+    return {
+        "count": len(rows),
+        "words": [
+            {"word": r["word"], "addedAt": r["added_at"], "state": r["state"], "source": r["source"]} for r in rows
+        ],
+    }
+
+
+@app.post("/api/v1/learning/words")
+async def learning_add_words(request: Request, body: LearningWordsRequest):
+    settings = get_settings()
+    device_id, error = _learning_device(settings, request)
+    if error is not None:
+        return error
+    if not body.words or len(body.words) > LEARNING_MAX_WORD_BATCH:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "invalid_words", "max": LEARNING_MAX_WORD_BATCH},
+        )
+    added = app.state.learning.add_words(device_id, [(w, body.source) for w in body.words])
+    log.info("learning word sync", extra={"deviceId": device_id, "requested": len(body.words), "added": added})
+    return {"ok": True, "accepted": len(body.words), "added": added}
+
+
+@app.post("/api/v1/learning/review")
+async def learning_review(request: Request, body: LearningReviewRequest):
+    settings = get_settings()
+    device_id, error = _learning_device(settings, request)
+    if error is not None:
+        return error
+    word = body.word.strip()
+    if not word or not body.clientEventId or not 1 <= body.rating <= 4:
+        return JSONResponse(status_code=400, content={"error": "invalid_review"})
+    extras = {"occurredAt": body.occurredAt} if body.occurredAt else None
+    stored = app.state.learning.record_review(device_id, word, body.rating, body.clientEventId, extras)
+    if not stored:
+        log.debug("learning review duplicate", extra={"deviceId": device_id, "event": body.clientEventId})
+    return {"ok": True, "duplicate": not stored}
 
 
 async def _noop(_piece: str) -> None:

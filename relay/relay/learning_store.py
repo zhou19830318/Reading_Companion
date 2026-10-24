@@ -15,10 +15,20 @@ Design notes:
 
 from __future__ import annotations
 
+import json
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 SCHEMA_VERSION = 1
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _dumps(extras: dict | None) -> str:
+    return json.dumps(extras or {}, ensure_ascii=False, separators=(",", ":"))
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -82,6 +92,64 @@ class LearningStore:
     def schema_version(self) -> int:
         row = self.conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
         return int(row["value"]) if row else 0
+
+    def add_words(self, device_id: str, entries: list[tuple[str, str]]) -> int:
+        """Insert word-book entries as (word, source); returns rows added.
+
+        INSERT OR IGNORE makes retries and intra-batch duplicates no-ops.
+        """
+        cleaned = [(word.strip(), (source or "lookup").strip() or "lookup") for word, source in entries]
+        cleaned = [(word, source) for word, source in cleaned if word]
+        if not cleaned:
+            return 0
+        conn = self.conn
+        cur = conn.executemany(
+            "INSERT OR IGNORE INTO words(device_id, word, added_at, source) VALUES(?,?,?,?)",
+            [(device_id, word, _now(), source) for word, source in cleaned],
+        )
+        conn.commit()
+        return cur.rowcount
+
+    def list_words(self, device_id: str, state: str | None = None, limit: int = 500) -> list[dict]:
+        sql = "SELECT word, added_at, state, source FROM words WHERE device_id = ?"
+        params: list = [device_id]
+        if state:
+            sql += " AND state = ?"
+            params.append(state)
+        sql += " ORDER BY added_at DESC, word LIMIT ?"
+        params.append(limit)
+        return [dict(row) for row in self.conn.execute(sql, params)]
+
+    def record_review(
+        self,
+        device_id: str,
+        word: str,
+        rating: int,
+        client_event_id: str,
+        extras: dict | None = None,
+    ) -> bool:
+        """Store one review event; False when client_event_id already exists.
+
+        The word row is auto-created so a review for a word the device
+        forgot to sync still lands in the book view (source='review').
+        Both statements commit together — no half-written review.
+        """
+        conn = self.conn
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO review_events"
+            "(device_id, word, rating, client_event_id, created_at, extras) VALUES(?,?,?,?,?,?)",
+            (device_id, word, rating, client_event_id, _now(), _dumps(extras)),
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO words(device_id, word, added_at, source) VALUES(?,?,?,?)",
+            (device_id, word, _now(), "review"),
+        )
+        conn.commit()
+        return cur.rowcount == 1
+
+    def review_count(self, device_id: str) -> int:
+        row = self.conn.execute("SELECT COUNT(*) AS c FROM review_events WHERE device_id = ?", (device_id,)).fetchone()
+        return int(row["c"])
 
     def close(self) -> None:
         if self._conn is not None:
