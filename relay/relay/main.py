@@ -127,10 +127,14 @@ async def device_config(request: Request):
             "maxReplyChars": settings.max_reply_chars,
         },
         "features": {
-            "partialAsr": settings.asr_provider != "mock" or True,
+            "partialAsr": settings.asr_provider == "mock" or True,
             "streamingLlm": True,
             "legacyFallback": True,
             "textToImage": settings.t2i_provider == "mock" or bool(settings.dashscope_api_key),
+            # Vocabulary learning: the store is opened in the lifespan (boot
+            # fails without it), so reaching this endpoint means learning is
+            # available. Firmware gates its learning menu on this key.
+            "learning": True,
         },
     }
 

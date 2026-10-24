@@ -73,6 +73,9 @@ def test_device_config_requires_valid_token(client):
         "frameMs": 40,
     }
     assert body["limits"]["maxAudioSeconds"] == 30
+    # Vocabulary learning capability flag: firmware hides its learning menu
+    # when the key is absent (older relay) or false.
+    assert body["features"]["learning"] is True
 
 
 def test_metrics_endpoint(client):
