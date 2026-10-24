@@ -71,6 +71,23 @@ class Settings(BaseSettings):
         alias="LLM_DICT_SYSTEM_PROMPT",
     )
     dict_max_tokens: int = Field(600, alias="LLM_DICT_MAX_TOKENS")
+    # mode="word" on /api/v1/chat: English word cards for the reader's word
+    # lookup (百词斩 §5.1). The offline dictionary data only covers Hanzi, so
+    # this mode always renders through the LLM. Shares dict_max_tokens — both
+    # are compact cards on a 480-logical-px screen.
+    llm_word_system_prompt: str = Field(
+        "你是一本简明英汉词典。用户发来一个英语单词，你只输出这个单词的词条，严格用下面格式"
+        "（每项一行，不要 Markdown、不要解释、不要反问）：\n"
+        "【词】<原形单词>\n"
+        "【音标】/<英式音标>/\n"
+        "【词性】<v.、n.、adj. 等，多项用；隔开>\n"
+        "【释义】1. <中文释义> 2. <中文释义>\n"
+        "【例句】<一句英文例句>\n"
+        "【译文】<例句的中文翻译>\n"
+        "内容务必准确精炼：释义最多 3 条，全文不超过 300 字；"
+        "若输入不是英语单词，输出【词】无法识别。",
+        alias="LLM_WORD_SYSTEM_PROMPT",
+    )
     llm_disable_thinking: bool = Field(True, alias="LLM_DISABLE_THINKING")
 
     # --- dictionary cards ---------------------------------------------------

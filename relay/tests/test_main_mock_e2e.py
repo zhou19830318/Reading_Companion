@@ -284,3 +284,18 @@ def test_chat_default_mode_keeps_default_prompt(client, monkeypatch):
     r = client.post("/api/v1/chat", json={"text": "你好", "stream": False}, headers=ADMIN)
     assert r.status_code == 200
     assert provider.calls[0]["system"] is None
+
+
+def test_chat_word_mode_uses_word_prompt_and_token_budget(client, monkeypatch):
+    from relay.config import reload_settings
+
+    settings = reload_settings()
+    provider = _CapturingProvider()
+    monkeypatch.setattr("relay.main.make_llm_provider", lambda settings: provider)
+    r = client.post("/api/v1/chat", json={"text": "abandon", "stream": False, "mode": "word"}, headers=ADMIN)
+    assert r.status_code == 200
+    assert provider.calls == [
+        {"prompt": "abandon", "max_tokens": settings.dict_max_tokens, "system": settings.llm_word_system_prompt}
+    ]
+    # The Hanzi-only local data must never serve English cards.
+    assert provider.calls[0]["system"] is not settings.llm_dict_system_prompt

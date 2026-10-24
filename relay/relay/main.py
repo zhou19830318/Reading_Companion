@@ -400,7 +400,9 @@ async def chat(request: Request, body: ChatRequest):
     # (readings, radical, senses, 组词) must not be model output. DICT_SOURCE=llm
     # restores the generated cards; when the data is missing we degrade to the
     # LLM path rather than failing the lookup entirely.
-    if body.mode == "dict" and settings.dict_source != "llm":
+    dict_mode = body.mode == "dict"
+    word_mode = body.mode == "word"
+    if dict_mode and settings.dict_source != "llm":
         source = dict_source.get_dict_source(settings.dict_data_dir)
         if source is not None:
             card = source.card(body.text)
@@ -431,9 +433,13 @@ async def chat(request: Request, body: ChatRequest):
             return StreamingResponse(local_card_events(), media_type="text/event-stream")
         log.warning("dict data unavailable; serving this card from the LLM")
 
-    dict_mode = body.mode == "dict"
-    system = settings.llm_dict_system_prompt if dict_mode else None
-    max_tokens = body.maxTokens or (settings.dict_max_tokens if dict_mode else settings.max_llm_output_tokens)
+    system = None
+    if dict_mode:
+        system = settings.llm_dict_system_prompt
+    elif word_mode:
+        system = settings.llm_word_system_prompt
+    card_mode = dict_mode or word_mode
+    max_tokens = body.maxTokens or (settings.dict_max_tokens if card_mode else settings.max_llm_output_tokens)
     provider = make_llm_provider(settings)
 
     if not body.stream:
