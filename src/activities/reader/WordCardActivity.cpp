@@ -11,10 +11,13 @@
 
 #include <algorithm>
 #include <cstring>
+#include <ctime>
 #include <iterator>
 
 #include "CrossPointSettings.h"
+#include "LearningSync.h"
 #include "MappedInputManager.h"
+#include "WordBook.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -39,6 +42,9 @@ void WordCardActivity::onEnter() {
     LOG_ERR("WORD", "OOM: reply buffer %u bytes", static_cast<unsigned>(REPLY_CAP + 1));
     failText_ = tr(STR_MIC_OOM);
     state_ = State::Failed;
+  } else {
+    inWordbook_ = Learning::WordBook::contains(word_.c_str(), &wordSynced_);
+    if (inWordbook_) status_ = wordSynced_ ? Status::AddedSynced : Status::AddedPending;
   }
   requestUpdate();
 }
@@ -63,9 +69,9 @@ void WordCardActivity::beginLookup() {
     return;
   }
   CLOUD_CFG.load();  // NVS, idempotent; the same source the voice screen reads
-  const bool relayConfigured = SETTINGS.voiceRelayEnabled != 0 && CLOUD_CFG.relayUrl[0] != '\0' &&
-                               CLOUD_CFG.relayToken[0] != '\0' && CLOUD_CFG.relayDeviceId[0] != '\0';
-  if (!relayConfigured) {
+  relayConfigured_ = SETTINGS.voiceRelayEnabled != 0 && CLOUD_CFG.relayUrl[0] != '\0' &&
+                     CLOUD_CFG.relayToken[0] != '\0' && CLOUD_CFG.relayDeviceId[0] != '\0';
+  if (!relayConfigured_) {
     // Unlike the Hanzi card there is no local payload to fall back to.
     LOG_ERR("WORD", "relay not configured; word cards need the relay");
     failText_ = tr(STR_WORD_NO_RELAY);
@@ -99,7 +105,11 @@ void WordCardActivity::beginLookup() {
 
 void WordCardActivity::loop() {
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    finish();
+    if (detailOpen_) {
+      toggleDetail();  // 返回逐层回退: close the detail block first
+    } else {
+      finish();
+    }
     return;
   }
   switch (state_) {
@@ -120,7 +130,11 @@ void WordCardActivity::loop() {
       break;
     case State::Card:
       if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-        toggleDetail();
+        if (detailOpen_) {
+          toggleDetail();  // collapse; M3 inserts the voice layer before this
+        } else {
+          toggleAdd();
+        }
       } else if (mappedInput.wasReleased(MappedInputManager::Button::Up)) {
         if (scrollLine_ > 0) {
           --scrollLine_;
@@ -139,6 +153,54 @@ void WordCardActivity::loop() {
 void WordCardActivity::toggleDetail() {
   detailOpen_ = !detailOpen_;
   scrollLine_ = 0;
+  requestUpdate();
+}
+
+void WordCardActivity::toggleAdd() {
+  if (inWordbook_) {
+    if (Learning::WordBook::remove(word_.c_str())) {
+      inWordbook_ = false;
+      wordSynced_ = false;
+      status_ = Status::Removed;
+    } else {
+      LOG_ERR("WORD", "wordbook remove failed: %s", word_.c_str());
+      status_ = Status::SaveFailed;
+    }
+    requestUpdate();
+    return;
+  }
+
+  bool added = false;
+  const auto addedAt = static_cast<uint32_t>(time(nullptr));
+  if (!Learning::WordBook::add(word_.c_str(), addedAt, added)) {
+    LOG_ERR("WORD", "wordbook add failed: %s", word_.c_str());
+    status_ = Status::SaveFailed;
+    requestUpdate();
+    return;
+  }
+  inWordbook_ = true;
+  wordSynced_ = false;
+  status_ = Status::AddedPending;
+  if (!added) LOG_INF("WORD", "already in wordbook: %s", word_.c_str());
+
+  // One opportunistic first push. Failure keeps every queued word pending; the
+  // next add retries the whole queue (a 16-word batch is one small POST).
+  if (!relayConfigured_ || WiFi.status() != WL_CONNECTED) {
+    requestUpdate();
+    return;
+  }
+  status_ = Status::Syncing;
+  requestUpdateAndWait();  // paint before the blocking round trip
+  const auto outcome =
+      Learning::LearningSync::syncPending(CLOUD_CFG.relayUrl, CLOUD_CFG.relayToken, CLOUD_CFG.relayDeviceId);
+  if (outcome.error != nullptr || !outcome.attempted) {
+    LOG_ERR("WORD", "wordbook sync: %s (%u synced)", outcome.error != nullptr ? outcome.error : "no-op",
+            static_cast<unsigned>(outcome.synced));
+    status_ = Status::AddedSyncFailed;
+  } else {
+    wordSynced_ = true;
+    status_ = Status::AddedSynced;
+  }
   requestUpdate();
 }
 
@@ -222,8 +284,39 @@ void WordCardActivity::render(RenderLock&&) {
   const int right = safe.x + safe.width - metrics.contentSidePadding;
   const int textWidth = right - left;
   const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int contentBottom = safe.y + safe.height - metrics.verticalSpacing;
   const int lineH = renderer.getLineHeight(bodyFont);
+
+  const char* statusText = nullptr;
+  char statusBuf[96];
+  switch (status_) {
+    case Status::AddedPending:
+      snprintf(statusBuf, sizeof(statusBuf), "%s · %s", tr(STR_WORD_ADDED), tr(STR_WORD_PENDING));
+      statusText = statusBuf;
+      break;
+    case Status::Syncing:
+      statusText = tr(STR_WORD_SYNCING);
+      break;
+    case Status::AddedSynced:
+      snprintf(statusBuf, sizeof(statusBuf), "%s · %s", tr(STR_WORD_ADDED), tr(STR_WORD_SYNCED));
+      statusText = statusBuf;
+      break;
+    case Status::AddedSyncFailed:
+      snprintf(statusBuf, sizeof(statusBuf), "%s · %s", tr(STR_WORD_ADDED), tr(STR_WORD_SYNC_FAILED));
+      statusText = statusBuf;
+      break;
+    case Status::Removed:
+      statusText = tr(STR_WORD_REMOVED);
+      break;
+    case Status::SaveFailed:
+      statusText = tr(STR_WORD_SAVE_FAILED);
+      break;
+    case Status::None:
+      break;
+  }
+  // The status line owns its strip at the bottom so card scrolling cannot
+  // overlap it.
+  const int statusH = statusText != nullptr ? lineH + 4 : 0;
+  const int contentBottom = safe.y + safe.height - metrics.verticalSpacing - statusH;
 
   const auto drawHero = [&]() {
     const int heroW = renderer.getTextWidth(bodyFont, hero_.c_str(), EpdFontFamily::BOLD);
@@ -292,6 +385,11 @@ void WordCardActivity::render(RenderLock&&) {
     }
   }
 
+  if (statusText != nullptr) {
+    const int statusW = renderer.getTextWidth(bodyFont, statusText);
+    renderer.drawText(bodyFont, left + (textWidth - statusW) / 2,
+                      safe.y + safe.height - metrics.verticalSpacing - lineH, statusText, true);
+  }
   if (state_ == State::Card && maxScroll_ > 0) {
     GUI.drawSideButtonHints(renderer, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   }
@@ -299,7 +397,7 @@ void WordCardActivity::render(RenderLock&&) {
   if (state_ == State::Failed) {
     confirmLabel = tr(STR_RETRY);
   } else if (state_ == State::Card) {
-    confirmLabel = detailOpen_ ? tr(STR_WORD_COLLAPSE) : tr(STR_WORD_DETAIL);
+    confirmLabel = detailOpen_ ? tr(STR_WORD_COLLAPSE) : (inWordbook_ ? tr(STR_WORD_REMOVE) : tr(STR_WORD_ADD));
   }
   const char* scrollUp = state_ == State::Card && maxScroll_ > 0 ? tr(STR_DIR_UP) : "";
   const char* scrollDown = state_ == State::Card && maxScroll_ > 0 ? tr(STR_DIR_DOWN) : "";

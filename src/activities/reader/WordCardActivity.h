@@ -16,8 +16,10 @@
 // waiting frame is painted (the DictionaryActivity/Ask-AI pattern).
 //
 // M1 scope: word, phonetic, part of speech, meaning, and a Confirm-expanded
-// example block. 加入生词 arrives with the wordbook sync (M1-5) and the voice
-// layer in M3; neither may regress the two-layer interaction here.
+// example block, plus 加入/移出生词 on SD with one opportunistic relay sync.
+// The voice layer arrives in M3; it must not regress the layered interaction:
+// front Confirm adds/removes while the detail block is closed, second Confirm
+// expands 例句/译文, Back steps out one layer at a time.
 class WordCardActivity final : public Activity {
  public:
   WordCardActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const char* word)
@@ -31,6 +33,17 @@ class WordCardActivity final : public Activity {
 
  private:
   enum class State : uint8_t { Loading, Card, Failed };
+
+  // One-line feedback under the card (加入/移出 + sync state).
+  enum class Status : uint8_t {
+    None,
+    AddedPending,  // saved on SD, sync not attempted yet
+    Syncing,
+    AddedSynced,
+    AddedSyncFailed,
+    Removed,
+    SaveFailed,
+  };
 
   struct Row {
     std::string label;                 // includes the 【】 markers, drawn as-is
@@ -54,8 +67,13 @@ class WordCardActivity final : public Activity {
   bool detailOpen_ = false;
   int scrollLine_ = 0;
   const char* failText_ = nullptr;
+  bool relayConfigured_ = false;
+  bool inWordbook_ = false;
+  bool wordSynced_ = false;
+  Status status_ = Status::None;
 
   void beginLookup();
   void buildCard(int fontId, int textWidth);
   void toggleDetail();
+  void toggleAdd();
 };
