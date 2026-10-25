@@ -131,11 +131,17 @@ enum class Field : uint8_t {
   ImageWidth,
   ImageHeight,
   ImageBytes,
+  // /api/v1/learning success bodies: {"ok":true,"accepted":N,"added":N}.
+  // "ok" / "accepted" / "added" appear in no other body this parser sees.
+  Ok,
+  Accepted,
+  Added,
 };
 
 Field classifyKey(const char* k, size_t n) {
   switch (n) {
     case 2:
+      if (memcmp(k, "ok", 2) == 0) return Field::Ok;
       return memcmp(k, "id", 2) == 0 ? Field::ImageId : Field::None;
     case 3:
       return memcmp(k, "seq", 3) == 0 ? Field::Seq : Field::None;
@@ -143,6 +149,7 @@ Field classifyKey(const char* k, size_t n) {
       if (memcmp(k, "error", 5) == 0) return Field::Error;
       if (memcmp(k, "width", 5) == 0) return Field::ImageWidth;
       if (memcmp(k, "bytes", 5) == 0) return Field::ImageBytes;
+      if (memcmp(k, "added", 5) == 0) return Field::Added;
       return Field::None;
     case 4:
       if (memcmp(k, "type", 4) == 0) return Field::Type;
@@ -159,6 +166,7 @@ Field classifyKey(const char* k, size_t n) {
     case 8:
       if (memcmp(k, "asrFinal", 8) == 0) return Field::LatAsrFinal;
       if (memcmp(k, "llmFinal", 8) == 0) return Field::LatLlmFinal;
+      if (memcmp(k, "accepted", 8) == 0) return Field::Accepted;
       return Field::None;
     case 9:
       if (memcmp(k, "requestId", 9) == 0) return Field::RequestId;
@@ -489,6 +497,11 @@ struct ChatParseState {
   int32_t imageWidth = 0;
   int32_t imageHeight = 0;
   int32_t imageBytes = 0;
+  // /api/v1/learning success bodies: "ok" plus the two batch counters.
+  bool ok = false;
+  bool sawOk = false;
+  int32_t accepted = -1;
+  int32_t added = -1;
   bool sawText = false;
   bool sawImageId = false;
   bool strokesOverflowed = false;
@@ -510,6 +523,10 @@ struct ChatParseState {
     imageWidth = 0;
     imageHeight = 0;
     imageBytes = 0;
+    ok = false;
+    sawOk = false;
+    accepted = -1;
+    added = -1;
     sawText = false;
     sawImageId = false;
     strokesOverflowed = false;
@@ -598,11 +615,23 @@ struct ChatParseState {
       case Field::ImageBytes:
         st->imageBytes = parseI32(value, len);
         break;
+      case Field::Accepted:
+        st->accepted = parseI32(value, len);
+        break;
+      case Field::Added:
+        st->added = parseI32(value, len);
+        break;
       default:
         break;
     }
   }
-  static void onBoolCb(void*, bool) {}
+  static void onBoolCb(void* ctx, bool value) {
+    auto* st = static_cast<ChatParseState*>(ctx);
+    if (st->field == Field::Ok) {
+      st->ok = value;
+      st->sawOk = true;
+    }
+  }
   static void onNullCb(void*) {}
   static void onObjectStartCb(void*) {}
   static void onObjectEndCb(void*) {}
@@ -651,6 +680,22 @@ bool parseChatResponse(const char* json, size_t len, char* textOut, size_t textC
   truncated = g_chatState.truncated;
   error = g_chatState.error;
   return g_chatState.sawText;
+}
+
+bool parseAddWordsResponse(const char* json, size_t len, AddWordsResult& out) {
+  out = AddWordsResult{};
+  g_chatState.begin(nullptr, 0, nullptr, 0);
+  if (json == nullptr || len == 0) return false;
+
+  g_chatParser.reset();
+  g_chatParser.feed(json, len);
+  if (g_chatParser.hasError()) return false;
+
+  out.ok = g_chatState.ok;
+  out.accepted = g_chatState.accepted;
+  out.added = g_chatState.added;
+  out.error = g_chatState.error;
+  return g_chatState.sawOk;
 }
 
 bool parseImageResponse(const char* json, size_t len, ImageMeta& out, char* textOut, size_t textCap, ErrorCode& error) {
@@ -746,6 +791,25 @@ size_t buildChatRequest(char* out, size_t cap, const char* requestId, const char
     if (!appendLiteral(out, cap, pos, "\"")) return 0;
   }
   if (!appendLiteral(out, cap, pos, "}")) return 0;
+  if (!finishFrame(out, cap, pos)) return 0;
+  return pos;
+}
+
+size_t buildAddWordsRequest(char* out, size_t cap, const char* const* words, size_t count, const char* source) {
+  if (out == nullptr || cap == 0 || words == nullptr || count == 0) return 0;
+  if (source == nullptr) source = "lookup";
+  size_t pos = 0;
+  if (!appendLiteral(out, cap, pos, "{\"words\":[")) return 0;
+  for (size_t i = 0; i < count; ++i) {
+    if (words[i] == nullptr || words[i][0] == '\0') return 0;
+    if (i > 0 && !appendLiteral(out, cap, pos, ",")) return 0;
+    if (!appendLiteral(out, cap, pos, "\"")) return 0;
+    if (!appendEscaped(out, cap, pos, words[i], strlen(words[i]))) return 0;
+    if (!appendLiteral(out, cap, pos, "\"")) return 0;
+  }
+  if (!appendLiteral(out, cap, pos, "],\"source\":\"")) return 0;
+  if (!appendEscaped(out, cap, pos, source, strlen(source))) return 0;
+  if (!appendLiteral(out, cap, pos, "\"}")) return 0;
   if (!finishFrame(out, cap, pos)) return 0;
   return pos;
 }

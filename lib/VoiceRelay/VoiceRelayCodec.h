@@ -190,6 +190,36 @@ size_t buildChatRequest(char* out, size_t cap, const char* requestId, const char
 bool parseChatResponse(const char* json, size_t len, char* textOut, size_t textCap, bool& truncated, ErrorCode& error,
                        char* strokesOut = nullptr, size_t strokesCap = 0);
 
+// ── learning endpoint (百词斩 word book sync) ─────────────────────────────
+//
+// POST <origin>/api/v1/learning/words with {"words":["...",...],"source":"..."}
+// (relay/relay/main.py learning_add_words): success body
+// {"ok":true,"accepted":N,"added":N}; errors as {"error":"UNAUTHORIZED"} or
+// {"error":"invalid_words","max":200}. The relay accepts at most
+// LEARNING_MAX_WORDS_PER_REQUEST entries per call — the device chunks smaller
+// (LEARNING_CHUNK_WORDS) so one request stays near 1 KB on the wire.
+
+constexpr size_t LEARNING_MAX_WORDS_PER_REQUEST = 200;
+constexpr size_t LEARNING_CHUNK_WORDS = 16;
+
+struct AddWordsResult {
+  bool ok = false;                    // body carried "ok" (true)
+  int32_t accepted = -1;              // echoed request size; -1 = absent
+  int32_t added = -1;                 // rows newly inserted; -1 = absent
+  ErrorCode error = ErrorCode::None;  // {"error":...} / {"code":...} body
+};
+
+// Builds the request body; `words` entries are escaped through the shared JSON
+// escaper. Returns 0 (and never a partial frame) on a null/empty word, a null
+// array, or when the frame does not fit `cap`.
+size_t buildAddWordsRequest(char* out, size_t cap, const char* const* words, size_t count,
+                            const char* source = "lookup");
+
+// True when the body carried "ok" (an empty-batch echo is still a success).
+// On false, out.error holds the token from an {"error":...} body so the
+// transport can map 401/400 without a second parser.
+bool parseAddWordsResponse(const char* json, size_t len, AddWordsResult& out);
+
 // ── image endpoint (AI 生图) ─────────────────────────────────────────────
 //
 // POST <origin>/api/v1/image on the same relay (relay/relay/main.py
