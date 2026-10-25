@@ -42,6 +42,7 @@
 #include "RecentBooksStore.h"
 #include "RuledLineSettingsActivity.h"
 #include "SdCardFontSystem.h"
+#include "WordCardActivity.h"
 #include "activities/settings/SettingsActivity.h"
 #include "activities/voice/VoiceActivity.h"
 #include "components/UITheme.h"
@@ -524,7 +525,8 @@ void EpubReaderActivity::buildDictCellTable(const Page& page, const int fontId, 
 
   // Pass 2: walk every word and emit one cell per glyph.
   size_t lineIdx = 0;
-  for (const auto& el : page.elements) {
+  for (size_t elIdx = 0; elIdx < page.elements.size(); ++elIdx) {
+    const auto& el = page.elements[elIdx];
     if (el->getTag() != TAG_PageLine) continue;
     const auto& lineEl = static_cast<const PageLine&>(*el);
     const auto* block = lineEl.getBlock().get();
@@ -565,6 +567,7 @@ void EpubReaderActivity::buildDictCellTable(const Page& page, const int fontId, 
           cell.x = static_cast<int16_t>(penX);
           cell.adv = static_cast<int16_t>(std::max(1, fp4::toPixel(advanceFP)));
           cell.line = static_cast<uint8_t>(lineIdx);
+          cell.wordIdx = static_cast<uint16_t>(i);
         }
         prevAdvanceFP = advanceFP;
         prevCp = cp;
@@ -572,7 +575,7 @@ void EpubReaderActivity::buildDictCellTable(const Page& page, const int fontId, 
     }
     if (dictCharCount_ > firstChar) {
       dictLines_[lineIdx] = DictLine{static_cast<int16_t>(lineTop), static_cast<uint16_t>(firstChar),
-                                     static_cast<uint16_t>(dictCharCount_ - firstChar)};
+                                     static_cast<uint16_t>(dictCharCount_ - firstChar), static_cast<uint16_t>(elIdx)};
       lineIdx++;
     }
   }
@@ -581,6 +584,49 @@ void EpubReaderActivity::buildDictCellTable(const Page& page, const int fontId, 
   dictCellTableValid_ = dictCharCount_ > 0 && dictLineCount_ > 0;
   LOG_INF("ERS", "dict picker: %u chars on %u lines", static_cast<unsigned>(dictCharCount_),
           static_cast<unsigned>(dictLineCount_));
+}
+
+bool EpubReaderActivity::extractWordAtCursor(const Page& page, std::string& out) const {
+  if (!dictCellTableValid_ || dictCursor_ >= dictCharCount_) return false;
+  const DictChar& cell = dictChars_[dictCursor_];
+  if (cell.line >= dictLineCount_) return false;
+  const DictLine& line = dictLines_[cell.line];
+  if (line.elementIdx >= page.elements.size()) return false;
+  const PageElement& el = *page.elements[line.elementIdx];
+  if (el.getTag() != TAG_PageLine) return false;
+  const auto& words = static_cast<const PageLine&>(el).getBlock()->getWords();
+  if (cell.wordIdx >= words.size()) return false;
+  const std::string& token = words[cell.wordIdx];
+
+  // Longest ASCII-letter run; ' and - join only when letters sit on both
+  // sides (it’s, well-known). Non-ASCII bytes never match, so a CJK token
+  // yields nothing and stays on the character-card path.
+  const auto isLetter = [](char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); };
+  size_t bestStart = 0;
+  size_t bestLen = 0;
+  size_t runStart = 0;
+  size_t runLen = 0;
+  for (size_t i = 0; i <= token.size(); ++i) {
+    const char c = i < token.size() ? token[i] : '\0';
+    const bool join = (c == '\'' || c == '-') && runLen > 0 && i + 1 < token.size() && isLetter(token[i + 1]);
+    if (isLetter(c) || join) {
+      if (runLen == 0) runStart = i;
+      ++runLen;
+    } else if (runLen > 0) {
+      if (runLen > bestLen) {
+        bestLen = runLen;
+        bestStart = runStart;
+      }
+      runLen = 0;
+    }
+  }
+  if (bestLen < 2) return false;  // single letters are not worth a card
+
+  out.assign(token, bestStart, bestLen);
+  for (char& c : out) {
+    if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+  }
+  return true;
 }
 
 void EpubReaderActivity::moveDictCursor(const int dChar, const int dLine) {
@@ -621,6 +667,21 @@ void EpubReaderActivity::moveDictCursor(const int dChar, const int dLine) {
 void EpubReaderActivity::launchDictionaryLookup() {
   if (!dictCellTableValid_ || dictCursor_ >= dictCharCount_) return;
   const uint32_t cp = dictChars_[dictCursor_].cp;
+  // ASCII letter under the cursor: open the English word card instead of the
+  // per-character Hanzi card (§4.3 prefers the direct word over candidates).
+  if ((cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z')) {
+    std::string word;
+    if (section) {
+      auto page = section->loadPageFromSectionFile();
+      if (page && extractWordAtCursor(*page, word)) {
+        LOG_INF("ERS", "word lookup: %s", word.c_str());
+        startActivityForResult(std::make_unique<WordCardActivity>(renderer, mappedInput, word.c_str()),
+                               [this](const ActivityResult&) { requestUpdate(); });
+        return;
+      }
+    }
+    LOG_INF("ERS", "no word at cursor; falling back to the character card");
+  }
   LOG_INF("ERS", "dictionary lookup for U+%04X", static_cast<unsigned>(cp));
   startActivityForResult(std::make_unique<DictionaryActivity>(renderer, mappedInput, cp),
                          [this](const ActivityResult&) { requestUpdate(); });  // repaint page + cursor box

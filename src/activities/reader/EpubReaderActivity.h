@@ -255,11 +255,16 @@ class EpubReaderActivity final : public Activity {
     int16_t x = 0;    // cell left edge, framebuffer coords (margins applied)
     int16_t adv = 0;  // cell advance width, >= 1 px
     uint8_t line = 0;
+    // Index into DictLine's block words: lets a lookup resolve the cursor to
+    // the full whitespace token without re-running ligature logic (fallback 0
+    // is harmless — the cell still maps to the line's first word).
+    uint16_t wordIdx = 0;
   };
   struct DictLine {
     int16_t y = 0;  // line top, framebuffer coords
     uint16_t first = 0;
     uint16_t count = 0;
+    uint16_t elementIdx = 0;  // index into Page::elements for this line
   };
   bool dictPickActive_ = false;
   bool dictShowHelp_ = false;        // one hint overlay until the first move
@@ -278,6 +283,11 @@ class EpubReaderActivity final : public Activity {
   void exitDictPick();
   void freeDictCellTable();
   void buildDictCellTable(const Page& page, int fontId, int xOffset, int yOffset);
+  // Resolves the dict cursor to an English word for the word card: the
+  // whitespace token holding the cursor glyph (identity recorded at table
+  // build, so ligatures cannot shift it), trimmed to its longest ASCII
+  // letter run. False for CJK tokens and single letters.
+  bool extractWordAtCursor(const Page& page, std::string& out) const;
   void moveDictCursor(int dChar, int dLine);
   void launchDictionaryLookup();
 };
