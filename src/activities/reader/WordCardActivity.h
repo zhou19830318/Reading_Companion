@@ -73,6 +73,7 @@ class WordCardActivity final : public Activity {
   Status status_ = Status::None;
 
   void beginLookup();
+  void promptForWifi();
   void buildCard(int fontId, int textWidth);
   void toggleDetail();
   void toggleAdd();

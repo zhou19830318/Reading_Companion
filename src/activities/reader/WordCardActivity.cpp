@@ -18,6 +18,7 @@
 #include "LearningSync.h"
 #include "MappedInputManager.h"
 #include "WordBook.h"
+#include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -63,9 +64,7 @@ void WordCardActivity::beginLookup() {
     return;
   }
   if (WiFi.status() != WL_CONNECTED) {
-    failText_ = tr(STR_STT_NO_NETWORK);
-    state_ = State::Failed;
-    requestUpdate();
+    promptForWifi();
     return;
   }
   CLOUD_CFG.load();  // NVS, idempotent; the same source the voice screen reads
@@ -101,6 +100,25 @@ void WordCardActivity::beginLookup() {
     state_ = State::Failed;
   }
   requestUpdate();
+}
+
+void WordCardActivity::promptForWifi() {
+  // Ask-at-send, matching the dictionary/Ask-AI screens: cancelling surfaces as
+  // a failed lookup whose Confirm retry re-prompts; `started_` stays set while
+  // the picker is up so the Loading branch cannot fire a second prompt.
+  LOG_INF("WORD", "no WiFi; prompting for network");
+  started_ = true;
+  startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
+                         [this](const ActivityResult& result) {
+                           if (result.isCancelled) {
+                             failText_ = tr(STR_STT_NO_NETWORK);
+                             state_ = State::Failed;
+                           } else {
+                             started_ = false;
+                             state_ = State::Loading;
+                           }
+                           requestUpdate();
+                         });
 }
 
 void WordCardActivity::loop() {
