@@ -277,8 +277,8 @@ void VoiceActivity::resetRoundTrip() {
   // A new capture inherits nothing from a summarize round: pendingText_ points
   // at historyLine_, which the next recordHistoryTurn() needs as append
   // scratch, and summaryRound_/cameFromHistory_ belong to the old round only.
-  // A failed summary still retries from its own Failed screen (these are not
-  // cleared there — pendingText_ must survive until the retry or a new round).
+  // Cleared on entry to a summary round as well (sendHistorySummary), before
+  // the flags are re-armed for the new round.
   pendingText_ = nullptr;
   summaryRound_ = false;
   cameFromHistory_ = false;
@@ -762,7 +762,9 @@ void VoiceActivity::settleRelaySuccess() {
   // The session is over but the socket stays up: the next round arms a fresh
   // session on it (no dial in the capture window). relayRound_ keeps routing
   // the panel and the history append to relayReply_.
-  recordHistoryTurn();
+  // Backstop: a stale settle during a summarize round must not append the
+  // summary label as a fake user turn (the session path guards the same way).
+  if (!summaryRound_) recordHistoryTurn();
   // The answer is shown and fallback is off the table: release the PCM the way
   // finishTranscription() does for the legacy pipeline.
   recorder_.close();
@@ -1001,6 +1003,11 @@ void VoiceActivity::sendHistorySummary() {
     requestUpdate();
     return;
   }
+  // A settled relay round leaves relayRound_/relayDone_ up; without the reset
+  // below this round would route into loopRelaySending(), re-show the previous
+  // relay answer under the summary label and append a fake turn (the guard in
+  // settleRelaySuccess is the backstop). Flags are set again right after.
+  resetRoundTrip();
   // Display keeps the short label; the long prompt goes out via pendingText_.
   snprintf(transcript_, sizeof(transcript_), "%s %s", tr(STR_VOICE_SUMMARY_OF), label);
   haveTranscript_ = true;
