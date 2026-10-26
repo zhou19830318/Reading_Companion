@@ -97,6 +97,25 @@ def test_review_queue_intervals_and_ordering(tmp_path):
         store.close()
 
 
+def test_remove_words_tombstone_and_reactivate(tmp_path):
+    store = LearningStore(tmp_path / "learning.db")
+    store.open()
+    try:
+        assert store.add_words("dev", [("rust", "lookup")]) == 1
+        assert store.remove_words("dev", ["rust", "ghost"]) == 1
+        assert store.list_words("dev", state="active") == []
+        assert [row["word"] for row in store.list_words("dev", state="removed")] == ["rust"]
+        # Second removal is a no-op (already a tombstone).
+        assert store.remove_words("dev", ["rust"]) == 0
+        # Re-add reactivates; the return value still counts only new rows.
+        assert store.add_words("dev", [("rust", "lookup")]) == 0
+        assert [row["word"] for row in store.list_words("dev", state="active")] == ["rust"]
+        # Another device's removal never touches this device's book.
+        assert store.remove_words("other", ["rust"]) == 0
+    finally:
+        store.close()
+
+
 def test_config_learning_db_path(monkeypatch, tmp_path):
     monkeypatch.setenv("RELAY_LEARNING_DIR", str(tmp_path / "learning"))
     reload_settings()

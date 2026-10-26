@@ -54,13 +54,48 @@ def test_word_batch_add_and_list(client):
     assert all(w["source"] == "lookup" for w in listing["words"])
 
     filtered = client.get("/api/v1/learning/words", headers=DEVICE, params={"state": "new"}).json()
-    assert filtered["count"] == 0  # default state is 'active'
+    assert filtered["count"] == 0  # no word ever carries state 'new'
 
 
 def test_word_batch_validation(client):
     assert client.post("/api/v1/learning/words", headers=DEVICE, json={"words": []}).status_code == 400
     too_many = ["w%d" % i for i in range(201)]
     assert client.post("/api/v1/learning/words", headers=DEVICE, json={"words": too_many}).status_code == 400
+
+
+def test_word_removal_reactivation_and_queue(client):
+    client.post("/api/v1/learning/words", headers=DEVICE, json={"words": ["rust", "profiles"]})
+
+    resp = client.post("/api/v1/learning/words/remove", headers=DEVICE, json={"words": ["rust", "ghost"]})
+    assert resp.status_code == 200
+    # accepted echoes the request; removed counts rows that were active.
+    assert resp.json() == {"ok": True, "accepted": 2, "removed": 1}
+
+    # No state filter lists every row (the response carries each state);
+    # state= filters to one book view.
+    active = client.get("/api/v1/learning/words", headers=DEVICE, params={"state": "active"}).json()
+    assert [w["word"] for w in active["words"]] == ["profiles"]
+    tombstones = client.get("/api/v1/learning/words", headers=DEVICE, params={"state": "removed"}).json()
+    assert [w["word"] for w in tombstones["words"]] == ["rust"]
+
+    # Removed words leave the review queue immediately.
+    queue = client.get("/api/v1/learning/review", headers=DEVICE).json()
+    assert [w["word"] for w in queue["words"]] == ["profiles"]
+
+    # Re-adding flips the tombstone back to active (added stays 0: no new row).
+    again = client.post("/api/v1/learning/words", headers=DEVICE, json={"words": ["rust"]})
+    assert again.json()["added"] == 0
+    active = client.get("/api/v1/learning/words", headers=DEVICE, params={"state": "active"}).json()
+    assert {w["word"] for w in active["words"]} == {"rust", "profiles"}
+
+
+def test_word_removal_validation_and_auth(client):
+    assert client.post("/api/v1/learning/words/remove", json={"words": ["x"]}).status_code == 401
+    assert client.post("/api/v1/learning/words/remove", headers=DEVICE, json={"words": []}).status_code == 400
+    too_many = ["w%d" % i for i in range(201)]
+    assert (
+        client.post("/api/v1/learning/words/remove", headers=DEVICE, json={"words": too_many}).status_code == 400
+    )
 
 
 def test_review_idempotent_and_auto_adds_word(client):

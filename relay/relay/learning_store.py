@@ -107,6 +107,9 @@ class LearningStore:
         """Insert word-book entries as (word, source); returns rows added.
 
         INSERT OR IGNORE makes retries and intra-batch duplicates no-ops.
+        A word previously removed (state='removed') is re-activated instead of
+        staying a tombstone — re-adding it must put it back in the queue.
+        `added` counts only newly inserted rows; re-activations are implicit.
         """
         cleaned = [(word.strip(), (source or "lookup").strip() or "lookup") for word, source in entries]
         cleaned = [(word, source) for word, source in cleaned if word]
@@ -116,6 +119,30 @@ class LearningStore:
         cur = conn.executemany(
             "INSERT OR IGNORE INTO words(device_id, word, added_at, source) VALUES(?,?,?,?)",
             [(device_id, word, _now(), source) for word, source in cleaned],
+        )
+        added = cur.rowcount
+        conn.executemany(
+            "UPDATE words SET state='active' WHERE device_id=? AND word=? AND state='removed'",
+            [(device_id, word) for word, _ in cleaned],
+        )
+        conn.commit()
+        return added
+
+    def remove_words(self, device_id: str, words: list[str]) -> int:
+        """Set active words to state='removed'; returns rows changed.
+
+        Removed words leave the review queue immediately (review_queue only
+        serves state='active'); their review history stays for the record and
+        a later add_words flips them back to active.
+        """
+        cleaned = [word.strip() for word in words]
+        cleaned = [word for word in cleaned if word]
+        if not cleaned:
+            return 0
+        conn = self.conn
+        cur = conn.executemany(
+            "UPDATE words SET state='removed' WHERE device_id=? AND word=? AND state='active'",
+            [(device_id, word) for word in cleaned],
         )
         conn.commit()
         return cur.rowcount

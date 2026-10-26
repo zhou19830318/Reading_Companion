@@ -622,6 +622,22 @@ async def learning_add_words(request: Request, body: LearningWordsRequest):
     return {"ok": True, "accepted": len(body.words), "added": added}
 
 
+@app.post("/api/v1/learning/words/remove")
+async def learning_remove_words(request: Request, body: LearningWordsRequest):
+    settings = get_settings()
+    device_id, error = _learning_device(settings, request)
+    if error is not None:
+        return error
+    if not body.words or len(body.words) > LEARNING_MAX_WORD_BATCH:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "invalid_words", "max": LEARNING_MAX_WORD_BATCH},
+        )
+    removed = app.state.learning.remove_words(device_id, body.words)
+    log.info("learning word removal", extra={"deviceId": device_id, "requested": len(body.words), "removed": removed})
+    return {"ok": True, "accepted": len(body.words), "removed": removed}
+
+
 @app.get("/api/v1/learning/review")
 async def learning_review_queue(request: Request, limit: int = 20):
     settings = get_settings()
