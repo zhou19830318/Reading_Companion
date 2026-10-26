@@ -622,6 +622,16 @@ async def learning_add_words(request: Request, body: LearningWordsRequest):
     return {"ok": True, "accepted": len(body.words), "added": added}
 
 
+@app.get("/api/v1/learning/review")
+async def learning_review_queue(request: Request, limit: int = 20):
+    settings = get_settings()
+    device_id, error = _learning_device(settings, request)
+    if error is not None:
+        return error
+    rows, due = app.state.learning.review_queue(device_id, limit=max(1, min(limit, 50)))
+    return {"count": len(rows), "due": due, "words": rows}
+
+
 @app.post("/api/v1/learning/review")
 async def learning_review(request: Request, body: LearningReviewRequest):
     settings = get_settings()

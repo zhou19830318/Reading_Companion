@@ -86,6 +86,30 @@ def test_review_idempotent_and_auto_adds_word(client):
     assert listing["words"][0]["source"] == "review"
 
 
+def test_review_queue_returns_due_words_and_total(client):
+    client.post("/api/v1/learning/words", headers=DEVICE, json={"words": ["abandon", "ability", "candid"]})
+    # Reviewed with 认识 (3) = not due again for 3 days.
+    client.post(
+        "/api/v1/learning/review",
+        headers=DEVICE,
+        json={"word": "candid", "rating": 3, "clientEventId": "evt-candid"},
+    )
+
+    body = client.get("/api/v1/learning/review", headers=DEVICE).json()
+    assert body["due"] == 2
+    assert body["count"] == 2
+    assert {w["word"] for w in body["words"]} == {"abandon", "ability"}
+    assert all(w["lastRating"] is None for w in body["words"])
+
+    limited = client.get("/api/v1/learning/review", headers=DEVICE, params={"limit": 1}).json()
+    assert limited["count"] == 1
+    assert limited["due"] == 2
+
+
+def test_review_queue_requires_token(client):
+    assert client.get("/api/v1/learning/review").status_code == 401
+
+
 def test_review_validation(client):
     bad = [
         {"word": "", "rating": 3, "clientEventId": "e"},

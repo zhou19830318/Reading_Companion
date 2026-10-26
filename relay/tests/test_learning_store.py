@@ -63,6 +63,40 @@ def test_unique_client_event_id_enforced(tmp_path):
         store.close()
 
 
+def test_review_queue_intervals_and_ordering(tmp_path):
+    from datetime import datetime, timedelta, timezone
+
+    store = LearningStore(tmp_path / "learning.db")
+    store.open()
+    try:
+        store.add_words("dev", [("new", "lookup"), ("missed", "lookup"), ("known", "lookup")])
+        now = datetime(2026, 10, 25, 12, 0, tzinfo=timezone.utc)
+        store.conn.execute(
+            "INSERT INTO review_events(device_id, word, rating, client_event_id, created_at) "
+            "VALUES('dev', 'missed', 1, 'e1', ?)",
+            ((now - timedelta(hours=2)).isoformat(timespec="seconds"),),
+        )
+        store.conn.execute(
+            "INSERT INTO review_events(device_id, word, rating, client_event_id, created_at) "
+            "VALUES('dev', 'known', 3, 'e2', ?)",
+            ((now - timedelta(hours=2)).isoformat(timespec="seconds"),),
+        )
+        store.conn.commit()
+
+        due, total = store.review_queue("dev", now=now)
+        assert total == 2
+        assert [row["word"] for row in due] == ["missed", "new"]
+        assert due[0]["lastRating"] == 1
+        assert due[1]["lastRating"] is None
+
+        later = now + timedelta(days=3)
+        due, total = store.review_queue("dev", now=later)
+        assert total == 3
+        assert {row["word"] for row in due} == {"new", "missed", "known"}
+    finally:
+        store.close()
+
+
 def test_config_learning_db_path(monkeypatch, tmp_path):
     monkeypatch.setenv("RELAY_LEARNING_DIR", str(tmp_path / "learning"))
     reload_settings()

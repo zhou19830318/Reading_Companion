@@ -17,10 +17,20 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 SCHEMA_VERSION = 1
+
+# Review spacing by rating (百词斩 §6.4 uses 忘记/模糊/认识 = 1/2/3; 4 is the
+# web's "easy"). 忘记 comes back inside the same session day so a missed word
+# is seen again before the day ends.
+REVIEW_INTERVALS = {
+    1: timedelta(hours=1),
+    2: timedelta(days=1),
+    3: timedelta(days=3),
+    4: timedelta(days=7),
+}
 
 
 def _now() -> str:
@@ -150,6 +160,67 @@ class LearningStore:
     def review_count(self, device_id: str) -> int:
         row = self.conn.execute("SELECT COUNT(*) AS c FROM review_events WHERE device_id = ?", (device_id,)).fetchone()
         return int(row["c"])
+
+    def review_queue(
+        self,
+        device_id: str,
+        now: datetime | None = None,
+        limit: int = 20,
+    ) -> tuple[list[dict], int]:
+        """Words whose last review has expired, oldest due first.
+
+        Returns (page, total_due). `now` is injectable for tests; production
+        callers omit it. A word without any review is due immediately, so a
+        fresh word book starts a queue as soon as it is looked up.
+        """
+        moment = now or datetime.now(timezone.utc)
+        rows = self.conn.execute(
+            """
+            SELECT w.word, w.added_at, w.source,
+                   (SELECT e.rating FROM review_events e
+                     WHERE e.device_id = w.device_id AND e.word = w.word
+                     ORDER BY e.id DESC LIMIT 1) AS rating,
+                   (SELECT e.created_at FROM review_events e
+                     WHERE e.device_id = w.device_id AND e.word = w.word
+                     ORDER BY e.id DESC LIMIT 1) AS last_review
+              FROM words w
+             WHERE w.device_id = ? AND w.state = 'active'
+            """,
+            (device_id,),
+        ).fetchall()
+
+        due: list[dict] = []
+        for row in rows:
+            last_review = row["last_review"]
+            if last_review:
+                try:
+                    last = datetime.fromisoformat(last_review)
+                except ValueError:
+                    last = None
+                if last is not None:
+                    if last.tzinfo is None:
+                        last = last.replace(tzinfo=timezone.utc)
+                    interval = REVIEW_INTERVALS.get(int(row["rating"] or 1), REVIEW_INTERVALS[1])
+                    due_at = last + interval
+                    if due_at > moment:
+                        continue
+                else:
+                    due_at = moment
+            else:
+                due_at = moment
+            due.append(
+                {
+                    "word": row["word"],
+                    "addedAt": row["added_at"],
+                    "source": row["source"],
+                    "lastRating": int(row["rating"]) if row["rating"] is not None else None,
+                    "lastReviewedAt": last_review,
+                    "dueAt": due_at.isoformat(timespec="seconds"),
+                }
+            )
+
+        due.sort(key=lambda item: (item["dueAt"], item["word"]))
+        return due[:limit], len(due)
 
     def close(self) -> None:
         if self._conn is not None:
