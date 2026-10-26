@@ -41,6 +41,42 @@ TEST(LearningCodecBuild, RejectsInvalidInput) {
   EXPECT_EQ(0u, VoiceRelay::buildAddWordsRequest(out, 20, ok, 1));
 }
 
+// ── remove endpoint (移出生词) ─────────────────────────────────────────────
+// relay/relay/main.py learning_remove_words: {"words":[...]} in (no source
+// field), {"ok":true,"accepted":N,"removed":N} out.
+
+TEST(LearningCodecBuild, RemoveRequestMatchesServerContract) {
+  const char* words[] = {"abandon", "candid"};
+  char out[256];
+  const size_t n = VoiceRelay::buildRemoveWordsRequest(out, sizeof(out), words, 2);
+  ASSERT_GT(n, 0u);
+  EXPECT_STREQ(R"({"words":["abandon","candid"]})", out);
+  EXPECT_EQ(std::strlen(out), n);
+
+  const char* single[] = {"candid"};
+  ASSERT_GT(VoiceRelay::buildRemoveWordsRequest(out, sizeof(out), single, 1), 0u);
+  EXPECT_STREQ(R"({"words":["candid"]})", out);
+}
+
+TEST(LearningCodecBuild, RemoveRequestEscapesAndRejectsInvalidInput) {
+  char out[256];
+  const char* quoted[] = {"a\"b"};
+  ASSERT_GT(VoiceRelay::buildRemoveWordsRequest(out, sizeof(out), quoted, 1), 0u);
+  EXPECT_STREQ(R"({"words":["a\"b"]})", out);
+
+  const char* ok[] = {"word"};
+  const char* nullEntry[] = {"word", nullptr};
+  const char* emptyEntry[] = {""};
+  EXPECT_EQ(0u, VoiceRelay::buildRemoveWordsRequest(nullptr, sizeof(out), ok, 1));
+  EXPECT_EQ(0u, VoiceRelay::buildRemoveWordsRequest(out, sizeof(out), nullptr, 1));
+  EXPECT_EQ(0u, VoiceRelay::buildRemoveWordsRequest(out, sizeof(out), ok, 0));
+  EXPECT_EQ(0u, VoiceRelay::buildRemoveWordsRequest(out, sizeof(out), nullEntry, 2));
+  EXPECT_EQ(0u, VoiceRelay::buildRemoveWordsRequest(out, sizeof(out), emptyEntry, 1));
+  // {"words":["word"]} is 18 bytes + NUL: 10 cannot hold it, 20 can.
+  EXPECT_EQ(0u, VoiceRelay::buildRemoveWordsRequest(out, 10, ok, 1));
+  EXPECT_GT(VoiceRelay::buildRemoveWordsRequest(out, 20, ok, 1), 0u);
+}
+
 TEST(LearningCodecParse, SuccessBody) {
   const char* body = R"({"ok":true,"accepted":3,"added":2})";
   VoiceRelay::AddWordsResult out;
@@ -58,6 +94,18 @@ TEST(LearningCodecParse, EmptyBatchEchoIsStillSuccess) {
   EXPECT_TRUE(out.ok);
   EXPECT_EQ(0, out.accepted);
   EXPECT_EQ(0, out.added);
+}
+
+TEST(LearningCodecParse, RemoveAckParsesWithOkOnly) {
+  // The relay answers a removal with "removed", not "added"; the device acts
+  // on ok/error, so the count must not block the ack.
+  const char* body = R"({"ok":true,"accepted":2,"removed":1})";
+  VoiceRelay::AddWordsResult out;
+  ASSERT_TRUE(VoiceRelay::parseAddWordsResponse(body, std::strlen(body), out));
+  EXPECT_TRUE(out.ok);
+  EXPECT_EQ(2, out.accepted);
+  EXPECT_EQ(-1, out.added);
+  EXPECT_EQ(VoiceRelay::ErrorCode::None, out.error);
 }
 
 TEST(LearningCodecParse, ErrorBodyCarriesCode) {
@@ -91,8 +139,7 @@ const char* kQueueBody =
 
 TEST(LearningReviewBuild, RequestMatchesServerContract) {
   char out[256];
-  const size_t n =
-      VoiceRelay::buildReviewRequest(out, sizeof(out), "abandon", 3, "0123456789abcdef0123456789abcdef");
+  const size_t n = VoiceRelay::buildReviewRequest(out, sizeof(out), "abandon", 3, "0123456789abcdef0123456789abcdef");
   ASSERT_GT(n, 0u);
   EXPECT_STREQ(R"({"word":"abandon","rating":3,"clientEventId":"0123456789abcdef0123456789abcdef"})", out);
   EXPECT_EQ(std::strlen(out), n);
@@ -152,8 +199,7 @@ TEST(LearningReviewParse, QueueErrorAndGarbageFail) {
   VoiceRelay::ReviewItem items[4];
   size_t stored = 0;
   VoiceRelay::ReviewQueueResult result;
-  EXPECT_FALSE(
-      VoiceRelay::parseReviewQueueResponse(errorBody, std::strlen(errorBody), items, 4, stored, result));
+  EXPECT_FALSE(VoiceRelay::parseReviewQueueResponse(errorBody, std::strlen(errorBody), items, 4, stored, result));
   EXPECT_EQ(0u, stored);
   EXPECT_EQ(-1, result.due);
 

@@ -189,6 +189,22 @@ void WordCardActivity::toggleAdd() {
       inWordbook_ = false;
       wordSynced_ = false;
       status_ = Status::Removed;
+      // Same opportunistic push as the add: the tombstone rides syncPending's
+      // removal phase and is dropped once the relay acknowledges it. Offline
+      // it stays queued for the next sync (add or review entry).
+      if (relayConfigured_ && WiFi.status() == WL_CONNECTED) {
+        status_ = Status::Syncing;
+        requestUpdateAndWait();  // paint before the blocking round trip
+        const auto outcome =
+            Learning::LearningSync::syncPending(CLOUD_CFG.relayUrl, CLOUD_CFG.relayToken, CLOUD_CFG.relayDeviceId);
+        if (outcome.error != nullptr || !outcome.attempted) {
+          LOG_ERR("WORD", "removal sync: %s (%u synced)", outcome.error != nullptr ? outcome.error : "no-op",
+                  static_cast<unsigned>(outcome.synced));
+          status_ = Status::RemovedSyncFailed;
+        } else {
+          status_ = Status::Removed;
+        }
+      }
     } else {
       LOG_ERR("WORD", "wordbook remove failed: %s", word_.c_str());
       status_ = Status::SaveFailed;
@@ -333,6 +349,10 @@ void WordCardActivity::render(RenderLock&&) {
       break;
     case Status::Removed:
       statusText = tr(STR_WORD_REMOVED);
+      break;
+    case Status::RemovedSyncFailed:
+      snprintf(statusBuf, sizeof(statusBuf), "%s · %s", tr(STR_WORD_REMOVED), tr(STR_WORD_SYNC_FAILED));
+      statusText = statusBuf;
       break;
     case Status::SaveFailed:
       statusText = tr(STR_WORD_SAVE_FAILED);

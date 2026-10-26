@@ -32,7 +32,7 @@ bool rewriteFile(Fn&& fn) {
 
 }  // namespace
 
-bool WordBook::contains(const char* word, bool* synced) {
+bool WordBook::find(const char* word, WordBookFormat::Entry& out) {
   if (!WordBookFormat::validWord(word)) return false;
   recoverRewrite(WordBookFormat::FILE_PATH, TMP_PATH);
   if (!Storage.exists(WordBookFormat::FILE_PATH)) return false;
@@ -46,23 +46,51 @@ bool WordBook::contains(const char* word, bool* synced) {
     WordBookFormat::Entry entry;
     if (!WordBookFormat::parseLine(line, len, entry)) continue;
     if (strcmp(entry.word, word) == 0) {
-      if (synced != nullptr) *synced = entry.synced;
+      out = entry;
       return true;
     }
   }
   return false;
 }
 
+bool WordBook::contains(const char* word, bool* synced) {
+  WordBookFormat::Entry entry;
+  if (!find(word, entry)) return false;
+  if (entry.state == WordBookFormat::State::Removing) return false;  // tombstoned: left the book
+  if (synced != nullptr) *synced = entry.state == WordBookFormat::State::Synced;
+  return true;
+}
+
 bool WordBook::add(const char* word, const uint32_t addedAt, bool& added) {
   added = false;
-  WordBookFormat::Entry entry;
-  entry.addedAt = addedAt;
   if (!WordBookFormat::validWord(word)) {
     LOG_ERR("LRN", "add: bad word");
     return false;
   }
+
+  WordBookFormat::Entry existing;
+  if (find(word, existing)) {
+    if (existing.state != WordBookFormat::State::Removing) return true;  // duplicate
+    // Re-adding a tombstoned word queues a fresh add: the relay's add flips
+    // its removed row back to active (a no-op when the removal never landed),
+    // so either order of in-flight ops converges.
+    const bool ok = rewriteFile([&](WordBookFormat::Entry& entry) {
+      if (strcmp(entry.word, word) != 0) return true;
+      entry.state = WordBookFormat::State::Pending;
+      entry.addedAt = addedAt;
+      return true;
+    });
+    if (!ok) {
+      LOG_ERR("LRN", "add: rewrite failed");
+      return false;
+    }
+    added = true;
+    return true;
+  }
+
+  WordBookFormat::Entry entry;
+  entry.addedAt = addedAt;
   snprintf(entry.word, sizeof(entry.word), "%s", word);
-  if (contains(word)) return true;  // duplicate
 
   if (!Storage.ensureDirectoryExists(WordBookFormat::DIR)) {
     LOG_ERR("LRN", "mkdir failed: %s", WordBookFormat::DIR);
@@ -89,15 +117,16 @@ bool WordBook::add(const char* word, const uint32_t addedAt, bool& added) {
 
 bool WordBook::remove(const char* word) {
   if (!WordBookFormat::validWord(word)) return true;  // can never be a member
-  bool removed = false;
+  bool touched = false;
   const bool ok = rewriteFile([&](WordBookFormat::Entry& entry) {
-    if (strcmp(entry.word, word) == 0) {
-      removed = true;
-      return false;
-    }
+    if (strcmp(entry.word, word) != 0) return true;
+    // Tombstone regardless of the previous state (see the header): the relay
+    // remove is idempotent, and pushing it heals an unacked add.
+    entry.state = WordBookFormat::State::Removing;
+    touched = true;
     return true;
   });
-  if (ok && !removed) return true;  // already absent
+  if (ok && !touched) return true;  // already absent
   return ok;
 }
 
@@ -115,7 +144,27 @@ size_t WordBook::listPending(WordBookFormat::Entry* out, const size_t cap) {
   for (int r; count < cap && (r = reader.next(line, sizeof(line), len)) == 1;) {
     WordBookFormat::Entry entry;
     if (!WordBookFormat::parseLine(line, len, entry)) continue;
-    if (entry.synced) continue;
+    if (entry.state != WordBookFormat::State::Pending) continue;
+    out[count++] = entry;
+  }
+  return count;
+}
+
+size_t WordBook::listRemoving(WordBookFormat::Entry* out, const size_t cap) {
+  if (out == nullptr || cap == 0) return 0;
+  recoverRewrite(WordBookFormat::FILE_PATH, TMP_PATH);
+  if (!Storage.exists(WordBookFormat::FILE_PATH)) return 0;
+
+  HalFile f;
+  if (!Storage.openFileForRead("LRN", WordBookFormat::FILE_PATH, f)) return 0;
+  char line[LINE_CAP];
+  size_t len = 0;
+  size_t count = 0;
+  LineReader reader(f);
+  for (int r; count < cap && (r = reader.next(line, sizeof(line), len)) == 1;) {
+    WordBookFormat::Entry entry;
+    if (!WordBookFormat::parseLine(line, len, entry)) continue;
+    if (entry.state != WordBookFormat::State::Removing) continue;
     out[count++] = entry;
   }
   return count;
@@ -124,11 +173,23 @@ size_t WordBook::listPending(WordBookFormat::Entry* out, const size_t cap) {
 bool WordBook::markSynced(const char* const* words, const size_t count) {
   if (words == nullptr || count == 0) return true;
   return rewriteFile([&](WordBookFormat::Entry& entry) {
+    if (entry.state != WordBookFormat::State::Pending) return true;  // a removal queued in between wins
     for (size_t i = 0; i < count; ++i) {
       if (words[i] != nullptr && strcmp(entry.word, words[i]) == 0) {
-        entry.synced = true;
+        entry.state = WordBookFormat::State::Synced;
         break;
       }
+    }
+    return true;
+  });
+}
+
+bool WordBook::markRemoved(const char* const* words, const size_t count) {
+  if (words == nullptr || count == 0) return true;
+  return rewriteFile([&](WordBookFormat::Entry& entry) {
+    if (entry.state != WordBookFormat::State::Removing) return true;
+    for (size_t i = 0; i < count; ++i) {
+      if (words[i] != nullptr && strcmp(entry.word, words[i]) == 0) return false;  // acked: drop the line
     }
     return true;
   });

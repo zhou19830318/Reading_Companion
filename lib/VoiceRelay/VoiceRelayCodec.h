@@ -215,6 +215,13 @@ struct AddWordsResult {
 size_t buildAddWordsRequest(char* out, size_t cap, const char* const* words, size_t count,
                             const char* source = "lookup");
 
+// Builds POST /api/v1/learning/words/remove: {"words":["...",...]} (relay
+// main.py learning_remove_words; success body {"ok":true,"accepted":N,
+// "removed":N}). Validation mirrors the add builder. The response parses with
+// parseAddWordsResponse — the device acts on ok/error, not on the count
+// (`added` stays -1 for a remove ack).
+size_t buildRemoveWordsRequest(char* out, size_t cap, const char* const* words, size_t count);
+
 // True when the body carried "ok" (an empty-batch echo is still a success).
 // On false, out.error holds the token from an {"error":...} body so the
 // transport can map 401/400 without a second parser.

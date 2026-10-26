@@ -3,14 +3,18 @@
 // Personal word-book line format (百词斩 M1-5): one append-only line per word
 // under /.crosspoint/learning/words.tsv.
 //
-//   WBT1 <addedAt> <p|s> <word>\n
+//   WBT1 <addedAt> <p|s|r> <word>\n
 //
 // "WBT1 " is the format tag (a stray text file in the directory cannot match
 // it, the NTF1 rule). Fields are decimal / single characters / the token,
-// space separated. `p` means the word still waits for the relay to accept it,
-// `s` means /api/v1/learning/words has acknowledged it. Words are the picker's
-// lowercase ASCII tokens; only [a-z]/[A-Z], apostrophe and hyphen are accepted
-// so a line can never contain a space or control byte.
+// space separated. The state char is the sync contract with the relay:
+//   p = the add still waits for /api/v1/learning/words to accept it,
+//   s = that endpoint has acknowledged the add,
+//   r = removed locally, waiting for /api/v1/learning/words/remove (a
+//       tombstone — the line survives until the relay acks the removal).
+// Words are the picker's lowercase ASCII tokens; only [a-z]/[A-Z], apostrophe
+// and hyphen are accepted so a line can never contain a space or control
+// byte.
 //
 // Header-only, pure C++ — no ESP-IDF, no Arduino — so test/learning_wordbook
 // compiles the same helpers the firmware uses.
@@ -34,11 +38,26 @@ inline constexpr const char* LINE_PREFIX = "WBT1 ";
 // well under this; 48 keeps a whole line inside a 128-byte scratch buffer.
 inline constexpr size_t WORD_CAP = 48;
 
+enum class State : uint8_t { Pending, Synced, Removing };
+
 struct Entry {
   uint32_t addedAt = 0;  // epoch seconds; 0 when the clock was not set
-  bool synced = false;
+  State state = State::Pending;
   char word[WORD_CAP] = {};
 };
+
+// State char on the wire; lives next to the enum so build/parse cannot drift.
+inline char stateChar(State state) {
+  switch (state) {
+    case State::Synced:
+      return 's';
+    case State::Removing:
+      return 'r';
+    case State::Pending:
+      break;
+  }
+  return 'p';
+}
 
 // True when `word` is a non-empty token the picker can produce.
 inline bool validWord(const char* word) {
@@ -58,7 +77,7 @@ inline bool validWord(const char* word) {
 inline size_t buildLine(char* out, size_t cap, const Entry& entry) {
   if (out == nullptr || cap == 0 || !validWord(entry.word)) return 0;
   const int n = snprintf(out, cap, "%s%lu %c %s\n", LINE_PREFIX, static_cast<unsigned long>(entry.addedAt),
-                         entry.synced ? 's' : 'p', entry.word);
+                         stateChar(entry.state), entry.word);
   return n > 0 && static_cast<size_t>(n) < cap ? static_cast<size_t>(n) : 0;
 }
 
@@ -82,8 +101,20 @@ inline bool parseLine(const char* line, size_t len, Entry& out) {
   if (digits == 0 || p + 2 >= len || line[p] != ' ') return false;
   ++p;
 
-  if (line[p] != 'p' && line[p] != 's') return false;
-  const bool synced = line[p] == 's';
+  State state;
+  switch (line[p]) {
+    case 'p':
+      state = State::Pending;
+      break;
+    case 's':
+      state = State::Synced;
+      break;
+    case 'r':
+      state = State::Removing;
+      break;
+    default:
+      return false;
+  }
   ++p;
   if (p >= len || line[p] != ' ') return false;
   ++p;
@@ -96,7 +127,7 @@ inline bool parseLine(const char* line, size_t len, Entry& out) {
   if (!validWord(word)) return false;
 
   out.addedAt = addedAt;
-  out.synced = synced;
+  out.state = state;
   memcpy(out.word, word, wordLen + 1);
   return true;
 }

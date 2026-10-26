@@ -1,10 +1,10 @@
 #pragma once
 
+#include <VoiceRelayCodec.h>
+
 #include <memory>
 #include <string>
 #include <vector>
-
-#include <VoiceRelayCodec.h>
 
 #include "ReviewFormat.h"
 #include "activities/Activity.h"
@@ -24,8 +24,7 @@
 // online session pushes them before fetching a fresh queue.
 class ReviewActivity final : public Activity {
  public:
-  ReviewActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-      : Activity("Review", renderer, mappedInput) {}
+  ReviewActivity(GfxRenderer& renderer, MappedInputManager& mappedInput) : Activity("Review", renderer, mappedInput) {}
 
   void onEnter() override;
   void onExit() override;
@@ -41,17 +40,17 @@ class ReviewActivity final : public Activity {
     Back,
     FetchingCard,  // one blocking relay round for a card that is not cached
     Rating,
-    Done,          // session finished
+    Done,  // session finished
     Failed,
   };
 
   enum class Status : uint8_t {
     None,
-    Offline,      // cached queue, no relay
-    Syncing,      // pushing queued ratings
-    Synced,       // last rating batch acknowledged
-    SyncFailed,   // ratings stay queued on SD
-    SaveFailed,   // could not persist a rating
+    Offline,     // cached queue, no relay
+    Syncing,     // pushing queued ratings
+    Synced,      // last rating batch acknowledged
+    SyncFailed,  // ratings stay queued on SD
+    SaveFailed,  // could not persist a rating
   };
 
   static constexpr size_t REPLY_CAP = 1536;  // CHAT_TEXT_CAP, same as WordCard
@@ -81,6 +80,7 @@ class ReviewActivity final : public Activity {
   const char* currentWord() const;
   void loadQueue();
   void loadCachedQueue();
+  void dropRemovedWords();  // queue entries whose word left the word book
   void showFront();
   void reveal();
   void fetchCard();

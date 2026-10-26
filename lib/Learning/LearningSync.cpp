@@ -31,12 +31,18 @@ LearningSync::Outcome LearningSync::syncPending(const char* url, const char* tok
     return outcome;
   }
 
+  const char* words[BATCH_CAP];
+  bool exhausted = false;
+
+  // Phase 1: adds. A failed batch stops the pass; the lines stay Pending and
+  // the next sync retries them.
   for (int round = 0; round < MAX_BATCHES; ++round) {
     const size_t count = WordBook::listPending(batch.get(), BATCH_CAP);
-    if (count == 0) return outcome;  // done (also the clean first pass)
+    if (count == 0) {
+      exhausted = true;
+      break;
+    }
     outcome.attempted = true;
-
-    const char* words[BATCH_CAP];
     for (size_t i = 0; i < count; ++i) words[i] = batch[i].word;
 
     int32_t added = 0;
@@ -57,8 +63,42 @@ LearningSync::Outcome LearningSync::syncPending(const char* url, const char* tok
     }
     outcome.synced += count;
   }
-  LOG_ERR("LSYNC", "stopped after %d batches", MAX_BATCHES);
-  outcome.error = "loop";
+  if (!exhausted) {
+    LOG_ERR("LSYNC", "stopped after %d add batches", MAX_BATCHES);
+    outcome.error = "loop";
+    return outcome;
+  }
+
+  // Phase 2: removal tombstones, same queue rule. The relay's remove is
+  // idempotent, so a tombstone whose add never reached it still succeeds.
+  exhausted = false;
+  for (int round = 0; round < MAX_BATCHES; ++round) {
+    const size_t count = WordBook::listRemoving(batch.get(), BATCH_CAP);
+    if (count == 0) {
+      exhausted = true;
+      break;
+    }
+    outcome.attempted = true;
+    for (size_t i = 0; i < count; ++i) words[i] = batch[i].word;
+
+    const auto result = VoiceRelay::LearningClient::removeWords(url, token, deviceId, words, count);
+    if (result != VoiceRelay::LearningClient::Result::Ok) {
+      LOG_ERR("LSYNC", "removal batch of %u failed: %s", static_cast<unsigned>(count),
+              VoiceRelay::LearningClient::resultName(result));
+      outcome.error = VoiceRelay::LearningClient::resultName(result);
+      return outcome;
+    }
+    LOG_INF("LSYNC", "removal batch of %u acknowledged", static_cast<unsigned>(count));
+    if (!WordBook::markRemoved(words, count)) {
+      outcome.error = "wordbook";
+      return outcome;
+    }
+    outcome.synced += count;
+  }
+  if (!exhausted) {
+    LOG_ERR("LSYNC", "stopped after %d removal batches", MAX_BATCHES);
+    outcome.error = "loop";
+  }
   return outcome;
 }
 
@@ -78,8 +118,8 @@ LearningSync::Outcome LearningSync::syncReviews(const char* url, const char* tok
 
     for (size_t i = 0; i < count; ++i) {
       bool duplicate = false;
-      const auto result = VoiceRelay::LearningClient::submitReview(url, token, deviceId, batch[i].word,
-                                                                  batch[i].rating, batch[i].clientEventId, &duplicate);
+      const auto result = VoiceRelay::LearningClient::submitReview(url, token, deviceId, batch[i].word, batch[i].rating,
+                                                                   batch[i].clientEventId, &duplicate);
       if (result != VoiceRelay::LearningClient::Result::Ok) {
         LOG_ERR("LSYNC", "review %s failed: %s", batch[i].clientEventId,
                 VoiceRelay::LearningClient::resultName(result));

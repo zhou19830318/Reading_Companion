@@ -21,9 +21,13 @@ class LearningSync {
     const char* error = nullptr;  // static reason on failure
   };
 
-  // Syncs every pending word in LEARNING_CHUNK_WORDS batches. `url`/`token`/
+  // Syncs the word book in two phases, LEARNING_CHUNK_WORDS batches each:
+  // pending adds first (POST /words, WordBook::markSynced), then removal
+  // tombstones (POST /words/remove, WordBook::markRemoved). `url`/`token`/
   // `deviceId` come from CloudConfig (relay URL is the ws:// form ChatClient
-  // accepts). Stops at the first failed batch.
+  // accepts). Stops at the first failed batch; whatever was not acked stays
+  // queued and the next call retries it. `synced` counts words the relay
+  // acknowledged across both phases.
   static Outcome syncPending(const char* url, const char* token, const char* deviceId);
 
   // Submits every queued review event one POST at a time (the relay stores one

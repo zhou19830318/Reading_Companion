@@ -42,6 +42,13 @@ class LearningClient {
                          size_t count, const char* source = "lookup", int32_t* added = nullptr,
                          int32_t* accepted = nullptr, Stats* stats = nullptr);
 
+  // POST <origin>/api/v1/learning/words/remove: flips the given words to the
+  // relay's 'removed' state (idempotent — a word the relay never saw answers
+  // removed:0 and still succeeds). Ok only means the relay acknowledged; the
+  // caller then drops its local tombstones via WordBook::markRemoved.
+  static Result removeWords(const char* url, const char* token, const char* deviceId, const char* const* words,
+                            size_t count, Stats* stats = nullptr);
+
   // GET <origin>/api/v1/learning/review?limit=LEARNING_REVIEW_LIMIT. Fills at
   // most `cap` items in server order; `stored` is the count written and `due`
   // the total due (which may exceed `stored`). Ok only when the queue body

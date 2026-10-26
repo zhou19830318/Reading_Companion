@@ -19,6 +19,7 @@
 #include "LearningSync.h"
 #include "MappedInputManager.h"
 #include "ReviewStore.h"
+#include "WordBook.h"
 #include "components/UITheme.h"
 
 void ReviewActivity::onEnter() {
@@ -45,9 +46,7 @@ void ReviewActivity::onExit() {
   Activity::onExit();
 }
 
-const char* ReviewActivity::currentWord() const {
-  return index_ < queue_.size() ? queue_[index_].word : "";
-}
+const char* ReviewActivity::currentWord() const { return index_ < queue_.size() ? queue_[index_].word : ""; }
 
 void ReviewActivity::updateDueCache() {
   if (due_ >= 0 && !Learning::ReviewStore::saveDue(due_, static_cast<uint32_t>(time(nullptr)))) {
@@ -64,6 +63,7 @@ void ReviewActivity::loadCachedQueue() {
   }
   const size_t count = Learning::ReviewStore::loadQueue(entries.get(), QUEUE_CAP);
   queue_.assign(entries.get(), entries.get() + count);
+  dropRemovedWords();  // a snapshot predates an offline 移出生词
   index_ = 0;
   uint32_t checkedAt = 0;
   int32_t cachedDue = 0;
@@ -89,8 +89,10 @@ void ReviewActivity::loadQueue() {
     return;
   }
 
-  const auto words = Learning::LearningSync::syncPending(CLOUD_CFG.relayUrl, CLOUD_CFG.relayToken, CLOUD_CFG.relayDeviceId);
-  const auto reviews = Learning::LearningSync::syncReviews(CLOUD_CFG.relayUrl, CLOUD_CFG.relayToken, CLOUD_CFG.relayDeviceId);
+  const auto words =
+      Learning::LearningSync::syncPending(CLOUD_CFG.relayUrl, CLOUD_CFG.relayToken, CLOUD_CFG.relayDeviceId);
+  const auto reviews =
+      Learning::LearningSync::syncReviews(CLOUD_CFG.relayUrl, CLOUD_CFG.relayToken, CLOUD_CFG.relayDeviceId);
   if (reviews.error != nullptr) {
     LOG_ERR("REVIEW", "pending ratings could not sync: %s", reviews.error);
     status_ = Status::SyncFailed;
@@ -127,6 +129,8 @@ void ReviewActivity::loadQueue() {
     snprintf(entry.word, sizeof(entry.word), "%s", items[i].word);
     queue_.push_back(entry);
   }
+  dropRemovedWords();  // server drift (a removal still in flight, or an add
+                       // ack whose SD rewrite failed) never reaches the screen
   index_ = 0;
   due_ = due;
   if (!Learning::ReviewStore::saveQueue(queue_.data(), queue_.size())) {
@@ -140,6 +144,21 @@ void ReviewActivity::loadQueue() {
     showFront();
   }
   requestUpdate();
+}
+
+void ReviewActivity::dropRemovedWords() {
+  // A word whose line left the book (移出生词 on the card, acked or not) is
+  // not reviewable: the relay still queues it only from 'active' rows, but a
+  // cached snapshot or an in-flight removal can lag one session behind.
+  const auto newEnd = std::remove_if(queue_.begin(), queue_.end(), [](const Learning::ReviewFormat::QueueEntry& entry) {
+    return !Learning::WordBook::contains(entry.word);
+  });
+  if (newEnd != queue_.end()) {
+    LOG_DBG("REVIEW", "dropped %u removed words from the queue",
+            static_cast<unsigned>(std::distance(newEnd, queue_.end())));
+    queue_.erase(newEnd, queue_.end());
+    if (index_ >= queue_.size()) index_ = 0;
+  }
 }
 
 void ReviewActivity::showFront() {
@@ -173,17 +192,17 @@ void ReviewActivity::reveal() {
 void ReviewActivity::fetchCard() {
   bool truncated = false;
   VoiceRelay::ChatClient::Stats stats;
-  const auto result = VoiceRelay::ChatClient::ask(CLOUD_CFG.relayUrl, CLOUD_CFG.relayToken, CLOUD_CFG.relayDeviceId,
-                                                  currentWord(), card_.get(), REPLY_CAP + 1, truncated, nullptr, 0,
-                                                  "word", &stats);
+  const auto result =
+      VoiceRelay::ChatClient::ask(CLOUD_CFG.relayUrl, CLOUD_CFG.relayToken, CLOUD_CFG.relayDeviceId, currentWord(),
+                                  card_.get(), REPLY_CAP + 1, truncated, nullptr, 0, "word", &stats);
   cardReady_ = result == VoiceRelay::ChatClient::Result::Ok && card_[0] != '\0';
   if (cardReady_) {
     if (!Learning::ReviewStore::saveCard(currentWord(), card_.get())) {
       LOG_ERR("REVIEW", "card cache write failed: %s", currentWord());
     }
   } else {
-    LOG_ERR("REVIEW", "card failed for %s: %s (http %d)", currentWord(),
-            VoiceRelay::ChatClient::resultName(result), stats.httpStatus);
+    LOG_ERR("REVIEW", "card failed for %s: %s (http %d)", currentWord(), VoiceRelay::ChatClient::resultName(result),
+            stats.httpStatus);
     card_[0] = '\0';
     status_ = Status::SyncFailed;
   }
@@ -232,7 +251,8 @@ void ReviewActivity::submitRating() {
   }
   status_ = Status::Syncing;
   requestUpdateAndWait();
-  const auto outcome = Learning::LearningSync::syncReviews(CLOUD_CFG.relayUrl, CLOUD_CFG.relayToken, CLOUD_CFG.relayDeviceId);
+  const auto outcome =
+      Learning::LearningSync::syncReviews(CLOUD_CFG.relayUrl, CLOUD_CFG.relayToken, CLOUD_CFG.relayDeviceId);
   status_ = outcome.error == nullptr ? Status::Synced : Status::SyncFailed;
   if (outcome.error != nullptr) LOG_ERR("REVIEW", "rating sync failed: %s", outcome.error);
   requestUpdate();

@@ -41,7 +41,8 @@ class WordCardActivity final : public Activity {
     Syncing,
     AddedSynced,
     AddedSyncFailed,
-    Removed,
+    Removed,            // queued on SD; relay acked (or sync not needed/possible)
+    RemovedSyncFailed,  // tombstone queued, the relay push failed
     SaveFailed,
   };
 

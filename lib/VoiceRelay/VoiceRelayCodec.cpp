@@ -917,9 +917,10 @@ size_t buildChatRequest(char* out, size_t cap, const char* requestId, const char
   return pos;
 }
 
-size_t buildAddWordsRequest(char* out, size_t cap, const char* const* words, size_t count, const char* source) {
+// Shared {"words":[...](,"source":"...")} body for the add/remove endpoints;
+// `source` may be null to omit the field (the remove endpoint ignores it).
+static size_t buildWordsListRequest(char* out, size_t cap, const char* const* words, size_t count, const char* source) {
   if (out == nullptr || cap == 0 || words == nullptr || count == 0) return 0;
-  if (source == nullptr) source = "lookup";
   size_t pos = 0;
   if (!appendLiteral(out, cap, pos, "{\"words\":[")) return 0;
   for (size_t i = 0; i < count; ++i) {
@@ -929,11 +930,24 @@ size_t buildAddWordsRequest(char* out, size_t cap, const char* const* words, siz
     if (!appendEscaped(out, cap, pos, words[i], strlen(words[i]))) return 0;
     if (!appendLiteral(out, cap, pos, "\"")) return 0;
   }
-  if (!appendLiteral(out, cap, pos, "],\"source\":\"")) return 0;
-  if (!appendEscaped(out, cap, pos, source, strlen(source))) return 0;
-  if (!appendLiteral(out, cap, pos, "\"}")) return 0;
+  if (source != nullptr) {
+    if (!appendLiteral(out, cap, pos, "],\"source\":\"")) return 0;
+    if (!appendEscaped(out, cap, pos, source, strlen(source))) return 0;
+    if (!appendLiteral(out, cap, pos, "\"}")) return 0;
+  } else {
+    if (!appendLiteral(out, cap, pos, "]}")) return 0;
+  }
   if (!finishFrame(out, cap, pos)) return 0;
   return pos;
+}
+
+size_t buildAddWordsRequest(char* out, size_t cap, const char* const* words, size_t count, const char* source) {
+  if (source == nullptr) source = "lookup";
+  return buildWordsListRequest(out, cap, words, count, source);
+}
+
+size_t buildRemoveWordsRequest(char* out, size_t cap, const char* const* words, size_t count) {
+  return buildWordsListRequest(out, cap, words, count, nullptr);
 }
 
 size_t buildReviewRequest(char* out, size_t cap, const char* word, int rating, const char* clientEventId) {

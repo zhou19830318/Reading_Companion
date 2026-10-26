@@ -5,13 +5,15 @@
 using Learning::WordBookFormat::buildLine;
 using Learning::WordBookFormat::Entry;
 using Learning::WordBookFormat::parseLine;
+using Learning::WordBookFormat::State;
+using Learning::WordBookFormat::stateChar;
 using Learning::WordBookFormat::validWord;
 
-TEST(WordBookFormat, RoundTripsBothStates) {
-  for (const bool synced : {false, true}) {
+TEST(WordBookFormat, RoundTripsAllStates) {
+  for (const State state : {State::Pending, State::Synced, State::Removing}) {
     Entry in;
     in.addedAt = 1750000000;
-    in.synced = synced;
+    in.state = state;
     snprintf(in.word, sizeof(in.word), "%s", "abandon");
 
     char line[128];
@@ -22,9 +24,24 @@ TEST(WordBookFormat, RoundTripsBothStates) {
     Entry out;
     ASSERT_TRUE(parseLine(line, len, out));
     EXPECT_EQ(out.addedAt, in.addedAt);
-    EXPECT_EQ(out.synced, synced);
+    EXPECT_EQ(out.state, state);
     EXPECT_STREQ(out.word, "abandon");
   }
+}
+
+TEST(WordBookFormat, StateCharMatchesTheWireContract) {
+  EXPECT_EQ('p', stateChar(State::Pending));
+  EXPECT_EQ('s', stateChar(State::Synced));
+  EXPECT_EQ('r', stateChar(State::Removing));
+
+  Entry out;
+  const auto parse = [&](const char* s) { return parseLine(s, strlen(s), out); };
+  ASSERT_TRUE(parse("WBT1 1750000000 p abandon\n"));
+  EXPECT_EQ(State::Pending, out.state);
+  ASSERT_TRUE(parse("WBT1 1750000000 s abandon\n"));
+  EXPECT_EQ(State::Synced, out.state);
+  ASSERT_TRUE(parse("WBT1 1750000000 r abandon\n"));  // removal tombstone
+  EXPECT_EQ(State::Removing, out.state);
 }
 
 TEST(WordBookFormat, AcceptsJoinersAndZeroTimestamp) {

@@ -86,8 +86,8 @@ namespace {
 // was outside 2xx and `body` holds the error prefix for the caller's parser.
 // Transport failures map straight to a Result.
 LearningClient::Result exchange(const char* url, const char* token, const char* deviceId, const char* path,
-                                const char* requestBody, size_t requestLen, char* body, size_t bodyCap,
-                                size_t& bodyLen, int& status, bool& httpError) {
+                                const char* requestBody, size_t requestLen, char* body, size_t bodyCap, size_t& bodyLen,
+                                int& status, bool& httpError) {
   bodyLen = 0;
   status = 0;
   httpError = false;
@@ -169,8 +169,7 @@ LearningClient::Result exchange(const char* url, const char* token, const char* 
   body[total] = '\0';
   bodyLen = total;
   if (httpError) {
-    LOG_ERR("VLEARN", "HTTP %d (%lld bytes): %s", status, static_cast<long long>(contentLength),
-            total > 0 ? body : "");
+    LOG_ERR("VLEARN", "HTTP %d (%lld bytes): %s", status, static_cast<long long>(contentLength), total > 0 ? body : "");
   }
   return LearningClient::Result::Ok;
 }
@@ -229,8 +228,7 @@ LearningClient::Result LearningClient::addWords(const char* url, const char* tok
 
   AddWordsResult result;
   if (!parseAddWordsResponse(body.get(), bodyLen, result)) {
-    LOG_ERR("VLEARN", "no ok in a %u-byte body (code=%s)", static_cast<unsigned>(bodyLen),
-            errorCodeName(result.error));
+    LOG_ERR("VLEARN", "no ok in a %u-byte body (code=%s)", static_cast<unsigned>(bodyLen), errorCodeName(result.error));
     if (result.error != ErrorCode::None) return mapError(result.error);
     return Result::NoData;
   }
@@ -238,6 +236,54 @@ LearningClient::Result LearningClient::addWords(const char* url, const char* tok
   if (accepted != nullptr) *accepted = result.accepted;
   LOG_INF("VLEARN", "synced %u words (accepted %ld, added %ld)", static_cast<unsigned>(count),
           static_cast<long>(result.accepted), static_cast<long>(result.added));
+  return Result::Ok;
+}
+
+LearningClient::Result LearningClient::removeWords(const char* url, const char* token, const char* deviceId,
+                                                   const char* const* words, size_t count, Stats* stats) {
+  if (stats != nullptr) *stats = Stats{};
+  if (url == nullptr || token == nullptr || deviceId == nullptr || words == nullptr || count == 0 ||
+      count > LEARNING_MAX_WORDS_PER_REQUEST) {
+    return Result::BadConfig;
+  }
+
+  Scratch req = allocScratch(REQ_CAP);
+  Scratch body = allocScratch(BODY_CAP);
+  if (!req || !body) {
+    LOG_ERR("VLEARN", "OOM: %u + %u bytes", static_cast<unsigned>(REQ_CAP), static_cast<unsigned>(BODY_CAP));
+    return Result::Oom;
+  }
+
+  const size_t reqLen = buildRemoveWordsRequest(req.get(), REQ_CAP, words, count);
+  if (reqLen == 0) {
+    LOG_ERR("VLEARN", "remove request build failed (%u words)", static_cast<unsigned>(count));
+    return Result::BadConfig;
+  }
+
+  size_t bodyLen = 0;
+  int status = 0;
+  bool httpError = false;
+  const Result exchanged = exchange(url, token, deviceId, "/api/v1/learning/words/remove", req.get(), reqLen,
+                                    body.get(), BODY_CAP, bodyLen, status, httpError);
+  if (stats != nullptr) stats->httpStatus = status;
+  if (exchanged != Result::Ok) return exchanged;
+  if (stats != nullptr) stats->responseBytes = bodyLen;
+
+  if (httpError) {
+    AddWordsResult errorBody;
+    parseAddWordsResponse(body.get(), bodyLen, errorBody);
+    return mapHttpStatus(status, errorBody.error);
+  }
+
+  AddWordsResult result;
+  if (!parseAddWordsResponse(body.get(), bodyLen, result)) {
+    LOG_ERR("VLEARN", "no ok in a %u-byte remove body (code=%s)", static_cast<unsigned>(bodyLen),
+            errorCodeName(result.error));
+    if (result.error != ErrorCode::None) return mapError(result.error);
+    return Result::NoData;
+  }
+  LOG_INF("VLEARN", "removed %u words (accepted %ld)", static_cast<unsigned>(count),
+          static_cast<long>(result.accepted));
   return Result::Ok;
 }
 
@@ -250,8 +296,8 @@ LearningClient::Result LearningClient::fetchReviewQueue(const char* url, const c
   if (items == nullptr || cap == 0) return Result::BadConfig;
 
   char path[48];
-  const int pathLen = snprintf(path, sizeof(path), "/api/v1/learning/review?limit=%u",
-                               static_cast<unsigned>(LEARNING_REVIEW_LIMIT));
+  const int pathLen =
+      snprintf(path, sizeof(path), "/api/v1/learning/review?limit=%u", static_cast<unsigned>(LEARNING_REVIEW_LIMIT));
   if (pathLen <= 0 || static_cast<size_t>(pathLen) >= sizeof(path)) return Result::BadConfig;
 
   Scratch body = allocScratch(BODY_CAP);
