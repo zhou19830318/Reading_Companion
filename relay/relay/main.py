@@ -446,6 +446,14 @@ async def chat(request: Request, body: ChatRequest):
         try:
             text, usage = await provider.stream(body.text, [], max_tokens, _noop, system=system)
             metrics.llm_requests_total.labels(result="ok").inc()
+            if card_mode:
+                # The word-card path used to leave only a bare httpx line:
+                # which word was served (and how long it took to generate)
+                # was invisible in the journal.
+                log.info(
+                    "llm card served",
+                    extra={"mode": body.mode, "word": body.text[:32], "chars": len(text), "outputTokens": usage.output_tokens},
+                )
             return {
                 "requestId": request_id,
                 "text": text,
@@ -456,15 +464,32 @@ async def chat(request: Request, body: ChatRequest):
             }
         except ProviderError as exc:
             metrics.llm_requests_total.labels(result="error").inc()
+            if card_mode:
+                log.warning(
+                    "llm card failed",
+                    extra={"mode": body.mode, "word": body.text[:32], "code": exc.code.value},
+                )
             return JSONResponse(status_code=502, content={"code": exc.code.value})
 
     async def events():
+        chars = 0
         try:
             yield _sse({"type": "llm.start", "requestId": request_id})
             async for piece in _iter_deltas(provider, body.text, max_tokens, system):
+                chars += len(piece)
                 yield _sse({"type": "llm.delta", "requestId": request_id, "text": piece})
+            if card_mode:
+                log.info(
+                    "llm card served",
+                    extra={"mode": body.mode, "word": body.text[:32], "chars": chars},
+                )
             yield _sse({"type": "session.done", "requestId": request_id})
         except ProviderError as exc:
+            if card_mode:
+                log.warning(
+                    "llm card failed",
+                    extra={"mode": body.mode, "word": body.text[:32], "code": exc.code.value},
+                )
             yield _sse({"type": "error", "requestId": request_id, "code": exc.code.value})
         finally:
             close = getattr(provider, "close", None)
@@ -573,6 +598,9 @@ def _learning_device(settings: Settings, request: Request) -> tuple[str | None, 
         device_id = check_device(settings, request.headers.get("authorization"), request.headers.get("x-device-id"))
         return device_id, None
     except ProtocolError as exc:
+        # nginx keeps the status code, but only this line tells the operator
+        # why a device call was rejected (bad token vs wrong device id).
+        log.warning("learning auth rejected", extra={"code": exc.code.value, "detail": exc.detail})
         return None, JSONResponse(
             status_code=401 if exc.code == ErrorCode.UNAUTHORIZED else 403,
             content={"error": exc.code.value},
@@ -598,6 +626,7 @@ async def learning_words(request: Request, state: str = "", limit: int = 500):
     if error is not None:
         return error
     rows = app.state.learning.list_words(device_id, state or None, max(1, min(limit, 500)))
+    log.info("learning word list", extra={"deviceId": device_id, "state": state or "all", "count": len(rows)})
     return {
         "count": len(rows),
         "words": [
@@ -645,6 +674,7 @@ async def learning_review_queue(request: Request, limit: int = 20):
     if error is not None:
         return error
     rows, due = app.state.learning.review_queue(device_id, limit=max(1, min(limit, 50)))
+    log.info("learning review queue", extra={"deviceId": device_id, "served": len(rows), "due": due})
     return {"count": len(rows), "due": due, "words": rows}
 
 
@@ -659,8 +689,10 @@ async def learning_review(request: Request, body: LearningReviewRequest):
         return JSONResponse(status_code=400, content={"error": "invalid_review"})
     extras = {"occurredAt": body.occurredAt} if body.occurredAt else None
     stored = app.state.learning.record_review(device_id, word, body.rating, body.clientEventId, extras)
-    if not stored:
-        log.debug("learning review duplicate", extra={"deviceId": device_id, "event": body.clientEventId})
+    log.info(
+        "learning review event",
+        extra={"deviceId": device_id, "word": word, "rating": body.rating, "duplicate": not stored},
+    )
     return {"ok": True, "duplicate": not stored}
 
 

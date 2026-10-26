@@ -201,6 +201,10 @@ Provider：`T2I_PROVIDER=mock`（默认）在本地绘制一张确定性的占�
 - **移出语义**：设备先本地落盘，再推 remove；离线移出在设备端排队（tombstone
   同 add 一样 pending-until-ack），服务器只保留状态不删行，便于审计与重建。
 - 批量上限 `LEARNING_MAX_WORD_BATCH = 200`（设备端另按 16 词/批拆包）。
+- **日志**（journalctl -u reading-companion-relay）：`learning word sync/removal/list`、
+  `learning review queue`（served/due）、`learning review event`（word/rating/duplicate）、
+  `learning auth rejected`（401/403 原因，WARNING）、`llm card served/failed`
+  （词卡 mode=word/dict-llm 的词预览与输出长度）。设备每次学习动作都应留下一行。
 - 未来若把固定间隔换成 FSRS，只动 `LearningStore.review_queue` 的到期计算，
   以上契约（路径/字段/幂等）保持不变。
 
