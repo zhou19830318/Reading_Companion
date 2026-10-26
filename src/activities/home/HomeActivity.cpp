@@ -17,11 +17,12 @@
 #include "MappedInputManager.h"
 #include "OpdsServerStore.h"
 #include "RecentBooksStore.h"
+#include "ReviewStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
 int HomeActivity::getMenuItemCount() const {
-  int count = 6;  // File Browser, Recents, Voice, Workbench, File transfer, Settings
+  int count = 7;  // File Browser, Recents, Review, Voice, Workbench, File transfer, Settings
   if (!recentBooks.empty()) {
     count += recentBooks.size();
   }
@@ -112,6 +113,9 @@ void HomeActivity::onEnter() {
   Activity::onEnter();
 
   hasOpdsServers = OPDS_STORE.hasServers();
+  uint32_t reviewCheckedAt = 0;
+  int32_t cachedDue = 0;
+  if (Learning::ReviewStore::loadDue(cachedDue, reviewCheckedAt)) reviewDue = cachedDue;
 
   const auto& metrics = UITheme::getInstance().getMetrics();
   loadRecentBooks(metrics.homeRecentBooksCount);
@@ -194,6 +198,9 @@ void HomeActivity::loop() {
         case HomeMenuItem::OPDS_BROWSER:
           onOpdsBrowserOpen();
           break;
+        case HomeMenuItem::REVIEW:
+          onReviewOpen();
+          break;
         case HomeMenuItem::VOICE:
           onVoiceOpen();
           break;
@@ -236,11 +243,12 @@ void HomeActivity::render(RenderLock&&) {
                           recentBooks, selectorIndex, coverRendered, coverBufferStored, bufferRestored,
                           std::bind(&HomeActivity::storeCoverBuffer, this));
 
-  // Build menu items dynamically. Voice sits between the OPDS entry (inserted
-  // below at +2) and Workbench, mirroring indexToMenuItem().
-  std::vector<const char*> menuItems = {tr(STR_BROWSE_FILES), tr(STR_MENU_RECENT_BOOKS), tr(STR_VOICE),
-                                        tr(STR_WORKBENCH),    tr(STR_FILE_TRANSFER),     tr(STR_SETTINGS_TITLE)};
-  std::vector<UIIcon> menuIcons = {Folder, Recent, Mic, Workbench, Transfer, Settings};
+  reviewLabel = tr(STR_REVIEW_TODAY);
+  if (reviewDue >= 0) reviewLabel += " " + std::to_string(reviewDue);
+  std::vector<const char*> menuItems = {tr(STR_BROWSE_FILES), tr(STR_MENU_RECENT_BOOKS), reviewLabel.c_str(),
+                                        tr(STR_VOICE),        tr(STR_WORKBENCH),         tr(STR_FILE_TRANSFER),
+                                        tr(STR_SETTINGS_TITLE)};
+  std::vector<UIIcon> menuIcons = {Folder, Recent, Recent, Mic, Workbench, Transfer, Settings};
 
   if (hasOpdsServers) {
     menuItems.insert(menuItems.begin() + 2, tr(STR_OPDS_BROWSER));
@@ -294,6 +302,8 @@ void HomeActivity::onSettingsOpen() { activityManager.goToSettings(); }
 void HomeActivity::onFileTransferOpen() { activityManager.goToFileTransfer(); }
 
 void HomeActivity::onOpdsBrowserOpen() { activityManager.goToBrowser(); }
+
+void HomeActivity::onReviewOpen() { activityManager.goToReview(); }
 
 void HomeActivity::onVoiceOpen() { activityManager.goToAiAssistant(); }
 

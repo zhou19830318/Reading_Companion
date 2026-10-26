@@ -82,4 +82,108 @@ TEST(LearningCodecContract, DeviceChunkFitsTheServerCap) {
                 "one chunk must never exceed the relay batch cap");
 }
 
+// ── review endpoint (今日复习) ────────────────────────────────────────────
+
+const char* kQueueBody =
+    R"({"count":2,"due":5,"words":[)"
+    R"({"word":"abandon","addedAt":"2026-10-20T08:00:00+00:00","source":"lookup","lastRating":null,"lastReviewedAt":null,"dueAt":"2026-10-25T08:00:00+00:00"},)"
+    R"({"word":"candid","addedAt":"2026-10-21T08:00:00+00:00","source":"review","lastRating":1,"lastReviewedAt":"2026-10-25T07:00:00+00:00","dueAt":"2026-10-25T08:00:00+00:00"}]})";
+
+TEST(LearningReviewBuild, RequestMatchesServerContract) {
+  char out[256];
+  const size_t n =
+      VoiceRelay::buildReviewRequest(out, sizeof(out), "abandon", 3, "0123456789abcdef0123456789abcdef");
+  ASSERT_GT(n, 0u);
+  EXPECT_STREQ(R"({"word":"abandon","rating":3,"clientEventId":"0123456789abcdef0123456789abcdef"})", out);
+  EXPECT_EQ(std::strlen(out), n);
+}
+
+TEST(LearningReviewBuild, EscapesWordAndRejectsBadInput) {
+  char out[256];
+  ASSERT_GT(VoiceRelay::buildReviewRequest(out, sizeof(out), "a\"b", 1, "id"), 0u);
+  EXPECT_STREQ(R"({"word":"a\"b","rating":1,"clientEventId":"id"})", out);
+
+  EXPECT_EQ(0u, VoiceRelay::buildReviewRequest(nullptr, sizeof(out), "word", 1, "id"));
+  EXPECT_EQ(0u, VoiceRelay::buildReviewRequest(out, sizeof(out), "", 1, "id"));
+  EXPECT_EQ(0u, VoiceRelay::buildReviewRequest(out, sizeof(out), "word", 0, "id"));
+  EXPECT_EQ(0u, VoiceRelay::buildReviewRequest(out, sizeof(out), "word", 5, "id"));
+  EXPECT_EQ(0u, VoiceRelay::buildReviewRequest(out, sizeof(out), "word", 1, ""));
+  EXPECT_EQ(0u, VoiceRelay::buildReviewRequest(out, 20, "word", 1, "id"));
+}
+
+TEST(LearningReviewParse, QueueEnvelopeAndItems) {
+  VoiceRelay::ReviewItem items[8];
+  size_t stored = 0;
+  VoiceRelay::ReviewQueueResult result;
+  ASSERT_TRUE(VoiceRelay::parseReviewQueueResponse(kQueueBody, std::strlen(kQueueBody), items, 8, stored, result));
+  EXPECT_EQ(2u, stored);
+  EXPECT_EQ(2, result.count);
+  EXPECT_EQ(5, result.due);
+  EXPECT_STREQ("abandon", items[0].word);
+  EXPECT_EQ(-1, items[0].lastRating);
+  EXPECT_STREQ("candid", items[1].word);
+  EXPECT_EQ(1, items[1].lastRating);
+}
+
+TEST(LearningReviewParse, QueueStopsAtCapacityButStillReadsCounts) {
+  VoiceRelay::ReviewItem items[1];
+  size_t stored = 0;
+  VoiceRelay::ReviewQueueResult result;
+  ASSERT_TRUE(VoiceRelay::parseReviewQueueResponse(kQueueBody, std::strlen(kQueueBody), items, 1, stored, result));
+  EXPECT_EQ(1u, stored);
+  EXPECT_STREQ("abandon", items[0].word);
+  EXPECT_EQ(2, result.count);
+  EXPECT_EQ(5, result.due);
+}
+
+TEST(LearningReviewParse, EmptyQueueIsValid) {
+  const char* body = R"({"count":0,"due":0,"words":[]})";
+  VoiceRelay::ReviewItem items[4];
+  size_t stored = 1;
+  VoiceRelay::ReviewQueueResult result;
+  ASSERT_TRUE(VoiceRelay::parseReviewQueueResponse(body, std::strlen(body), items, 4, stored, result));
+  EXPECT_EQ(0u, stored);
+  EXPECT_EQ(0, result.count);
+  EXPECT_EQ(0, result.due);
+}
+
+TEST(LearningReviewParse, QueueErrorAndGarbageFail) {
+  const char* errorBody = R"({"error":"UNAUTHORIZED"})";
+  VoiceRelay::ReviewItem items[4];
+  size_t stored = 0;
+  VoiceRelay::ReviewQueueResult result;
+  EXPECT_FALSE(
+      VoiceRelay::parseReviewQueueResponse(errorBody, std::strlen(errorBody), items, 4, stored, result));
+  EXPECT_EQ(0u, stored);
+  EXPECT_EQ(-1, result.due);
+
+  EXPECT_FALSE(VoiceRelay::parseReviewQueueResponse(nullptr, 0, items, 4, stored, result));
+  const char* notJson = "hello";
+  EXPECT_FALSE(VoiceRelay::parseReviewQueueResponse(notJson, std::strlen(notJson), items, 4, stored, result));
+}
+
+TEST(LearningReviewParse, SubmitEchoAndDuplicate) {
+  VoiceRelay::ReviewSubmitResult out;
+  const char* first = R"({"ok":true,"duplicate":false})";
+  ASSERT_TRUE(VoiceRelay::parseReviewResponse(first, std::strlen(first), out));
+  EXPECT_TRUE(out.ok);
+  EXPECT_FALSE(out.duplicate);
+
+  const char* retry = R"({"ok":true,"duplicate":true})";
+  ASSERT_TRUE(VoiceRelay::parseReviewResponse(retry, std::strlen(retry), out));
+  EXPECT_TRUE(out.ok);
+  EXPECT_TRUE(out.duplicate);
+
+  const char* bad = R"({"error":"invalid_review"})";
+  EXPECT_FALSE(VoiceRelay::parseReviewResponse(bad, std::strlen(bad), out));
+  EXPECT_EQ(VoiceRelay::ErrorCode::Unknown, out.error);  // unrecognised token, 400 still maps to BadConfig
+}
+
+TEST(LearningReviewParse, SubmitErrorCarriesAuthToken) {
+  VoiceRelay::ReviewSubmitResult out;
+  const char* body = R"({"error":"DEVICE_NOT_ALLOWED"})";
+  EXPECT_FALSE(VoiceRelay::parseReviewResponse(body, std::strlen(body), out));
+  EXPECT_EQ(VoiceRelay::ErrorCode::DeviceNotAllowed, out.error);
+}
+
 }  // namespace

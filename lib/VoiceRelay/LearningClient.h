@@ -42,6 +42,18 @@ class LearningClient {
                          size_t count, const char* source = "lookup", int32_t* added = nullptr,
                          int32_t* accepted = nullptr, Stats* stats = nullptr);
 
+  // GET <origin>/api/v1/learning/review?limit=LEARNING_REVIEW_LIMIT. Fills at
+  // most `cap` items in server order; `stored` is the count written and `due`
+  // the total due (which may exceed `stored`). Ok only when the queue body
+  // parsed.
+  static Result fetchReviewQueue(const char* url, const char* token, const char* deviceId, ReviewItem* items,
+                                 size_t cap, size_t& stored, int32_t& due, Stats* stats = nullptr);
+
+  // POST <origin>/api/v1/learning/review. `clientEventId` is the idempotency
+  // key (32 lowercase hex); a repeat is a success and sets `duplicate`.
+  static Result submitReview(const char* url, const char* token, const char* deviceId, const char* word, int rating,
+                             const char* clientEventId, bool* duplicate = nullptr, Stats* stats = nullptr);
+
   static const char* resultName(Result result);
 };
 

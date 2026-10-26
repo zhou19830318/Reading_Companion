@@ -136,6 +136,15 @@ enum class Field : uint8_t {
   Ok,
   Accepted,
   Added,
+  // /api/v1/learning/review: queue envelope + item members, and the review
+  // POST echo. "words"/"word" are unique to these bodies; "count"/"due" and
+  // "duplicate" appear in no other body this parser sees.
+  Words,
+  Word,
+  Count,
+  Due,
+  LastRating,
+  Duplicate,
 };
 
 Field classifyKey(const char* k, size_t n) {
@@ -144,17 +153,21 @@ Field classifyKey(const char* k, size_t n) {
       if (memcmp(k, "ok", 2) == 0) return Field::Ok;
       return memcmp(k, "id", 2) == 0 ? Field::ImageId : Field::None;
     case 3:
-      return memcmp(k, "seq", 3) == 0 ? Field::Seq : Field::None;
+      if (memcmp(k, "seq", 3) == 0) return Field::Seq;
+      return memcmp(k, "due", 3) == 0 ? Field::Due : Field::None;
     case 5:
       if (memcmp(k, "error", 5) == 0) return Field::Error;
       if (memcmp(k, "width", 5) == 0) return Field::ImageWidth;
       if (memcmp(k, "bytes", 5) == 0) return Field::ImageBytes;
       if (memcmp(k, "added", 5) == 0) return Field::Added;
+      if (memcmp(k, "words", 5) == 0) return Field::Words;
+      if (memcmp(k, "count", 5) == 0) return Field::Count;
       return Field::None;
     case 4:
       if (memcmp(k, "type", 4) == 0) return Field::Type;
       if (memcmp(k, "text", 4) == 0) return Field::Text;
       if (memcmp(k, "code", 4) == 0) return Field::Code;
+      if (memcmp(k, "word", 4) == 0) return Field::Word;
       return Field::None;
     case 6:
       return memcmp(k, "height", 6) == 0 ? Field::ImageHeight : Field::None;
@@ -173,7 +186,10 @@ Field classifyKey(const char* k, size_t n) {
       if (memcmp(k, "sessionId", 9) == 0) return Field::SessionId;
       if (memcmp(k, "retryable", 9) == 0) return Field::Retryable;
       if (memcmp(k, "latencyMs", 9) == 0) return Field::LatencyMs;
+      if (memcmp(k, "duplicate", 9) == 0) return Field::Duplicate;
       return Field::None;
+    case 10:
+      return memcmp(k, "lastRating", 10) == 0 ? Field::LastRating : Field::None;
     case 12:
       return memcmp(k, "visibleTotal", 12) == 0 ? Field::LatVisibleTotal : Field::None;
     case 13:
@@ -502,6 +518,19 @@ struct ChatParseState {
   bool sawOk = false;
   int32_t accepted = -1;
   int32_t added = -1;
+  // /api/v1/learning/review queue: the "words" array's items plus the
+  // envelope numbers. Item boundaries come from array/object depth, so a
+  // nested object inside an item (none today) can never be mistaken for one.
+  ReviewItem* items = nullptr;
+  size_t itemCap = 0;
+  size_t itemCount = 0;
+  int32_t count = -1;
+  int32_t due = -1;
+  uint8_t depth = 0;
+  uint8_t wordsDepth = 0;
+  bool inWords = false;
+  bool sawWords = false;
+  bool duplicate = false;
   bool sawText = false;
   bool sawImageId = false;
   bool strokesOverflowed = false;
@@ -510,7 +539,7 @@ struct ChatParseState {
   Field field = Field::None;
 
   void begin(char* out, size_t outCap, char* strokesOut, size_t strokesOutCap, char* imageIdOut = nullptr,
-             size_t imageIdOutCap = 0) {
+             size_t imageIdOutCap = 0, ReviewItem* itemsOut = nullptr, size_t itemsOutCap = 0) {
     text = out;
     cap = outCap;
     textLen = 0;
@@ -527,6 +556,16 @@ struct ChatParseState {
     sawOk = false;
     accepted = -1;
     added = -1;
+    items = itemsOut;
+    itemCap = itemsOutCap;
+    itemCount = 0;
+    count = -1;
+    due = -1;
+    depth = 0;
+    wordsDepth = 0;
+    inWords = false;
+    sawWords = false;
+    duplicate = false;
     sawText = false;
     sawImageId = false;
     strokesOverflowed = false;
@@ -591,6 +630,19 @@ struct ChatParseState {
         st->sawImageId = true;
         break;
       }
+      case Field::Word: {
+        // Queue item word. Also all-or-nothing: a cut word would send the
+        // review back under a different spelling.
+        if (st->items == nullptr || st->itemCount == 0 || st->itemCount > st->itemCap) break;
+        ReviewItem& item = st->items[st->itemCount - 1];
+        if (len >= sizeof(item.word)) {
+          item.word[0] = '\0';
+          break;
+        }
+        memcpy(item.word, value, len);
+        item.word[len] = '\0';
+        break;
+      }
       default:
         break;
     }
@@ -621,6 +673,17 @@ struct ChatParseState {
       case Field::Added:
         st->added = parseI32(value, len);
         break;
+      case Field::Count:
+        st->count = parseI32(value, len);
+        break;
+      case Field::Due:
+        st->due = parseI32(value, len);
+        break;
+      case Field::LastRating:
+        if (st->items != nullptr && st->itemCount > 0 && st->itemCount <= st->itemCap) {
+          st->items[st->itemCount - 1].lastRating = parseI32(value, len);
+        }
+        break;
       default:
         break;
     }
@@ -630,13 +693,40 @@ struct ChatParseState {
     if (st->field == Field::Ok) {
       st->ok = value;
       st->sawOk = true;
+    } else if (st->field == Field::Duplicate) {
+      st->duplicate = value;
     }
   }
   static void onNullCb(void*) {}
-  static void onObjectStartCb(void*) {}
-  static void onObjectEndCb(void*) {}
-  static void onArrayStartCb(void*) {}
-  static void onArrayEndCb(void*) {}
+  static void onObjectStartCb(void* ctx) {
+    auto* st = static_cast<ChatParseState*>(ctx);
+    if (st->depth < 255) ++st->depth;
+    // One object directly inside "words" is one queue item.
+    if (st->inWords && st->depth == st->wordsDepth + 1) {
+      ++st->itemCount;
+      if (st->items != nullptr && st->itemCount <= st->itemCap) {
+        st->items[st->itemCount - 1] = ReviewItem{};
+      }
+    }
+  }
+  static void onObjectEndCb(void* ctx) {
+    auto* st = static_cast<ChatParseState*>(ctx);
+    if (st->depth > 0) --st->depth;
+  }
+  static void onArrayStartCb(void* ctx) {
+    auto* st = static_cast<ChatParseState*>(ctx);
+    if (st->depth < 255) ++st->depth;
+    if (st->field == Field::Words && !st->inWords) {
+      st->inWords = true;
+      st->sawWords = true;
+      st->wordsDepth = st->depth;
+    }
+  }
+  static void onArrayEndCb(void* ctx) {
+    auto* st = static_cast<ChatParseState*>(ctx);
+    if (st->inWords && st->depth == st->wordsDepth) st->inWords = false;
+    if (st->depth > 0) --st->depth;
+  }
 };
 
 ChatParseState g_chatState;
@@ -694,6 +784,38 @@ bool parseAddWordsResponse(const char* json, size_t len, AddWordsResult& out) {
   out.ok = g_chatState.ok;
   out.accepted = g_chatState.accepted;
   out.added = g_chatState.added;
+  out.error = g_chatState.error;
+  return g_chatState.sawOk;
+}
+
+bool parseReviewQueueResponse(const char* json, size_t len, ReviewItem* out, size_t cap, size_t& stored,
+                              ReviewQueueResult& result) {
+  stored = 0;
+  result = ReviewQueueResult{};
+  g_chatState.begin(nullptr, 0, nullptr, 0, nullptr, 0, out, cap);
+  if (json == nullptr || len == 0) return false;
+
+  g_chatParser.reset();
+  g_chatParser.feed(json, len);
+  if (g_chatParser.hasError()) return false;
+
+  stored = g_chatState.itemCount < cap ? g_chatState.itemCount : cap;
+  result.count = g_chatState.count;
+  result.due = g_chatState.due;
+  return g_chatState.sawWords;
+}
+
+bool parseReviewResponse(const char* json, size_t len, ReviewSubmitResult& out) {
+  out = ReviewSubmitResult{};
+  g_chatState.begin(nullptr, 0, nullptr, 0);
+  if (json == nullptr || len == 0) return false;
+
+  g_chatParser.reset();
+  g_chatParser.feed(json, len);
+  if (g_chatParser.hasError()) return false;
+
+  out.ok = g_chatState.ok;
+  out.duplicate = g_chatState.duplicate;
   out.error = g_chatState.error;
   return g_chatState.sawOk;
 }
@@ -809,6 +931,26 @@ size_t buildAddWordsRequest(char* out, size_t cap, const char* const* words, siz
   }
   if (!appendLiteral(out, cap, pos, "],\"source\":\"")) return 0;
   if (!appendEscaped(out, cap, pos, source, strlen(source))) return 0;
+  if (!appendLiteral(out, cap, pos, "\"}")) return 0;
+  if (!finishFrame(out, cap, pos)) return 0;
+  return pos;
+}
+
+size_t buildReviewRequest(char* out, size_t cap, const char* word, int rating, const char* clientEventId) {
+  if (out == nullptr || cap == 0 || word == nullptr || word[0] == '\0' || clientEventId == nullptr ||
+      clientEventId[0] == '\0' || rating < 1 || rating > 4) {
+    return 0;
+  }
+  char ratingBuf[12];
+  const int ratingLen = snprintf(ratingBuf, sizeof(ratingBuf), "%d", rating);
+  if (ratingLen <= 0) return 0;
+  size_t pos = 0;
+  if (!appendLiteral(out, cap, pos, "{\"word\":\"")) return 0;
+  if (!appendEscaped(out, cap, pos, word, strlen(word))) return 0;
+  if (!appendLiteral(out, cap, pos, "\",\"rating\":")) return 0;
+  if (!appendRaw(out, cap, pos, ratingBuf, static_cast<size_t>(ratingLen))) return 0;
+  if (!appendLiteral(out, cap, pos, ",\"clientEventId\":\"")) return 0;
+  if (!appendEscaped(out, cap, pos, clientEventId, strlen(clientEventId))) return 0;
   if (!appendLiteral(out, cap, pos, "\"}")) return 0;
   if (!finishFrame(out, cap, pos)) return 0;
   return pos;

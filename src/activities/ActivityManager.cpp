@@ -15,6 +15,7 @@
 #include "home/FileBrowserActivity.h"
 #include "home/HomeActivity.h"
 #include "home/RecentBooksActivity.h"
+#include "learning/ReviewActivity.h"
 #include "network/CrossPointWebServerActivity.h"
 #include "reader/ReaderActivity.h"
 #include "settings/OpdsServerListActivity.h"
@@ -79,6 +80,7 @@ void ActivityManager::loop() {
       }
 
       ActivityResult pendingResult = std::move(currentActivity->result);
+      const bool returnToReview = stackActivities.empty() && currentActivity->name == "Review";
 
       // Destroy the current activity
       exitActivity(lock);
@@ -87,7 +89,7 @@ void ActivityManager::loop() {
       if (stackActivities.empty()) {
         LOG_DBG("ACT", "No more activities on stack, going home");
         lock.unlock();  // goHome may acquire its own lock
-        goHome();
+        goHome(returnToReview ? HomeMenuItem::REVIEW : HomeMenuItem::NONE);
         continue;  // Will launch goHome immediately
 
       } else {
@@ -225,6 +227,8 @@ void ActivityManager::goToReader(std::string path) {
   replaceActivity(std::make_unique<ReaderActivity>(renderer, mappedInput, std::move(path)));
 }
 
+void ActivityManager::goToReview() { replaceActivity(std::make_unique<ReviewActivity>(renderer, mappedInput)); }
+
 void ActivityManager::goToVoice() { replaceActivity(std::make_unique<VoiceActivity>(renderer, mappedInput)); }
 
 void ActivityManager::goToAiAssistant() { replaceActivity(std::make_unique<AiHubActivity>(renderer, mappedInput)); }
@@ -255,6 +259,8 @@ void ActivityManager::goHome(HomeMenuItem initialMenuItem) {
       initialMenuItem = HomeMenuItem::OPDS_BROWSER;
     } else if (activityName == "CrossPointWebServer") {
       initialMenuItem = HomeMenuItem::FILE_TRANSFER;
+    } else if (activityName == "Review") {
+      initialMenuItem = HomeMenuItem::REVIEW;
     } else if (activityName == "Voice") {
       initialMenuItem = HomeMenuItem::VOICE;
     } else if (activityName == "Settings") {

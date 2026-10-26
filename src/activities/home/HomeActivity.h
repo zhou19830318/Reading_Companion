@@ -1,5 +1,7 @@
 #pragma once
+#include <cstdint>
 #include <functional>
+#include <string>
 #include <vector>
 
 #include "./FileBrowserActivity.h"
@@ -15,6 +17,8 @@ class HomeActivity final : public Activity {
   bool recentsLoading = false;
   bool recentsLoaded = false;
   bool hasOpdsServers = false;
+  int32_t reviewDue = -1;
+  std::string reviewLabel;
   bool coverRendered = false;      // Track if cover has been rendered once
   bool coverBufferStored = false;  // Track if cover buffer is stored
   uint8_t* coverBuffer = nullptr;  // HomeActivity's own buffer for cover image
@@ -38,6 +42,8 @@ class HomeActivity final : public Activity {
     ++i;
     if (item == HomeMenuItem::OPDS_BROWSER) return hasOpdsUrl ? i : 0;
     if (hasOpdsUrl) ++i;
+    if (item == HomeMenuItem::REVIEW) return i;
+    ++i;
     if (item == HomeMenuItem::VOICE) return i;
     ++i;
     if (item == HomeMenuItem::WORKBENCH) return i;
@@ -54,6 +60,7 @@ class HomeActivity final : public Activity {
     if (idx == i++) return HomeMenuItem::FILE_BROWSER;
     if (idx == i++) return HomeMenuItem::RECENTS;
     if (hasOpdsUrl && idx == i++) return HomeMenuItem::OPDS_BROWSER;
+    if (idx == i++) return HomeMenuItem::REVIEW;
     if (idx == i++) return HomeMenuItem::VOICE;
     if (idx == i++) return HomeMenuItem::WORKBENCH;
     if (idx == i++) return HomeMenuItem::FILE_TRANSFER;
@@ -66,6 +73,7 @@ class HomeActivity final : public Activity {
   void onSettingsOpen();
   void onFileTransferOpen();
   void onOpdsBrowserOpen();
+  void onReviewOpen();
   void onVoiceOpen();
   void onWorkbenchOpen();
 

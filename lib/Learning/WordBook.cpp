@@ -6,6 +6,8 @@
 
 #include <cstring>
 
+#include "LineFile.h"
+
 namespace Learning {
 
 namespace {
@@ -13,118 +15,26 @@ namespace {
 constexpr size_t LINE_CAP = 128;  // see WordBookFormat::WORD_CAP
 constexpr char TMP_PATH[] = "/.crosspoint/learning/words.tsv.tmp";
 
-// Pulls '\n'-terminated lines out of a HalFile in fixed-size chunks. Overlong
-// lines are reported as one (parse-rejected) record and then skipped whole, so
-// a corrupt byte run cannot shift every later word onto the wrong entry.
-class LineReader {
- public:
-  explicit LineReader(HalFile& file) : file_(file) {}
-
-  // 1 = a line (NUL-terminated, `len` excludes the '\n'), 0 = EOF, -1 = error.
-  int next(char* line, size_t cap, size_t& len) {
-    len = 0;
-    bool overlong = false;
-    for (;;) {
-      if (pos_ < fill_) {
-        const char c = buf_[pos_++];
-        if (c == '\n') {
-          if (overlong) {
-            len = cap;  // garbage; parseLine rejects it
-            return 1;
-          }
-          line[len] = '\0';
-          return 1;
-        }
-        if (len + 1 < cap) {
-          line[len++] = c;
-        } else {
-          overlong = true;
-        }
-        continue;
-      }
-      if (eof_) {
-        if (len > 0 && !overlong) {
-          line[len] = '\0';  // torn tail without '\n': parseLine rejects
-          return 1;
-        }
-        return 0;
-      }
-      const int n = file_.read(buf_, sizeof(buf_));
-      if (n < 0) return -1;
-      if (n == 0) {
-        eof_ = true;
-        continue;
-      }
-      pos_ = 0;
-      fill_ = static_cast<size_t>(n);
-    }
-  }
-
- private:
-  HalFile& file_;
-  char buf_[128];
-  size_t fill_ = 0;
-  size_t pos_ = 0;
-  bool eof_ = false;
-};
-
-// Streams the file through `fn(Entry&) -> keep` into the temp file and swaps it
-// in. Lines that fail parsing are dropped. True when the file is absent (a
-// missing word book is an empty one) or the rewrite landed.
+// Re-serialises surviving lines through the shared temp-file swap. A line that
+// no longer parses is dropped, so a torn append cannot survive a rewrite.
 template <typename Fn>
 bool rewriteFile(Fn&& fn) {
-  if (!Storage.exists(WordBookFormat::FILE_PATH)) return true;
-  {
-    HalFile src;
-    if (!Storage.openFileForRead("LRN", WordBookFormat::FILE_PATH, src)) {
-      LOG_ERR("LRN", "rewrite: open failed: %s", WordBookFormat::FILE_PATH);
-      return false;
+  return rewriteLines(WordBookFormat::FILE_PATH, TMP_PATH, "LRN", [&](char* line, size_t len) -> size_t {
+    WordBookFormat::Entry entry;
+    if (!WordBookFormat::parseLine(line, len, entry)) {
+      LOG_DBG("LRN", "rewrite: dropping malformed line");
+      return 0;
     }
-    HalFile dst = Storage.open(TMP_PATH, O_WRITE | O_CREAT | O_TRUNC);
-    if (!dst.isOpen()) {
-      LOG_ERR("LRN", "rewrite: temp open failed: %s", TMP_PATH);
-      return false;
-    }
-
-    char line[LINE_CAP];
-    char out[LINE_CAP];
-    size_t len = 0;
-    LineReader reader(src);
-    for (int r; (r = reader.next(line, sizeof(line), len)) == 1;) {
-      WordBookFormat::Entry entry;
-      if (!WordBookFormat::parseLine(line, len, entry)) {
-        LOG_DBG("LRN", "rewrite: dropping malformed line");
-        continue;
-      }
-      if (!fn(entry)) continue;
-      const size_t n = WordBookFormat::buildLine(out, sizeof(out), entry);
-      if (n == 0) continue;
-      if (dst.write(out, n) != n) {
-        LOG_ERR("LRN", "rewrite: write failed");
-        Storage.remove(TMP_PATH);
-        return false;
-      }
-    }
-    // dst's destructor closes it before the directory operations below.
-  }
-
-  if (!Storage.remove(WordBookFormat::FILE_PATH)) {
-    LOG_ERR("LRN", "rewrite: remove failed: %s", WordBookFormat::FILE_PATH);
-    Storage.remove(TMP_PATH);
-    return false;
-  }
-  if (!Storage.rename(TMP_PATH, WordBookFormat::FILE_PATH)) {
-    LOG_ERR("LRN", "rewrite: rename failed: %s", TMP_PATH);
-    Storage.remove(TMP_PATH);
-    return false;
-  }
-  return true;
+    if (!fn(entry)) return 0;
+    return WordBookFormat::buildLine(line, LINE_CAP, entry);
+  });
 }
 
 }  // namespace
 
 bool WordBook::contains(const char* word, bool* synced) {
   if (!WordBookFormat::validWord(word)) return false;
+  recoverRewrite(WordBookFormat::FILE_PATH, TMP_PATH);
   if (!Storage.exists(WordBookFormat::FILE_PATH)) return false;
 
   HalFile f;
@@ -193,6 +103,7 @@ bool WordBook::remove(const char* word) {
 
 size_t WordBook::listPending(WordBookFormat::Entry* out, const size_t cap) {
   if (out == nullptr || cap == 0) return 0;
+  recoverRewrite(WordBookFormat::FILE_PATH, TMP_PATH);
   if (!Storage.exists(WordBookFormat::FILE_PATH)) return 0;
 
   HalFile f;

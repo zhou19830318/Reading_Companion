@@ -17,6 +17,7 @@
 #include "CrossPointSettings.h"
 #include "LearningSync.h"
 #include "MappedInputManager.h"
+#include "ReviewStore.h"
 #include "WordBook.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
@@ -90,6 +91,11 @@ void WordCardActivity::beginLookup() {
     }
     LOG_INF("WORD", "card for %s: %u bytes (http %d)", word_.c_str(), static_cast<unsigned>(stats.responseBytes),
             stats.httpStatus);
+    // Cache the card so 今日复习 can reveal it offline later. A cache miss is
+    // not an error the reader must see; the review screen reports it then.
+    if (!Learning::ReviewStore::saveCard(word_.c_str(), reply_.get())) {
+      LOG_DBG("WORD", "card cache write skipped: %s", word_.c_str());
+    }
     rowsBuilt_ = false;
     scrollLine_ = 0;
     detailOpen_ = false;
@@ -177,6 +183,9 @@ void WordCardActivity::toggleDetail() {
 void WordCardActivity::toggleAdd() {
   if (inWordbook_) {
     if (Learning::WordBook::remove(word_.c_str())) {
+      // A pending review would re-create the word on the relay at the next
+      // sync (record_review inserts it), so it leaves the queue too.
+      Learning::ReviewStore::removeWord(word_.c_str());
       inWordbook_ = false;
       wordSynced_ = false;
       status_ = Status::Removed;

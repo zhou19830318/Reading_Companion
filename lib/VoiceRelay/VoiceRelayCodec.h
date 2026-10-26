@@ -220,6 +220,54 @@ size_t buildAddWordsRequest(char* out, size_t cap, const char* const* words, siz
 // transport can map 401/400 without a second parser.
 bool parseAddWordsResponse(const char* json, size_t len, AddWordsResult& out);
 
+// ── review endpoint (今日复习) ────────────────────────────────────────────
+//
+// GET <origin>/api/v1/learning/review?limit=N returns the words whose last
+// review interval expired, oldest due first:
+//   {"count":N,"due":TOTAL,"words":[{"word":"...","addedAt":...,
+//     "source":"...","lastRating":N|null,"lastReviewedAt":...,"dueAt":...}]}
+// POST <origin>/api/v1/learning/review takes
+//   {"word":"...","rating":1..4,"clientEventId":"<32 hex>"}
+// and answers {"ok":true,"duplicate":bool}; clientEventId is the idempotency
+// key, so a retried submission never records the review twice.
+
+// Matches WordBookFormat::WORD_CAP; the codec keeps its own copy so it stays
+// independent of the storage layer.
+constexpr size_t LEARNING_WORD_CAP = 48;
+// One page is a whole review session on a 480-px panel; the relay clamps larger
+// limits to 50.
+constexpr size_t LEARNING_REVIEW_LIMIT = 20;
+
+struct ReviewItem {
+  char word[LEARNING_WORD_CAP] = {};
+  int32_t lastRating = -1;  // 1..4; -1 when the word was never reviewed
+};
+
+struct ReviewQueueResult {
+  int32_t count = -1;  // items on this page; -1 = absent
+  int32_t due = -1;    // total due; -1 = absent
+};
+
+// Parses a review queue body. Items fill `out` in server order up to `cap`;
+// `stored` is the number written. Returns true when the body parsed and the
+// "words" array was present (an empty queue is still a valid response).
+bool parseReviewQueueResponse(const char* json, size_t len, ReviewItem* out, size_t cap, size_t& stored,
+                              ReviewQueueResult& result);
+
+// Builds the review POST body. Returns 0 on a null/empty word or event id, a
+// rating outside 1..4, or when the frame does not fit `cap`.
+size_t buildReviewRequest(char* out, size_t cap, const char* word, int rating, const char* clientEventId);
+
+struct ReviewSubmitResult {
+  bool ok = false;                    // body carried "ok" (true)
+  bool duplicate = false;             // the relay already had this event id
+  ErrorCode error = ErrorCode::None;  // {"error":...} / {"code":...} body
+};
+
+// True when the body carried "ok". A duplicate is a success: the event is
+// already stored server-side.
+bool parseReviewResponse(const char* json, size_t len, ReviewSubmitResult& out);
+
 // ── image endpoint (AI 生图) ─────────────────────────────────────────────
 //
 // POST <origin>/api/v1/image on the same relay (relay/relay/main.py

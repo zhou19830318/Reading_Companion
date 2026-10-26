@@ -29,8 +29,10 @@ constexpr int HTTP_TX_BUF = 2048;
 // dead link (same value as the chat client keeps for one LLM turn).
 constexpr int HTTP_TIMEOUT_MS = 30000;
 constexpr size_t REQ_CAP = 2048;
-constexpr size_t BODY_CAP = 2048;  // response JSON; error bodies are short too
-constexpr size_t URL_CAP = 160;
+// One review queue page is ~150 B per item at LEARNING_REVIEW_LIMIT items.
+// 4 KB leaves room for long addedAt/dueAt timestamps on every item.
+constexpr size_t BODY_CAP = 4096;
+constexpr size_t URL_CAP = 192;
 constexpr size_t AUTH_CAP = 192;
 // Longest error body prefix drained for the log + the UNAUTHORIZED token.
 constexpr size_t ERROR_BODY_CAP = 159;
@@ -77,6 +79,115 @@ Scratch allocScratch(size_t size) {
 
 }  // namespace
 
+namespace {
+
+// Blocking round trip shared by every learning endpoint. Returns Ok when a
+// complete HTTP response was read — `httpError` then says whether the status
+// was outside 2xx and `body` holds the error prefix for the caller's parser.
+// Transport failures map straight to a Result.
+LearningClient::Result exchange(const char* url, const char* token, const char* deviceId, const char* path,
+                                const char* requestBody, size_t requestLen, char* body, size_t bodyCap,
+                                size_t& bodyLen, int& status, bool& httpError) {
+  bodyLen = 0;
+  status = 0;
+  httpError = false;
+  if (url == nullptr || token == nullptr || deviceId == nullptr || path == nullptr || body == nullptr || bodyCap == 0) {
+    return LearningClient::Result::BadConfig;
+  }
+  if (!WiFi.isConnected()) return LearningClient::Result::NoWifi;
+  const ParsedUrl parsedUrl = parseRelayUrl(url);
+  if (!parsedUrl.valid || token[0] == '\0' || deviceId[0] == '\0' || strlen(token) >= AUTH_CAP - 8) {
+    return LearningClient::Result::BadConfig;
+  }
+
+  char httpUrl[URL_CAP];
+  const int urlLen = snprintf(httpUrl, sizeof(httpUrl), "%s://%s:%u%s", parsedUrl.tls ? "https" : "http",
+                              parsedUrl.host, static_cast<unsigned>(parsedUrl.port), path);
+  if (urlLen <= 0 || static_cast<size_t>(urlLen) >= sizeof(httpUrl)) return LearningClient::Result::BadConfig;
+
+  NetBootstrap::ensureTlsAllocator();
+  // Only a TLS endpoint cares about the clock (same rule as ChatClient).
+  if (parsedUrl.tls && !NetBootstrap::ensureSystemTime()) return LearningClient::Result::Time;
+
+  esp_http_client_config_t config = {};
+  config.url = httpUrl;
+  config.method = requestBody != nullptr ? HTTP_METHOD_POST : HTTP_METHOD_GET;
+  config.buffer_size = HTTP_RX_BUF;
+  config.buffer_size_tx = HTTP_TX_BUF;
+  config.timeout_ms = HTTP_TIMEOUT_MS;
+  config.crt_bundle_attach = esp_crt_bundle_attach;
+
+  esp_http_client_handle_t client = esp_http_client_init(&config);
+  if (client == nullptr) {
+    LOG_ERR("VLEARN", "client init failed");
+    return LearningClient::Result::Connect;
+  }
+
+  esp_http_client_set_header(client, "Content-Type", "application/json");
+  esp_http_client_set_header(client, "Accept", "application/json");
+  esp_http_client_set_header(client, "User-Agent", "CrossPoint-ESP32-" CROSSPOINT_VERSION);
+  char auth[AUTH_CAP];
+  snprintf(auth, sizeof(auth), "Bearer %s", token);
+  esp_http_client_set_header(client, "Authorization", auth);
+  esp_http_client_set_header(client, "X-Device-Id", deviceId);
+
+  LOG_INF("VLEARN", "%s %s (%u body bytes)", requestBody != nullptr ? "POST" : "GET", httpUrl,
+          static_cast<unsigned>(requestLen));
+  if (esp_http_client_open(client, static_cast<int64_t>(requestLen)) != ESP_OK) {
+    LOG_ERR("VLEARN", "open failed");
+    esp_http_client_cleanup(client);
+    return LearningClient::Result::Connect;
+  }
+  if (requestBody != nullptr && !writeAll(client, requestBody, requestLen)) {
+    LOG_ERR("VLEARN", "body write failed");
+    esp_http_client_cleanup(client);
+    return LearningClient::Result::Http;
+  }
+
+  const int64_t contentLength = esp_http_client_fetch_headers(client);
+  status = esp_http_client_get_status_code(client);
+  httpError = status < 200 || status >= 300;
+  // Error bodies only need their prefix (log + error token); a success body
+  // is the whole payload and must fit.
+  const size_t cap = httpError ? (ERROR_BODY_CAP < bodyCap - 1 ? ERROR_BODY_CAP : bodyCap - 1) : bodyCap - 1;
+  size_t total = 0;
+  while (total < cap) {
+    const int got = esp_http_client_read(client, body + total, static_cast<int>(cap - total));
+    if (got < 0) {
+      // A broken error body still leaves the status class usable; a truncated
+      // success body does not.
+      if (httpError) break;
+      LOG_ERR("VLEARN", "read failed after %u bytes", static_cast<unsigned>(total));
+      esp_http_client_cleanup(client);
+      return LearningClient::Result::Read;
+    }
+    if (got == 0) break;  // end of body
+    total += static_cast<size_t>(got);
+    esp_task_wdt_reset();
+  }
+  esp_http_client_cleanup(client);
+  body[total] = '\0';
+  bodyLen = total;
+  if (httpError) {
+    LOG_ERR("VLEARN", "HTTP %d (%lld bytes): %s", status, static_cast<long long>(contentLength),
+            total > 0 ? body : "");
+  }
+  return LearningClient::Result::Ok;
+}
+
+LearningClient::Result mapHttpStatus(const int status, const ErrorCode code) {
+  if (status == 401 || code == ErrorCode::Unauthorized || code == ErrorCode::DeviceNotAllowed) {
+    return LearningClient::Result::Auth;
+  }
+  // 400 is a caller bug (bad batch / bad review); 404 means the relay predates
+  // the learning routes.
+  if (status == 400 || status == 404) return LearningClient::Result::BadConfig;
+  if (code != ErrorCode::None) return mapError(code);
+  return status >= 500 ? LearningClient::Result::Upstream : LearningClient::Result::Http;
+}
+
+}  // namespace
+
 LearningClient::Result LearningClient::addWords(const char* url, const char* token, const char* deviceId,
                                                 const char* const* words, size_t count, const char* source,
                                                 int32_t* added, int32_t* accepted, Stats* stats) {
@@ -87,15 +198,6 @@ LearningClient::Result LearningClient::addWords(const char* url, const char* tok
       count > LEARNING_MAX_WORDS_PER_REQUEST) {
     return Result::BadConfig;
   }
-  if (!WiFi.isConnected()) return Result::NoWifi;
-  const ParsedUrl parsedUrl = parseRelayUrl(url);
-  if (!parsedUrl.valid || token[0] == '\0' || deviceId[0] == '\0' || strlen(token) >= AUTH_CAP - 8) {
-    return Result::BadConfig;
-  }
-
-  char httpUrl[URL_CAP];
-  snprintf(httpUrl, sizeof(httpUrl), "%s://%s:%u/api/v1/learning/words", parsedUrl.tls ? "https" : "http",
-           parsedUrl.host, static_cast<unsigned>(parsedUrl.port));
 
   Scratch req = allocScratch(REQ_CAP);
   Scratch body = allocScratch(BODY_CAP);
@@ -110,93 +212,25 @@ LearningClient::Result LearningClient::addWords(const char* url, const char* tok
     return Result::BadConfig;
   }
 
-  NetBootstrap::ensureTlsAllocator();
-  // Only a TLS endpoint cares about the clock (same rule as ChatClient).
-  if (parsedUrl.tls && !NetBootstrap::ensureSystemTime()) return Result::Time;
-
-  esp_http_client_config_t config = {};
-  config.url = httpUrl;
-  config.method = HTTP_METHOD_POST;
-  config.buffer_size = HTTP_RX_BUF;
-  config.buffer_size_tx = HTTP_TX_BUF;
-  config.timeout_ms = HTTP_TIMEOUT_MS;
-  config.crt_bundle_attach = esp_crt_bundle_attach;
-
-  esp_http_client_handle_t client = esp_http_client_init(&config);
-  if (client == nullptr) {
-    LOG_ERR("VLEARN", "client init failed");
-    return Result::Connect;
-  }
-
-  esp_http_client_set_header(client, "Content-Type", "application/json");
-  esp_http_client_set_header(client, "Accept", "application/json");
-  esp_http_client_set_header(client, "User-Agent", "CrossPoint-ESP32-" CROSSPOINT_VERSION);
-  char auth[AUTH_CAP];
-  snprintf(auth, sizeof(auth), "Bearer %s", token);
-  esp_http_client_set_header(client, "Authorization", auth);
-  esp_http_client_set_header(client, "X-Device-Id", deviceId);
-
-  LOG_INF("VLEARN", "POST %s (%u words, %u body bytes)", httpUrl, static_cast<unsigned>(count),
-          static_cast<unsigned>(reqLen));
-  if (esp_http_client_open(client, static_cast<int64_t>(reqLen)) != ESP_OK) {
-    LOG_ERR("VLEARN", "open failed");
-    esp_http_client_cleanup(client);
-    return Result::Connect;
-  }
-  if (!writeAll(client, req.get(), reqLen)) {
-    LOG_ERR("VLEARN", "body write failed");
-    esp_http_client_cleanup(client);
-    return Result::Http;
-  }
-
-  const int64_t contentLength = esp_http_client_fetch_headers(client);
-  const int status = esp_http_client_get_status_code(client);
+  size_t bodyLen = 0;
+  int status = 0;
+  bool httpError = false;
+  const Result exchanged = exchange(url, token, deviceId, "/api/v1/learning/words", req.get(), reqLen, body.get(),
+                                    BODY_CAP, bodyLen, status, httpError);
   if (stats != nullptr) stats->httpStatus = status;
+  if (exchanged != Result::Ok) return exchanged;
+  if (stats != nullptr) stats->responseBytes = bodyLen;
 
-  if (status < 200 || status >= 300) {
-    // Drain a short prefix of the error body: enough for the log line and the
-    // {"error":"UNAUTHORIZED"} template that picks the class.
-    size_t n = 0;
-    while (n < ERROR_BODY_CAP) {
-      const int got = esp_http_client_read(client, body.get() + n, static_cast<int>(ERROR_BODY_CAP - n));
-      if (got <= 0) break;
-      n += static_cast<size_t>(got);
-    }
-    body[n] = '\0';
-    esp_http_client_cleanup(client);
+  if (httpError) {
     AddWordsResult errorBody;
-    parseAddWordsResponse(body.get(), n, errorBody);
-    LOG_ERR("VLEARN", "HTTP %d (%lld bytes): %s", status, static_cast<long long>(contentLength),
-            n > 0 ? body.get() : "");
-    if (status == 401 || errorBody.error == ErrorCode::Unauthorized || errorBody.error == ErrorCode::DeviceNotAllowed) {
-      return Result::Auth;
-    }
-    // 400 invalid_words is a caller bug (batch too large / empty word); 404
-    // means the relay predates the learning routes.
-    if (status == 400 || status == 404) return Result::BadConfig;
-    if (errorBody.error != ErrorCode::None) return mapError(errorBody.error);
-    return status >= 500 ? Result::Upstream : Result::Http;
+    parseAddWordsResponse(body.get(), bodyLen, errorBody);
+    return mapHttpStatus(status, errorBody.error);
   }
-
-  size_t total = 0;
-  while (total < BODY_CAP - 1) {
-    const int got = esp_http_client_read(client, body.get() + total, static_cast<int>(BODY_CAP - 1 - total));
-    if (got < 0) {
-      LOG_ERR("VLEARN", "read failed after %u bytes", static_cast<unsigned>(total));
-      esp_http_client_cleanup(client);
-      return Result::Read;
-    }
-    if (got == 0) break;  // end of body
-    total += static_cast<size_t>(got);
-    esp_task_wdt_reset();
-  }
-  esp_http_client_cleanup(client);
-  body[total] = '\0';
-  if (stats != nullptr) stats->responseBytes = total;
 
   AddWordsResult result;
-  if (!parseAddWordsResponse(body.get(), total, result)) {
-    LOG_ERR("VLEARN", "no ok in a %u-byte body (code=%s)", static_cast<unsigned>(total), errorCodeName(result.error));
+  if (!parseAddWordsResponse(body.get(), bodyLen, result)) {
+    LOG_ERR("VLEARN", "no ok in a %u-byte body (code=%s)", static_cast<unsigned>(bodyLen),
+            errorCodeName(result.error));
     if (result.error != ErrorCode::None) return mapError(result.error);
     return Result::NoData;
   }
@@ -204,6 +238,96 @@ LearningClient::Result LearningClient::addWords(const char* url, const char* tok
   if (accepted != nullptr) *accepted = result.accepted;
   LOG_INF("VLEARN", "synced %u words (accepted %ld, added %ld)", static_cast<unsigned>(count),
           static_cast<long>(result.accepted), static_cast<long>(result.added));
+  return Result::Ok;
+}
+
+LearningClient::Result LearningClient::fetchReviewQueue(const char* url, const char* token, const char* deviceId,
+                                                        ReviewItem* items, size_t cap, size_t& stored, int32_t& due,
+                                                        Stats* stats) {
+  stored = 0;
+  due = -1;
+  if (stats != nullptr) *stats = Stats{};
+  if (items == nullptr || cap == 0) return Result::BadConfig;
+
+  char path[48];
+  const int pathLen = snprintf(path, sizeof(path), "/api/v1/learning/review?limit=%u",
+                               static_cast<unsigned>(LEARNING_REVIEW_LIMIT));
+  if (pathLen <= 0 || static_cast<size_t>(pathLen) >= sizeof(path)) return Result::BadConfig;
+
+  Scratch body = allocScratch(BODY_CAP);
+  if (!body) {
+    LOG_ERR("VLEARN", "OOM: %u bytes", static_cast<unsigned>(BODY_CAP));
+    return Result::Oom;
+  }
+
+  size_t bodyLen = 0;
+  int status = 0;
+  bool httpError = false;
+  const Result exchanged =
+      exchange(url, token, deviceId, path, nullptr, 0, body.get(), BODY_CAP, bodyLen, status, httpError);
+  if (stats != nullptr) stats->httpStatus = status;
+  if (exchanged != Result::Ok) return exchanged;
+  if (stats != nullptr) stats->responseBytes = bodyLen;
+
+  if (httpError) {
+    ReviewSubmitResult errorBody;  // same {"error":...} token shape
+    parseReviewResponse(body.get(), bodyLen, errorBody);
+    return mapHttpStatus(status, errorBody.error);
+  }
+
+  ReviewQueueResult result;
+  if (!parseReviewQueueResponse(body.get(), bodyLen, items, cap, stored, result)) {
+    LOG_ERR("VLEARN", "no words in a %u-byte queue body", static_cast<unsigned>(bodyLen));
+    return Result::NoData;
+  }
+  due = result.due;
+  LOG_INF("VLEARN", "review queue: %u shown, %ld due", static_cast<unsigned>(stored), static_cast<long>(due));
+  return Result::Ok;
+}
+
+LearningClient::Result LearningClient::submitReview(const char* url, const char* token, const char* deviceId,
+                                                    const char* word, int rating, const char* clientEventId,
+                                                    bool* duplicate, Stats* stats) {
+  if (stats != nullptr) *stats = Stats{};
+  if (duplicate != nullptr) *duplicate = false;
+  if (word == nullptr || clientEventId == nullptr) return Result::BadConfig;
+
+  Scratch req = allocScratch(REQ_CAP);
+  Scratch body = allocScratch(BODY_CAP);
+  if (!req || !body) {
+    LOG_ERR("VLEARN", "OOM: %u + %u bytes", static_cast<unsigned>(REQ_CAP), static_cast<unsigned>(BODY_CAP));
+    return Result::Oom;
+  }
+
+  const size_t reqLen = buildReviewRequest(req.get(), REQ_CAP, word, rating, clientEventId);
+  if (reqLen == 0) {
+    LOG_ERR("VLEARN", "review request build failed (%s, rating %d)", word, rating);
+    return Result::BadConfig;
+  }
+
+  size_t bodyLen = 0;
+  int status = 0;
+  bool httpError = false;
+  const Result exchanged = exchange(url, token, deviceId, "/api/v1/learning/review", req.get(), reqLen, body.get(),
+                                    BODY_CAP, bodyLen, status, httpError);
+  if (stats != nullptr) stats->httpStatus = status;
+  if (exchanged != Result::Ok) return exchanged;
+  if (stats != nullptr) stats->responseBytes = bodyLen;
+
+  if (httpError) {
+    ReviewSubmitResult errorBody;
+    parseReviewResponse(body.get(), bodyLen, errorBody);
+    return mapHttpStatus(status, errorBody.error);
+  }
+
+  ReviewSubmitResult result;
+  if (!parseReviewResponse(body.get(), bodyLen, result)) {
+    LOG_ERR("VLEARN", "no ok in a %u-byte review body", static_cast<unsigned>(bodyLen));
+    if (result.error != ErrorCode::None) return mapError(result.error);
+    return Result::NoData;
+  }
+  if (duplicate != nullptr) *duplicate = result.duplicate;
+  LOG_INF("VLEARN", "review stored: %s rating %d%s", word, rating, result.duplicate ? " (duplicate)" : "");
   return Result::Ok;
 }
 

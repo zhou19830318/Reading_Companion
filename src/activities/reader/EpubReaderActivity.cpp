@@ -43,6 +43,7 @@
 #include "RuledLineSettingsActivity.h"
 #include "SdCardFontSystem.h"
 #include "WordCardActivity.h"
+#include "activities/learning/ReviewActivity.h"
 #include "activities/settings/SettingsActivity.h"
 #include "activities/voice/VoiceActivity.h"
 #include "components/UITheme.h"
@@ -1126,6 +1127,11 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       // Same picker the quick-action menu opens: box a glyph, Confirm looks
       // the character up on the relay's dictionary endpoint.
       enterDictPick();
+      break;
+    }
+    case EpubReaderMenuActivity::MenuAction::REVIEW: {
+      startActivityForResult(std::make_unique<ReviewActivity>(renderer, mappedInput),
+                             [this](const ActivityResult&) { requestUpdate(); });
       break;
     }
     case EpubReaderMenuActivity::MenuAction::VOICE_NOTE: {
