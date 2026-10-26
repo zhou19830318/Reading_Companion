@@ -181,6 +181,38 @@ Provider：`T2I_PROVIDER=mock`（默认）在本地绘制一张确定性的占�
 保持 mock，反之亦然。`/readyz` 报告
 `"t2i": "mock" | "configured" | "missing_config"`。
 
+## 词汇学习 API（/api/v1/learning/）
+
+百词斩词卡与复习的数据面。设备 token 认证（`Authorization` +
+`X-Device-Id`，与其它端点一致）；**nginx 必须代理
+`/api/v1/learning/`**——dev/prod 两份 conf 均已包含，未配置时 8080 会
+落进兜底 `location /` 返回 404（表现为设备"同步失败"）。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/v1/learning/words?state=&limit=` | 列词本；不带 `state`=全部（每行含 `state` 字段），`state=active/removed` 过滤；limit≤500 |
+| POST | `/api/v1/learning/words` | 批量加词 `{"words":[...],"source":"lookup\|review"}` → `{ok,accepted,added}`；重试幂等，重新加入会把 `removed` 墓碑翻回 `active` |
+| POST | `/api/v1/learning/words/remove` | 批量移出 `{"words":[...]}` → `{ok,accepted,removed}`；仅翻转 `active→removed`，复习历史保留 |
+| GET | `/api/v1/learning/review?limit=` | 到期待复习队列 → `{count,due,words:[{word,addedAt,source,lastRating,lastReviewedAt,dueAt}]}`；limit≤50，`due` 为总到期数 |
+| POST | `/api/v1/learning/review` | 评分事件 `{"word","rating"(1-4),"clientEventId"}` → `{ok,duplicate}`；`clientEventId` UNIQUE 幂等，缺词自动建（source=review） |
+
+- **调度**：固定间隔 `rating 1/2/3/4 → 1h/1d/3d/7d`（忘记/模糊/认识/简单）；
+  从未复习的词立即到期；排序 `(dueAt, word)`；仅 `state='active'` 入队。
+- **移出语义**：设备先本地落盘，再推 remove；离线移出在设备端排队（tombstone
+  同 add 一样 pending-until-ack），服务器只保留状态不删行，便于审计与重建。
+- 批量上限 `LEARNING_MAX_WORD_BATCH = 200`（设备端另按 16 词/批拆包）。
+- 未来若把固定间隔换成 FSRS，只动 `LearningStore.review_queue` 的到期计算，
+  以上契约（路径/字段/幂等）保持不变。
+
+```bash
+TOKEN=...
+curl -s -H "Authorization: Bearer $TOKEN" -H "X-Device-Id: reading-companion-001" \
+     -H 'Content-Type: application/json' -d '{"words":["abandon"]}' \
+     localhost:8080/api/v1/learning/words | jq .       # 经 nginx 验证代理
+curl -s -H "Authorization: Bearer $TOKEN" -H "X-Device-Id: reading-companion-001" \
+     "localhost:8080/api/v1/learning/review?limit=10" | jq .
+```
+
 ## 部署与回滚
 
 完整运维手册（中文）：[VoiceRelay 部署手册](./DEPLOY.md)——打包、安装、
