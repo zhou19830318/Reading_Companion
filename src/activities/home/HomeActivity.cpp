@@ -245,8 +245,8 @@ void HomeActivity::render(RenderLock&&) {
 
   reviewLabel = tr(STR_REVIEW_TODAY);
   if (reviewDue >= 0) reviewLabel += " " + std::to_string(reviewDue);
-  std::vector<const char*> menuItems = {tr(STR_BROWSE_FILES), tr(STR_MENU_RECENT_BOOKS), reviewLabel.c_str(),
-                                        tr(STR_VOICE),        tr(STR_WORKBENCH),         tr(STR_FILE_TRANSFER),
+  std::vector<const char*> menuItems = {tr(STR_BROWSE_FILES),  tr(STR_MENU_RECENT_BOOKS), reviewLabel.c_str(),
+                                        tr(STR_VOICE),         tr(STR_WORKBENCH),         tr(STR_FILE_TRANSFER),
                                         tr(STR_SETTINGS_TITLE)};
   std::vector<UIIcon> menuIcons = {Folder, Recent, Recent, Mic, Workbench, Transfer, Settings};
 

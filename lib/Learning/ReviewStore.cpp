@@ -110,28 +110,27 @@ size_t ReviewStore::pendingCount() {
 bool ReviewStore::remove(const char* clientEventId) {
   if (!ReviewFormat::validEventId(clientEventId)) return true;
   bool removed = false;
-  const bool ok = rewriteLines(ReviewFormat::EVENTS_PATH, ReviewFormat::EVENTS_TMP, TAG,
-                               [&](char* line, size_t len) -> size_t {
-                                 ReviewFormat::Event event;
-                                 if (!ReviewFormat::parseEventLine(line, len, event)) return 0;
-                                 if (strcmp(event.clientEventId, clientEventId) == 0) {
-                                   removed = true;
-                                   return 0;
-                                 }
-                                 return len;
-                               });
+  const bool ok =
+      rewriteLines(ReviewFormat::EVENTS_PATH, ReviewFormat::EVENTS_TMP, TAG, [&](char* line, size_t len) -> size_t {
+        ReviewFormat::Event event;
+        if (!ReviewFormat::parseEventLine(line, len, event)) return 0;
+        if (strcmp(event.clientEventId, clientEventId) == 0) {
+          removed = true;
+          return 0;
+        }
+        return len;
+      });
   if (ok && !removed) return true;  // already absent
   return ok;
 }
 
 bool ReviewStore::removeWord(const char* word) {
   if (!WordBookFormat::validWord(word)) return true;
-  return rewriteLines(ReviewFormat::EVENTS_PATH, ReviewFormat::EVENTS_TMP, TAG,
-                      [&](char* line, size_t len) -> size_t {
-                        ReviewFormat::Event event;
-                        if (!ReviewFormat::parseEventLine(line, len, event)) return 0;
-                        return strcmp(event.word, word) == 0 ? 0 : len;
-                      });
+  return rewriteLines(ReviewFormat::EVENTS_PATH, ReviewFormat::EVENTS_TMP, TAG, [&](char* line, size_t len) -> size_t {
+    ReviewFormat::Event event;
+    if (!ReviewFormat::parseEventLine(line, len, event)) return 0;
+    return strcmp(event.word, word) == 0 ? 0 : len;
+  });
 }
 
 bool ReviewStore::saveCard(const char* word, const char* text) {

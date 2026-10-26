@@ -108,8 +108,8 @@ inline bool parseEventLine(const char* line, size_t len, Event& out) {
 // epoch seconds (0 when the clock was not set).
 inline size_t buildStateLine(char* out, size_t cap, int32_t due, uint32_t checkedAt) {
   if (out == nullptr || cap == 0 || due < 0) return 0;
-  const int n = snprintf(out, cap, "%s%ld %lu\n", STATE_PREFIX, static_cast<long>(due),
-                         static_cast<unsigned long>(checkedAt));
+  const int n =
+      snprintf(out, cap, "%s%ld %lu\n", STATE_PREFIX, static_cast<long>(due), static_cast<unsigned long>(checkedAt));
   return n > 0 && static_cast<size_t>(n) < cap ? static_cast<size_t>(n) : 0;
 }
 
