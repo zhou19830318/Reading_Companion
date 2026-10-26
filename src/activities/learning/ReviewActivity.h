@@ -80,7 +80,7 @@ class ReviewActivity final : public Activity {
   const char* currentWord() const;
   void loadQueue();
   void loadCachedQueue();
-  void dropRemovedWords();  // queue entries whose word left the word book
+  size_t dropRemovedWords();  // drops queue entries whose word left the word book
   void showFront();
   void reveal();
   void fetchCard();

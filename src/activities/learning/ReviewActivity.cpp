@@ -20,6 +20,7 @@
 #include "MappedInputManager.h"
 #include "ReviewStore.h"
 #include "WordBook.h"
+#include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 
 void ReviewActivity::onEnter() {
@@ -35,6 +36,20 @@ void ReviewActivity::onEnter() {
     state_ = State::Failed;
   } else {
     card_[0] = '\0';
+  }
+  // The radio may have powered itself down (WifiIdleManager, 60 s of quiet):
+  // the offline branch in loadQueue() never reconnects, so a configured relay
+  // would stay unreachable for the whole session. Offer the picker the way
+  // Voice/WordCard do; WifiSelection auto-connects the last known network and
+  // the LoadingQueue branch runs loadQueue() once the result lands.
+  // started_ guards the one loop() that may run before the push is processed.
+  if (state_ != State::Failed && relayConfigured_ && WiFi.status() != WL_CONNECTED) {
+    LOG_INF("REVIEW", "no network, opening Wi-Fi selection");
+    started_ = true;
+    startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
+                           [this](const ActivityResult&) { started_ = false; });
+    requestUpdate();
+    return;
   }
   requestUpdate();
 }
@@ -63,11 +78,15 @@ void ReviewActivity::loadCachedQueue() {
   }
   const size_t count = Learning::ReviewStore::loadQueue(entries.get(), QUEUE_CAP);
   queue_.assign(entries.get(), entries.get() + count);
-  dropRemovedWords();  // a snapshot predates an offline 移出生词
   index_ = 0;
   uint32_t checkedAt = 0;
   int32_t cachedDue = 0;
   due_ = Learning::ReviewStore::loadDue(cachedDue, checkedAt) ? cachedDue : static_cast<int32_t>(count);
+  const size_t dropped = dropRemovedWords();  // a snapshot predates an offline 移出生词
+  if (dropped > 0) {
+    // The badge mirrors reviewable words only, so it must fall with the filter.
+    due_ = std::max(due_ - static_cast<int32_t>(dropped), static_cast<int32_t>(queue_.size()));
+  }
   if (queue_.empty()) {
     state_ = State::Empty;
   } else {
@@ -129,10 +148,13 @@ void ReviewActivity::loadQueue() {
     snprintf(entry.word, sizeof(entry.word), "%s", items[i].word);
     queue_.push_back(entry);
   }
-  dropRemovedWords();  // server drift (a removal still in flight, or an add
-                       // ack whose SD rewrite failed) never reaches the screen
+  const size_t dropped = dropRemovedWords();  // server drift (a removal still in
+                                              // flight, or an add ack whose SD
+                                              // rewrite failed) never reaches the screen
   index_ = 0;
-  due_ = due;
+  // The badge must count what this screen can actually review: words the relay
+  // queued from rows this book no longer has shrink it on the spot.
+  due_ = std::max(due - static_cast<int32_t>(dropped), static_cast<int32_t>(queue_.size()));
   if (!Learning::ReviewStore::saveQueue(queue_.data(), queue_.size())) {
     LOG_ERR("REVIEW", "queue cache write failed");
   }
@@ -146,19 +168,19 @@ void ReviewActivity::loadQueue() {
   requestUpdate();
 }
 
-void ReviewActivity::dropRemovedWords() {
+size_t ReviewActivity::dropRemovedWords() {
   // A word whose line left the book (移出生词 on the card, acked or not) is
   // not reviewable: the relay still queues it only from 'active' rows, but a
   // cached snapshot or an in-flight removal can lag one session behind.
   const auto newEnd = std::remove_if(queue_.begin(), queue_.end(), [](const Learning::ReviewFormat::QueueEntry& entry) {
     return !Learning::WordBook::contains(entry.word);
   });
-  if (newEnd != queue_.end()) {
-    LOG_DBG("REVIEW", "dropped %u removed words from the queue",
-            static_cast<unsigned>(std::distance(newEnd, queue_.end())));
-    queue_.erase(newEnd, queue_.end());
-    if (index_ >= queue_.size()) index_ = 0;
-  }
+  if (newEnd == queue_.end()) return 0;
+  const size_t dropped = static_cast<size_t>(std::distance(newEnd, queue_.end()));
+  LOG_DBG("REVIEW", "dropped %u removed words from the queue", static_cast<unsigned>(dropped));
+  queue_.erase(newEnd, queue_.end());
+  if (index_ >= queue_.size()) index_ = 0;
+  return dropped;
 }
 
 void ReviewActivity::showFront() {
