@@ -136,7 +136,6 @@ class VoiceActivity final : public Activity {
     NoteList,      // note mode: this book's notes (prev key enters)
     NoteView,      // note mode: one note, scroll window
     NoteQuick,     // note mode: quick-mark picker (no mic, no STT, no gateway)
-    ChatPresets,   // chat mode: preset questions (send or edit-then-send)
   };
 
   // Recording ceiling. The VAD usually stops long before this (1.5 s of
@@ -385,24 +384,6 @@ class VoiceActivity final : public Activity {
   char noteExcerpt_[Notes::NoteFormat::EXCERPT_CAP] = {};
   void openNoteQuick();
   void saveQuickNote();
-
-  // ── chat preset questions ─────────────────────────────────────────────
-  // A fixed list of one-tap questions on the chat screen (State::ChatPresets),
-  // opened by side Up from Idle/Failed — the three front keys are already
-  // bound (talk / send-mode toggle / history). Confirm sends the highlighted
-  // preset as a chat message with no mic round; front-Left opens it in the
-  // keyboard so the user can edit before submitting. Both paths reuse the
-  // oweSend_ text-send of a summarize round: transcript_ holds the question,
-  // pendingText_ stays null, and recordHistoryTurn() appends the turn on
-  // settle like any other chat round.
-  void openChatPresets();
-  void sendPresetDirect();
-  void openPresetEditor();
-  // Shared tail of the two text-send paths above: parks transcript_ as the
-  // outgoing message and enters Sending with oweSend_ armed (sendToOpenClaw's
-  // half that does not touch the recorder).
-  void startTextSend();
-  size_t presetSelected_ = 0;
 
   // Bound to the process-wide instance: the workbench status cards and this
   // activity share one gateway connection, so entering voice does not pay for
