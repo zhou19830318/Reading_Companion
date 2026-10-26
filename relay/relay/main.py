@@ -625,7 +625,14 @@ async def learning_words(request: Request, state: str = "", limit: int = 500):
     device_id, error = _learning_device(settings, request)
     if error is not None:
         return error
-    rows = app.state.learning.list_words(device_id, state or None, max(1, min(limit, 500)))
+    # "" and "all" mean no filter; anything outside the two real states is a
+    # client bug — answering count:0 would read as "the word book is empty".
+    if state and state not in ("all", "active", "removed"):
+        return JSONResponse(
+            status_code=400,
+            content={"error": "invalid_state", "allowed": ["active", "removed"]},
+        )
+    rows = app.state.learning.list_words(device_id, None if state in ("", "all") else state, max(1, min(limit, 500)))
     log.info("learning word list", extra={"deviceId": device_id, "state": state or "all", "count": len(rows)})
     return {
         "count": len(rows),

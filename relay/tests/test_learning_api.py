@@ -53,8 +53,12 @@ def test_word_batch_add_and_list(client):
     assert words == {"abandon", "ability"}
     assert all(w["source"] == "lookup" for w in listing["words"])
 
-    filtered = client.get("/api/v1/learning/words", headers=DEVICE, params={"state": "new"}).json()
-    assert filtered["count"] == 0  # no word ever carries state 'new'
+    filtered = client.get("/api/v1/learning/words", headers=DEVICE, params={"state": "new"})
+    assert filtered.status_code == 400  # unknown states are a client bug, not an empty book
+    assert filtered.json()["error"] == "invalid_state"
+
+    everything = client.get("/api/v1/learning/words", headers=DEVICE, params={"state": "all"}).json()
+    assert everything["count"] == 2  # "all" is the explicit form of "no filter"
 
 
 def test_word_batch_validation(client):

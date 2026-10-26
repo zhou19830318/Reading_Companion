@@ -190,7 +190,7 @@ Provider：`T2I_PROVIDER=mock`（默认）在本地绘制一张确定性的占�
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/v1/learning/words?state=&limit=` | 列词本；不带 `state`=全部（每行含 `state` 字段），`state=active/removed` 过滤；limit≤500 |
+| GET | `/api/v1/learning/words?state=&limit=` | 列词本；不带 `state` 或 `state=all`=全部（每行含 `state` 字段），`state=active/removed` 过滤，其他值 → 400 `invalid_state`；limit≤500 |
 | POST | `/api/v1/learning/words` | 批量加词 `{"words":[...],"source":"lookup\|review"}` → `{ok,accepted,added}`；重试幂等，重新加入会把 `removed` 墓碑翻回 `active` |
 | POST | `/api/v1/learning/words/remove` | 批量移出 `{"words":[...]}` → `{ok,accepted,removed}`；仅翻转 `active→removed`，复习历史保留 |
 | GET | `/api/v1/learning/review?limit=` | 到期待复习队列 → `{count,due,words:[{word,addedAt,source,lastRating,lastReviewedAt,dueAt}]}`；limit≤50，`due` 为总到期数 |
