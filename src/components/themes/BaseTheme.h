@@ -125,7 +125,8 @@ enum UIIcon {
   Hotspot,
   Bookmark,
   Mic,
-  Workbench
+  Workbench,
+  Review
 };
 
 enum class KeyboardKeyType { Normal, Shift, Mode, Space, Del, Ok, Disabled };

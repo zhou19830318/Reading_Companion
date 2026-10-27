@@ -24,6 +24,7 @@
 #include "components/icons/library.h"
 #include "components/icons/mic24.h"
 #include "components/icons/recent.h"
+#include "components/icons/review.h"
 #include "components/icons/settings2.h"
 #include "components/icons/text24.h"
 #include "components/icons/transfer.h"
@@ -90,6 +91,8 @@ const uint8_t* iconForName(UIIcon icon, int size) {
         return VoiceIcon;
       case UIIcon::Workbench:
         return WorkbenchIcon;
+      case UIIcon::Review:
+        return ReviewIcon;
       default:
         return nullptr;
     }
