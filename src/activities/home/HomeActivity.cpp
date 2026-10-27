@@ -35,11 +35,6 @@ void HomeActivity::buildMenu() {
   }
 }
 
-void HomeActivity::invalidateCover() {
-  freeCoverBuffer();
-  coverRendered = false;
-}
-
 void HomeActivity::loadRecentBooks(int maxBooks) {
   recentBooks.clear();
   const auto& books = RECENT_BOOKS.getBooks();

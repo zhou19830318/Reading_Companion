@@ -83,7 +83,6 @@ class HomeActivity final : public Activity {
   void onWorkbenchOpen();
 
   void buildMenu();
-  void invalidateCover();
   bool storeCoverBuffer();    // Store frame buffer for cover image
   bool restoreCoverBuffer();  // Restore frame buffer from stored cover
   void freeCoverBuffer();     // Free the stored cover buffer
