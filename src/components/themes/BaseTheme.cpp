@@ -498,12 +498,17 @@ void BaseTheme::drawTabBar(const GfxRenderer& renderer, const Rect rect, const s
 // Draw the "Recent Book" cover card on the home screen
 // TODO: Refactor method to make it cleaner, split into smaller methods
 void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,
-                                    const int selectorIndex, bool& coverRendered, bool& coverBufferStored,
-                                    bool& bufferRestored, std::function<bool()> storeCoverBuffer) const {
+                                    const int previewIndex, bool previewSelected, bool& coverRendered,
+                                    bool& coverBufferStored, bool& bufferRestored,
+                                    std::function<bool()> storeCoverBuffer) const {
   const bool hasContinueReading = !recentBooks.empty();
-  const bool bookSelected = hasContinueReading && selectorIndex == 0;
+  const bool bookSelected = hasContinueReading && previewSelected;
+  const RecentBook& selBook =
+      recentBooks[(!recentBooks.empty() && previewIndex >= 0 && previewIndex < static_cast<int>(recentBooks.size()))
+                      ? previewIndex
+                      : 0];
 
-  // --- Top "book" card for the current title (selectorIndex == 0) ---
+  // --- Top "book" card for the current title (preview selected) ---
   // When there's no cover image, use fixed size (half screen)
   // When there's cover image, adapt width to image aspect ratio, keep height fixed at 400px
   const int baseHeight = rect.height;  // Fixed height (400px)
@@ -511,10 +516,10 @@ void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
   int bookWidth, bookX;
   bool hasCoverImage = false;
 
-  if (hasContinueReading && !recentBooks[0].coverBmpPath.empty()) {
+  if (hasContinueReading && !selBook.coverBmpPath.empty()) {
     // Try to get actual image dimensions from BMP header
     const std::string coverBmpPath =
-        UITheme::getCoverThumbPath(recentBooks[0].coverBmpPath, BaseMetrics::values.homeCoverHeight);
+        UITheme::getCoverThumbPath(selBook.coverBmpPath, BaseMetrics::values.homeCoverHeight);
 
     HalFile file;
     if (Storage.openFileForRead("HOME", coverBmpPath, file)) {
@@ -561,9 +566,9 @@ void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
     // Draw cover image as background if available (inside the box)
     // Only load from SD on first render, then use stored buffer
 
-    if (hasContinueReading && !recentBooks[0].coverBmpPath.empty() && !coverRendered) {
+    if (hasContinueReading && !selBook.coverBmpPath.empty() && !coverRendered) {
       const std::string coverBmpPath =
-          UITheme::getCoverThumbPath(recentBooks[0].coverBmpPath, BaseMetrics::values.homeCoverHeight);
+          UITheme::getCoverThumbPath(selBook.coverBmpPath, BaseMetrics::values.homeCoverHeight);
 
       // First time: load cover from SD and render
       HalFile file;
@@ -638,8 +643,8 @@ void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
   }
 
   if (hasContinueReading) {
-    const std::string& lastBookTitle = recentBooks[0].title;
-    const std::string& lastBookAuthor = recentBooks[0].author;
+    const std::string& lastBookTitle = selBook.title;
+    const std::string& lastBookAuthor = selBook.author;
 
     // Invert text colors based on selection state:
     // - With cover: selected = white text on black box, unselected = black text on white box
@@ -751,6 +756,38 @@ void BaseTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
         tileY + (BaseMetrics::values.menuRowHeight - lineHeight) / 2;  // vertically centered assuming y is top of text
     // Invert text when the tile is selected, to contrast with the filled background
     renderer.drawText(UI_10_FONT_ID, textX, textY, label, selectedIndex != i);
+  }
+}
+
+// Default home grid: labels only, no icons (icon lookup is theme-specific).
+// Themes that support icons (e.g. LyraTheme) override this.
+void BaseTheme::drawHomeIconGrid(GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex, int columns,
+                                 const std::function<std::string(int index)>& tileLabel,
+                                 const std::function<UIIcon(int index)>& tileIcon) const {
+  if (itemCount <= 0 || columns <= 0) return;
+  const int sidePad = BaseMetrics::values.contentSidePadding;
+  const int innerW = rect.width - 2 * sidePad;
+  const int colW = innerW / columns;
+  const int tileH = BaseMetrics::values.menuRowHeight + 28;
+  const int rowGap = BaseMetrics::values.menuSpacing;
+  const int labelLine = renderer.getLineHeight(UI_10_FONT_ID);
+
+  for (int i = 0; i < itemCount; ++i) {
+    const int row = i / columns;
+    const int col = i % columns;
+    const int tileX = rect.x + sidePad + col * colW;
+    const int tileY = rect.y + row * (tileH + rowGap);
+    const int tileW = (col == columns - 1) ? (rect.x + sidePad + innerW - tileX) : colW;
+
+    if (i == selectedIndex) {
+      renderer.fillRect(tileX + 2, tileY + 2, tileW - 4, tileH - 4);
+    }
+
+    const std::string labelStr = tileLabel(i);
+    const std::string labelLine1 = renderer.truncatedText(UI_10_FONT_ID, labelStr.c_str(), tileW - 8);
+    const int textW = renderer.getTextWidth(UI_10_FONT_ID, labelLine1.c_str());
+    renderer.drawText(UI_10_FONT_ID, tileX + (tileW - textW) / 2, tileY + (tileH - labelLine) / 2, labelLine1.c_str(),
+                      i == selectedIndex);
   }
 }
 

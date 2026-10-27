@@ -245,12 +245,23 @@ class BaseTheme {
                              const char* rightLabel = nullptr) const;
   virtual void drawTabBar(const GfxRenderer& renderer, Rect rect, const std::vector<TabInfo>& tabs,
                           bool selected) const;
+  // previewIndex selects which recent book the card shows (invalidated by the
+  // caller when it changes); previewSelected draws the selection frame around
+  // the whole tile.
   virtual void drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,
-                                   const int selectorIndex, bool& coverRendered, bool& coverBufferStored,
-                                   bool& bufferRestored, std::function<bool()> storeCoverBuffer) const;
+                                   const int previewIndex, bool previewSelected, bool& coverRendered,
+                                   bool& coverBufferStored, bool& bufferRestored,
+                                   std::function<bool()> storeCoverBuffer) const;
   virtual void drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
                               const std::function<std::string(int index)>& buttonLabel,
                               const std::function<UIIcon(int index)>& rowIcon) const;
+  // Flat multi-column icon grid for the home menu: one tile per entry, icon
+  // over a centred label, selected tile filled. Rows are derived from
+  // itemCount and `columns`; the grid is top-aligned in `rect` with a fixed
+  // tile height so it scales with the number of entries above it.
+  virtual void drawHomeIconGrid(GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex, int columns,
+                                const std::function<std::string(int index)>& tileLabel,
+                                const std::function<UIIcon(int index)>& tileIcon) const;
   // Large pictorial choices filling `rect` — one card per choice, icon over a
   // centred label, selected card filled. drawButtonMenu's rows are pinned to
   // menuRowHeight, which leaves a 2-choice screen as two thin bars above an

@@ -6,14 +6,14 @@
 
 #include "./FileBrowserActivity.h"
 #include "activities/Activity.h"
-#include "util/ButtonNavigator.h"
+#include "components/themes/BaseTheme.h"
 
 struct RecentBook;
 struct Rect;
 
 class HomeActivity final : public Activity {
-  ButtonNavigator buttonNavigator;
-  int selectorIndex = 0;
+  int selectorIndex = 0;  // 0 = preview card, 1..N = grid tiles
+  int previewIndex = 0;   // which preview book the cover card shows
   bool recentsLoading = false;
   bool recentsLoaded = false;
   bool hasOpdsServers = false;
@@ -31,7 +31,12 @@ class HomeActivity final : public Activity {
   int coverRectW = 0;
   int coverRectH = 0;
   std::vector<RecentBook> recentBooks;
+  std::vector<std::string> gridLabels;
+  std::vector<UIIcon> gridIcons;
   const HomeMenuItem initialMenuItem;
+
+  // Home menu grid shape: three icon tiles per row (CJK labels need the width).
+  static constexpr int GRID_COLUMNS = 3;
 
   // Convert HomeMenuItem to menu index (used in onEnter)
   static int menuItemToIndex(HomeMenuItem item, bool hasOpdsUrl) {
@@ -77,7 +82,8 @@ class HomeActivity final : public Activity {
   void onVoiceOpen();
   void onWorkbenchOpen();
 
-  int getMenuItemCount() const;
+  void buildMenu();
+  void invalidateCover();
   bool storeCoverBuffer();    // Store frame buffer for cover image
   bool restoreCoverBuffer();  // Restore frame buffer from stored cover
   void freeCoverBuffer();     // Free the stored cover buffer

@@ -113,8 +113,9 @@ void RoundedRaffTheme::drawTabBar(const GfxRenderer& renderer, Rect rect, const 
 }
 
 void RoundedRaffTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,
-                                           const int selectorIndex, bool& coverRendered, bool& coverBufferStored,
-                                           bool& bufferRestored, std::function<bool()> storeCoverBuffer) const {
+                                           const int previewIndex, bool previewSelected, bool& coverRendered,
+                                           bool& coverBufferStored, bool& bufferRestored,
+                                           std::function<bool()> storeCoverBuffer) const {
   const int tileWidth = rect.width - 2 * RoundedRaffMetrics::values.contentSidePadding;
   const int tileHeight = rect.height;
   const int tileY = rect.y;
@@ -129,7 +130,8 @@ void RoundedRaffTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
   // Draw cover image as background if available (inside the box)
   // Only load from SD on first render, then use stored buffer
   if (hasContinueReading) {
-    RecentBook book = recentBooks[0];
+    RecentBook book =
+        recentBooks[previewIndex >= 0 && previewIndex < static_cast<int>(recentBooks.size()) ? previewIndex : 0];
     if (!coverRendered) {
       std::string coverPath = book.coverBmpPath;
       bool hasCover = true;

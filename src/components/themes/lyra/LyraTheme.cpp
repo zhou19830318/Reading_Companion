@@ -436,8 +436,9 @@ void LyraTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* top
 }
 
 void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,
-                                    const int selectorIndex, bool& coverRendered, bool& coverBufferStored,
-                                    bool& bufferRestored, std::function<bool()> storeCoverBuffer) const {
+                                    const int previewIndex, bool previewSelected, bool& coverRendered,
+                                    bool& coverBufferStored, bool& bufferRestored,
+                                    std::function<bool()> storeCoverBuffer) const {
   const int tileWidth = rect.width - 2 * LyraMetrics::values.contentSidePadding;
   const int tileHeight = rect.height;
   const int tileY = rect.y;
@@ -450,7 +451,8 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
   // Draw cover image as background if available (inside the box)
   // Only load from SD on first render, then use stored buffer
   if (hasContinueReading) {
-    RecentBook book = recentBooks[0];
+    RecentBook book =
+        recentBooks[previewIndex >= 0 && previewIndex < static_cast<int>(recentBooks.size()) ? previewIndex : 0];
     if (!coverRendered) {
       std::string coverPath = book.coverBmpPath;
       bool hasCover = true;
@@ -491,7 +493,7 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
       coverRendered = coverBufferStored;  // Only consider it rendered if we successfully stored the buffer
     }
 
-    bool bookSelected = (selectorIndex == 0);
+    bool bookSelected = previewSelected;
 
     int tileX = LyraMetrics::values.contentSidePadding;
     int textWidth = tileWidth - 2 * hPaddingInSelection - LyraMetrics::values.verticalSpacing - coverWidth;
@@ -570,5 +572,42 @@ void LyraTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
     }
 
     renderer.drawText(UI_12_FONT_ID, textX, textY, label, true);
+  }
+}
+
+void LyraTheme::drawHomeIconGrid(GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex, int columns,
+                                 const std::function<std::string(int index)>& tileLabel,
+                                 const std::function<UIIcon(int index)>& tileIcon) const {
+  if (itemCount <= 0 || columns <= 0) return;
+  const int sidePad = LyraMetrics::values.contentSidePadding;
+  const int innerW = rect.width - 2 * sidePad;
+  const int colW = innerW / columns;
+  const int tileH = LyraMetrics::values.menuRowHeight + 28;  // icon + one label line + padding
+  const int rowGap = LyraMetrics::values.menuSpacing;
+  const int labelLine = renderer.getLineHeight(UI_10_FONT_ID);
+
+  for (int i = 0; i < itemCount; ++i) {
+    const int row = i / columns;
+    const int col = i % columns;
+    const int tileX = rect.x + sidePad + col * colW;
+    const int tileY = rect.y + row * (tileH + rowGap);
+    // Last column of each row absorbs the division remainder.
+    const int tileW = (col == columns - 1) ? (rect.x + sidePad + innerW - tileX) : colW;
+
+    if (i == selectedIndex) {
+      renderer.fillRoundedRect(tileX + 2, tileY + 2, tileW - 4, tileH - 4, cornerRadius, Color::LightGray);
+    }
+
+    const int iconSize = mainMenuIconSize;
+    const int contentH = iconSize + 4 + labelLine;
+    const int contentY = tileY + (tileH - contentH) / 2;
+    const uint8_t* iconBitmap = iconForName(tileIcon(i), iconSize);
+    if (iconBitmap != nullptr) {
+      renderer.drawIcon(iconBitmap, tileX + (tileW - iconSize) / 2, contentY, iconSize, iconSize);
+    }
+    const std::string labelStr = tileLabel(i);
+    const std::string labelLine1 = renderer.truncatedText(UI_10_FONT_ID, labelStr.c_str(), tileW - 8);
+    const int textW = renderer.getTextWidth(UI_10_FONT_ID, labelLine1.c_str());
+    renderer.drawText(UI_10_FONT_ID, tileX + (tileW - textW) / 2, contentY + iconSize + 4, labelLine1.c_str(), true);
   }
 }

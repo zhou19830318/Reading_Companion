@@ -9,6 +9,7 @@
 #include <Utf8.h>
 #include <Xtc.h>
 
+#include <algorithm>
 #include <cstring>
 #include <vector>
 
@@ -21,15 +22,22 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 
-int HomeActivity::getMenuItemCount() const {
-  int count = 7;  // File Browser, Recents, Review, Voice, Workbench, File transfer, Settings
-  if (!recentBooks.empty()) {
-    count += recentBooks.size();
-  }
+void HomeActivity::buildMenu() {
+  gridLabels = {
+      tr(STR_BROWSE_FILES),  tr(STR_MENU_RECENT_BOOKS), reviewLabel.empty() ? tr(STR_REVIEW_TODAY) : reviewLabel,
+      tr(STR_VOICE),         tr(STR_WORKBENCH),         tr(STR_FILE_TRANSFER),
+      tr(STR_SETTINGS_TITLE)};
+  gridIcons = {Folder, Recent, Review, Mic, Workbench, Transfer, Settings};
+
   if (hasOpdsServers) {
-    count++;
+    gridLabels.insert(gridLabels.begin() + 2, tr(STR_OPDS_BROWSER));
+    gridIcons.insert(gridIcons.begin() + 2, Library);
   }
-  return count;
+}
+
+void HomeActivity::invalidateCover() {
+  freeCoverBuffer();
+  coverRendered = false;
 }
 
 void HomeActivity::loadRecentBooks(int maxBooks) {
@@ -120,8 +128,13 @@ void HomeActivity::onEnter() {
   const auto& metrics = UITheme::getInstance().getMetrics();
   loadRecentBooks(metrics.homeRecentBooksCount);
 
-  const auto base = static_cast<int>(recentBooks.size());
-  selectorIndex = initialMenuItem == HomeMenuItem::NONE ? 0 : base + menuItemToIndex(initialMenuItem, hasOpdsServers);
+  reviewLabel = tr(STR_REVIEW_TODAY);
+  if (reviewDue >= 0) reviewLabel += " " + std::to_string(reviewDue);
+  buildMenu();
+
+  // Focus space: 0 = preview card, 1.. = grid tiles.
+  selectorIndex = initialMenuItem == HomeMenuItem::NONE ? 0 : 1 + menuItemToIndex(initialMenuItem, hasOpdsServers);
+  previewIndex = 0;
 
   // Trigger first update
   requestUpdate();
@@ -171,24 +184,32 @@ void HomeActivity::freeCoverBuffer() {
 }
 
 void HomeActivity::loop() {
-  const int menuCount = getMenuItemCount();
+  const int tileCount = static_cast<int>(gridLabels.size());
+  const int bookCount = static_cast<int>(recentBooks.size());
 
-  buttonNavigator.onNext([this, menuCount] {
-    selectorIndex = ButtonNavigator::nextIndex(selectorIndex, menuCount);
+  const bool up = mappedInput.wasPressed(MappedInputManager::Button::Up);
+  const bool down = mappedInput.wasPressed(MappedInputManager::Button::Down);
+  const bool left = mappedInput.wasPressed(MappedInputManager::Button::Left);
+  const bool right = mappedInput.wasPressed(MappedInputManager::Button::Right);
+  if (up || down || left || right) {
+    const int dir = (down || right) ? 1 : -1;
+    // Focus ring: preview(0) -> tile 1..N -> preview. All four direction
+    // keys step one item at a time; Down/Right forward, Up/Left backward.
+    if (selectorIndex == 0) {
+      selectorIndex = dir > 0 ? 1 : tileCount;
+    } else {
+      const int next = selectorIndex + dir;
+      selectorIndex = (next < 1 || next > tileCount) ? 0 : next;
+    }
     requestUpdate();
-  });
-
-  buttonNavigator.onPrevious([this, menuCount] {
-    selectorIndex = ButtonNavigator::previousIndex(selectorIndex, menuCount);
-    requestUpdate();
-  });
+    return;
+  }
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    if (selectorIndex < recentBooks.size()) {
-      onSelectBook(recentBooks[selectorIndex].path);
+    if (selectorIndex == 0) {
+      if (bookCount > 0) onSelectBook(recentBooks[previewIndex].path);
     } else {
-      const int menuIndex = selectorIndex - static_cast<int>(recentBooks.size());
-      switch (indexToMenuItem(menuIndex, hasOpdsServers)) {
+      switch (indexToMenuItem(selectorIndex - 1, hasOpdsServers)) {
         case HomeMenuItem::FILE_BROWSER:
           onFileBrowserOpen();
           break;
@@ -240,36 +261,15 @@ void HomeActivity::render(RenderLock&&) {
   coverRectH = metrics.homeCoverTileHeight;
 
   GUI.drawRecentBookCover(renderer, Rect{0, metrics.homeTopPadding, pageWidth, metrics.homeCoverTileHeight},
-                          recentBooks, selectorIndex, coverRendered, coverBufferStored, bufferRestored,
-                          std::bind(&HomeActivity::storeCoverBuffer, this));
+                          recentBooks, previewIndex, selectorIndex == 0, coverRendered, coverBufferStored,
+                          bufferRestored, std::bind(&HomeActivity::storeCoverBuffer, this));
 
-  reviewLabel = tr(STR_REVIEW_TODAY);
-  if (reviewDue >= 0) reviewLabel += " " + std::to_string(reviewDue);
-  std::vector<const char*> menuItems = {tr(STR_BROWSE_FILES),  tr(STR_MENU_RECENT_BOOKS), reviewLabel.c_str(),
-                                        tr(STR_VOICE),         tr(STR_WORKBENCH),         tr(STR_FILE_TRANSFER),
-                                        tr(STR_SETTINGS_TITLE)};
-  std::vector<UIIcon> menuIcons = {Folder, Recent, Review, Mic, Workbench, Transfer, Settings};
-
-  if (hasOpdsServers) {
-    menuItems.insert(menuItems.begin() + 2, tr(STR_OPDS_BROWSER));
-    menuIcons.insert(menuIcons.begin() + 2, Library);
-  }
-
-  if (metrics.homeContinueReadingInMenu && !recentBooks.empty()) {
-    // Insert Continue Reading at the top if enabled in theme
-    menuItems.insert(menuItems.begin(), tr(STR_CONTINUE_READING));
-    menuIcons.insert(menuIcons.begin(), Book);
-  }
-
-  GUI.drawButtonMenu(
-      renderer,
-      Rect{0, metrics.homeTopPadding + metrics.homeCoverTileHeight + metrics.homeMenuTopOffset, pageWidth,
-           pageHeight - (metrics.headerHeight + metrics.homeTopPadding + metrics.verticalSpacing +
-                         metrics.homeMenuTopOffset + metrics.buttonHintsHeight)},
-      static_cast<int>(menuItems.size()),
-      metrics.homeContinueReadingInMenu ? selectorIndex : selectorIndex - recentBooks.size(),
-      [&menuItems](int index) { return std::string(menuItems[index]); },
-      [&menuIcons](int index) { return menuIcons[index]; });
+  const int gridY = metrics.homeTopPadding + metrics.homeCoverTileHeight + metrics.homeMenuTopOffset;
+  const int gridH = pageHeight - gridY - metrics.buttonHintsHeight;
+  GUI.drawHomeIconGrid(
+      renderer, Rect{0, gridY, pageWidth, gridH}, static_cast<int>(gridLabels.size()),
+      selectorIndex > 0 ? selectorIndex - 1 : -1, GRID_COLUMNS, [this](int index) { return gridLabels[index]; },
+      [this](int index) { return gridIcons[index]; });
 
   const auto labels = mappedInput.mapLabels("", tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);

@@ -93,8 +93,11 @@ class LyraTheme : public BaseTheme {
                       const std::function<std::string(int index)>& buttonLabel,
                       const std::function<UIIcon(int index)>& rowIcon) const override;
   void drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,
-                           const int selectorIndex, bool& coverRendered, bool& coverBufferStored, bool& bufferRestored,
-                           std::function<bool()> storeCoverBuffer) const override;
+                           const int previewIndex, bool previewSelected, bool& coverRendered, bool& coverBufferStored,
+                           bool& bufferRestored, std::function<bool()> storeCoverBuffer) const override;
+  void drawHomeIconGrid(GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex, int columns,
+                        const std::function<std::string(int index)>& tileLabel,
+                        const std::function<UIIcon(int index)>& tileIcon) const override;
   void drawEmptyRecents(const GfxRenderer& renderer, const Rect rect) const;
   bool showsFileIcons() const override { return true; }
 };
