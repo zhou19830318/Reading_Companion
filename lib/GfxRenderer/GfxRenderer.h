@@ -172,6 +172,9 @@ class GfxRenderer {
   int getScreenWidth() const;
   int getScreenHeight() const;
   void displayBuffer(HalDisplay::RefreshMode refreshMode = HalDisplay::FAST_REFRESH) const;
+  // Strong absolute clean using only the fast waveform (black pulse, then the
+  // framebuffer). Used by the ghost-cleanup cadence and the sleep screen.
+  void displayBufferBlackPulseClean() const;
   // Windowed update: push only the logical rect (orientation-aware; widened to
   // the panel's 8-pixel RAM columns). Does NOT advance the ghost-cleanup
   // cadence — the rest of the panel is untouched. Returns false when the rect

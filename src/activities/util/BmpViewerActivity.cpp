@@ -113,9 +113,11 @@ void BmpViewerActivity::onEnter() {
 
       // Draw UI hints on the base layer
       GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-      // Single pass for non-grayscale images
-
-      renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+      // Full-screen image changes defeat the 0xFC differential waveform: pixels
+      // that stay white/black are not driven, so the previous image survives as
+      // ghosting. Use the black-pulse clean (absolute black, then the target)
+      // so every image switch lands on a clean panel.
+      renderer.displayBufferBlackPulseClean();
 
     } else {
       // Handle file parsing error

@@ -524,7 +524,9 @@ bool AiImageActivity::drawImage(const char* path) {
   // on screen instead of navigating.
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SET_SLEEP_COVER), tr(STR_DELETE), "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-  renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+  // Same full-screen image reasoning as BmpViewer: a 0xFC differential leaves
+  // the previous picture as ghosting. Clean through an absolute black pass.
+  renderer.displayBufferBlackPulseClean();
   return true;
 }
 

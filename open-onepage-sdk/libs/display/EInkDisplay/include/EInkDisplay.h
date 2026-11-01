@@ -99,6 +99,10 @@ class EInkDisplay {
 #endif
 
   void displayBuffer(RefreshMode mode = FAST_REFRESH, bool turnOffScreen = false);
+  // Strong absolute clean using only the fast/DU waveform: drive the whole
+  // panel to black, then paint the framebuffer against a black RED baseline.
+  // For panels whose mode-1 (HALF/FULL) OTP LUT under-drives black.
+  void displayBufferBlackPulseClean(bool turnOffScreen = false);
   // EXPERIMENTAL: Windowed update - display only a rectangular region.
   // x and w must be byte-aligned (multiples of 8 pixels). X3 routes through
   // the full displayBuffer pipeline (windowed RAM addressing is X4-only).
@@ -167,6 +171,7 @@ class EInkDisplay {
 
   // State
   bool isScreenOn = false;
+  bool _needsInitialFull = true;
   bool customLutActive = false;
   bool inGrayscaleMode = false;
   bool drawGrayscale = false;
@@ -191,6 +196,7 @@ class EInkDisplay {
   // Low-level display operations
   void setRamArea(uint16_t x, uint16_t y, uint16_t w, uint16_t h);
   void writeRamBuffer(uint8_t ramBuffer, const uint8_t* data, uint32_t size);
+  void writeRamPattern(uint8_t ramBuffer, uint8_t value, uint32_t size);
 
   // X3 (UC81xx) primitives. Promoted from inline lambdas that used to be
   // redefined in displayBuffer / displayGrayBuffer / grayscaleRevert. These

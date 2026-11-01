@@ -823,9 +823,10 @@ void EInkDisplay::initDisplayController() {
   sendData((displayHeight - 1) / 256);
   sendData(0x02);  // SM=1 (interlaced), TB=0
 
-  // Border waveform control
+  // Border waveform control. Stock X4 init value: park the border at VCOM;
+  // each B/W refresh switches it to the follow-LUT value (0xC0).
   sendCommand(CMD_BORDER_WAVEFORM);
-  sendData(0x01);
+  sendData(0x80);
 
   // Set up full screen RAM area
   setRamArea(0, 0, displayWidth, displayHeight);
@@ -838,6 +839,8 @@ void EInkDisplay::initDisplayController() {
   sendCommand(CMD_AUTO_WRITE_RED_RAM);  // Auto write RED RAM
   sendData(0xF7);                       // Fill with white pattern
   waitWhileBusy(" CMD_AUTO_WRITE_RED_RAM");
+
+  _needsInitialFull = true;
 
   if (Serial) Serial.printf("[%lu]   SSD1677 controller initialized\n", millis());
 }
@@ -952,6 +955,17 @@ void EInkDisplay::writeRamBuffer(uint8_t ramBuffer, const uint8_t* data, uint32_
 
   const unsigned long duration = millis() - startTime;
   if (Serial) Serial.printf("[%lu]   %s RAM write complete (%lu ms)\n", millis(), bufferName, duration);
+}
+
+void EInkDisplay::writeRamPattern(uint8_t ramBuffer, uint8_t value, uint32_t size) {
+  uint8_t chunk[128];
+  memset(chunk, value, sizeof(chunk));
+  sendCommand(ramBuffer);
+  while (size > 0) {
+    const uint16_t n = (size > sizeof(chunk)) ? sizeof(chunk) : static_cast<uint16_t>(size);
+    sendData(chunk, n);
+    size -= n;
+  }
 }
 
 void EInkDisplay::setFramebuffer(const uint8_t* bwBuffer) const { memcpy(frameBuffer, bwBuffer, bufferSize); }
@@ -1309,16 +1323,30 @@ void EInkDisplay::cleanupGrayscaleBuffers(const uint8_t* bwBuffer) {
 #endif
 
 void EInkDisplay::displayBuffer(RefreshMode mode, const bool turnOffScreen) {
-  if (!isScreenOn && !turnOffScreen) {
-    // Waking the panel from off: force HALF refresh so the wake transition
-    // gets a stronger waveform than a fast differential, matching the X4
-    // policy. Applies to both X4 and X3.
-    mode = HALF_REFRESH;
+  bool blackPulseClean = false;
+  if (_x3Mode) {
+    if (!isScreenOn && !turnOffScreen) {
+      // Waking the panel from off: force HALF refresh so the wake transition
+      // gets a stronger waveform than a fast differential, matching the X4
+      // policy.
+      mode = HALF_REFRESH;
+    }
+  } else if (_needsInitialFull) {
+    // First paint after boot/wake must be an absolute clean, not a differential
+    // FAST: a FAST only drives pixels that differ from the RED baseline, so it
+    // cannot clear what is physically on the panel (e.g. the sleep screen).
+    blackPulseClean = true;
+    _needsInitialFull = false;
   }
 
   // If currently in grayscale mode, revert first to black/white
   if (inGrayscaleMode) {
     grayscaleRevert();
+  }
+
+  if (blackPulseClean) {
+    displayBufferBlackPulseClean(turnOffScreen);
+    return;
   }
 
   if (_x3Mode) {
@@ -1508,10 +1536,48 @@ void EInkDisplay::displayBuffer(RefreshMode mode, const bool turnOffScreen) {
   refreshDisplay(mode, turnOffScreen);
 
 #ifdef EINK_DISPLAY_SINGLE_BUFFER_MODE
-  // In single buffer mode always sync RED RAM after refresh to prepare for next
-  // fast refresh This ensures RED contains the currently displayed frame for
-  // differential comparison
+  // In single buffer mode sync both RAM planes after refresh so the next
+  // differential starts from a matched BW/RED baseline (stock X4 parity).
   setRamArea(0, 0, displayWidth, displayHeight);
+  writeRamBuffer(CMD_WRITE_RAM_BW, frameBuffer, bufferSize);
+  writeRamBuffer(CMD_WRITE_RAM_RED, frameBuffer, bufferSize);
+#endif
+}
+
+void EInkDisplay::displayBufferBlackPulseClean(const bool turnOffScreen) {
+  if (_x3Mode) {
+    displayBuffer(FAST_REFRESH, turnOffScreen);
+    return;
+  }
+  if (!frameBuffer) {
+    return;
+  }
+  if (inGrayscaleMode) {
+    grayscaleRevert();
+  }
+  // This is an absolute clean, so it satisfies the boot/wake first-paint
+  // promotion; don't let the next displayBuffer() repeat it.
+  _needsInitialFull = false;
+
+  // Pass 1: drive the whole panel to black. BW is all black; RED keeps the
+  // previous frame (or the init white), so every white pixel differs and is
+  // driven. Black pixels are already black.
+  if (Serial) Serial.printf("[%lu]   Black-pulse clean: black pass...\n", millis());
+  setRamArea(0, 0, displayWidth, displayHeight);
+  writeRamPattern(CMD_WRITE_RAM_BW, 0x00, bufferSize);
+  refreshDisplay(FAST_REFRESH, false);
+
+  // Pass 2: RED is all black, BW is the target. Only the target's white pixels
+  // differ, so they are driven while the black pixels stay black from pass 1.
+  if (Serial) Serial.printf("[%lu]   Black-pulse clean: target pass...\n", millis());
+  setRamArea(0, 0, displayWidth, displayHeight);
+  writeRamPattern(CMD_WRITE_RAM_RED, 0x00, bufferSize);
+  writeRamBuffer(CMD_WRITE_RAM_BW, frameBuffer, bufferSize);
+  refreshDisplay(FAST_REFRESH, turnOffScreen);
+
+#ifdef EINK_DISPLAY_SINGLE_BUFFER_MODE
+  setRamArea(0, 0, displayWidth, displayHeight);
+  writeRamBuffer(CMD_WRITE_RAM_BW, frameBuffer, bufferSize);
   writeRamBuffer(CMD_WRITE_RAM_RED, frameBuffer, bufferSize);
 #endif
 }
@@ -1703,46 +1769,50 @@ void EInkDisplay::refreshDisplay(const RefreshMode mode, const bool turnOffScree
   sendCommand(CMD_DISPLAY_UPDATE_CTRL1);
   sendData((mode == FAST_REFRESH) ? CTRL1_NORMAL : CTRL1_BYPASS_RED);  // Configure buffer comparison mode
 
-  // best guess at display mode bits:
-  // bit | hex | name                    | effect
-  // ----+-----+--------------------------+-------------------------------------------
-  // 7   | 80  | CLOCK_ON                | Start internal oscillator
-  // 6   | 40  | ANALOG_ON               | Enable analog power rails (VGH/VGL
-  // drivers) 5   | 20  | TEMP_LOAD               | Load temperature (internal
-  // or I2C) 4   | 10  | LUT_LOAD                | Load waveform LUT 3   | 08  |
-  // MODE_SELECT             | Mode 1/2 2   | 04  | DISPLAY_START           |
-  // Run display 1   | 02  | ANALOG_OFF_PHASE        | Shutdown step 1
-  // (undocumented) 0   | 01  | CLOCK_OFF               | Disable internal
-  // oscillator
+  // Vendor absolute update sequences (stock X4 / GDEQ0426T82 parity, matching
+  // crosspoint-reader's Ssd1677Driver defaults):
+  //   FULL 0xF7 = clock/analog on + temp load + OTP LUT load + display + power off
+  //   HALF 0xD7 = clock/analog on + OTP LUT load + display + power off (temp 0x5A first)
+  //   FAST 0xFC = clock/analog on + temp load + OTP LUT load + mode 2 + display
+  // The sequences carry their own power state, so isScreenOn must not add or
+  // remove 0xC0/0x03 bits: a stale flag would under-drive the panel.
+  if (customLutActive) {
+    // External-LUT (grayscale AA) activation: clock/analog enable + display,
+    // without the OTP LUT reload (0x10 clear).
+    uint8_t displayMode = 0xCC;
+    if (turnOffScreen) displayMode |= 0x03;
+    isScreenOn = !turnOffScreen;
+    if (Serial) Serial.printf("[%lu]   Powering on display 0x%02X (custom LUT refresh)...\n", millis(), displayMode);
+    sendCommand(CMD_DISPLAY_UPDATE_CTRL2);
+    sendData(displayMode);
+    sendCommand(CMD_MASTER_ACTIVATION);
+    if (Serial) Serial.printf("[%lu]   Waiting for display refresh...\n", millis());
+    waitWhileBusy("custom");
+    return;
+  }
 
-  // Select appropriate display mode based on refresh type
   uint8_t displayMode = 0x00;
-
-  // Enable counter and analog if not already on
-  if (!isScreenOn) {
-    isScreenOn = true;
-    displayMode |= 0xC0;  // Set CLOCK_ON and ANALOG_ON bits
-  }
-
-  // Turn off screen if requested
-  if (turnOffScreen) {
-    isScreenOn = false;
-    displayMode |= 0x03;  // Set ANALOG_OFF_PHASE and CLOCK_OFF bits
-  }
-
+  const char* refreshType = "fast";
   if (mode == FULL_REFRESH) {
-    displayMode |= 0x34;
+    displayMode = 0xF7;
+    refreshType = "full";
   } else if (mode == HALF_REFRESH) {
     // Write high temp to the register for a faster refresh
     sendCommand(CMD_WRITE_TEMP);
     sendData(0x5A);
-    displayMode |= 0xD4;
+    displayMode = 0xD7;
+    refreshType = "half";
   } else {  // FAST_REFRESH
-    displayMode |= customLutActive ? 0x0C : 0x1C;
+    displayMode = 0xFC;
   }
 
-  // Power on and refresh display
-  const char* refreshType = (mode == FULL_REFRESH) ? "full" : (mode == HALF_REFRESH) ? "half" : "fast";
+  // Track the border waveform with the refresh mode (vendor parity): B/W
+  // updates leave it on the follow-LUT value, power-off parks it at VCOM.
+  sendCommand(CMD_BORDER_WAVEFORM);
+  sendData(0xC0);
+
+  const bool sequencePowersOff = (displayMode & 0x03) != 0;
+  isScreenOn = !sequencePowersOff;
   if (Serial) Serial.printf("[%lu]   Powering on display 0x%02X (%s refresh)...\n", millis(), displayMode, refreshType);
   sendCommand(CMD_DISPLAY_UPDATE_CTRL2);
   sendData(displayMode);
@@ -1752,6 +1822,18 @@ void EInkDisplay::refreshDisplay(const RefreshMode mode, const bool turnOffScree
   // Wait for display to finish updating
   if (Serial) Serial.printf("[%lu]   Waiting for display refresh...\n", millis());
   waitWhileBusy(refreshType);
+
+  if (turnOffScreen && !sequencePowersOff) {
+    // 0xFC does not carry the power-off bits; run the documented POF sequence.
+    sendCommand(CMD_BORDER_WAVEFORM);
+    sendData(0x80);
+    sendCommand(CMD_DISPLAY_UPDATE_CTRL2);
+    sendData(0x03);
+    sendCommand(CMD_MASTER_ACTIVATION);
+    delay(200);
+    waitWhileBusy("power-off");
+    isScreenOn = false;
+  }
 }
 
 void EInkDisplay::setCustomLUT(const bool enabled, const unsigned char* lutData) {
@@ -1787,9 +1869,13 @@ void EInkDisplay::setCustomLUT(const bool enabled, const unsigned char* lutData)
 void EInkDisplay::deepSleep() {
   if (Serial) Serial.printf("[%lu]   Preparing display for deep sleep...\n", millis());
 
-  // First, power down the display properly
-  // This shuts down the analog power rails and clock
+  // Park the border at its init value so it is not left driven with the
+  // full-refresh waveform through deep sleep, then power down analog/clock.
   if (isScreenOn) {
+    if (!_x3Mode) {
+      sendCommand(CMD_BORDER_WAVEFORM);
+      sendData(0x80);
+    }
     sendCommand(CMD_DISPLAY_UPDATE_CTRL1);
     sendData(CTRL1_BYPASS_RED);  // Normal mode
 
@@ -1799,15 +1885,17 @@ void EInkDisplay::deepSleep() {
     sendCommand(CMD_MASTER_ACTIVATION);
 
     // Wait for the power-down sequence to complete
+    delay(200);
     waitWhileBusy(" display power-down");
 
     isScreenOn = false;
   }
 
-  // Now enter deep sleep mode
+  // Enter deep sleep mode 2 (discards controller RAM on X4; the next init
+  // clears and re-arms the first-paint full refresh).
   if (Serial) Serial.printf("[%lu]   Entering deep sleep mode...\n", millis());
   sendCommand(CMD_DEEP_SLEEP);
-  sendData(0x01);  // Enter deep sleep
+  sendData(_x3Mode ? 0x01 : 0x03);
 }
 
 void EInkDisplay::saveFrameBufferAsPBM(const char* filename) {

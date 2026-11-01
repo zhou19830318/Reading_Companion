@@ -1393,6 +1393,7 @@ void GfxRenderer::displayBuffer(const HalDisplay::RefreshMode refreshMode) const
   // text, popups and earlier menu frames is never re-driven until an absolute
   // waveform runs. One shared counter covers every call site; requestGhostCleanup()
   // parks it so a content-driven cleanup (image pages) lands on the next push.
+  bool blackPulseClean = false;
   if (refreshCadence > 0) {
     // Consume one tick of the transition guard per push, before deciding the
     // mode. Any non-FAST request counts too: it still replaces the screen, so
@@ -1404,7 +1405,7 @@ void GfxRenderer::displayBuffer(const HalDisplay::RefreshMode refreshMode) const
     if (mode == HalDisplay::FAST_REFRESH) {
       if (pagesSinceCleanup + 1 >= refreshCadence) {
         if (!holdoff) {
-          mode = HalDisplay::HALF_REFRESH;
+          blackPulseClean = true;
           pagesSinceCleanup = 0;
         }
         // Held off (an activity transition): leave the counter parked one
@@ -1421,8 +1422,14 @@ void GfxRenderer::displayBuffer(const HalDisplay::RefreshMode refreshMode) const
     cadenceHoldoffPushes = 0;
   }
 
+  if (blackPulseClean) {
+    display.displayBufferBlackPulseClean(fadingFix);
+    return;
+  }
   display.displayBuffer(mode, fadingFix);
 }
+
+void GfxRenderer::displayBufferBlackPulseClean() const { display.displayBufferBlackPulseClean(fadingFix); }
 
 std::string GfxRenderer::truncatedText(const int fontId, const char* text, const int maxWidth,
                                        const EpdFontFamily::Style style) const {

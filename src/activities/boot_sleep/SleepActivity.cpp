@@ -225,7 +225,7 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap) const {
     // plain HALF refresh (previous behavior).
     renderer.displayGrayscaleBase(HalDisplay::HALF_REFRESH);
   } else {
-    renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+    renderer.displayBufferBlackPulseClean();
   }
 
   if (hasGreyscale) {

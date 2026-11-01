@@ -39,6 +39,9 @@ class HalDisplay {
                             bool fromProgmem = false) const;
 
   void displayBuffer(RefreshMode mode = RefreshMode::FAST_REFRESH, bool turnOffScreen = false);
+  // Strong absolute clean using only the fast waveform (black pulse, then the
+  // framebuffer). For panels whose HALF/FULL OTP LUT under-drives black.
+  void displayBufferBlackPulseClean(bool turnOffScreen = false);
   void refreshDisplay(RefreshMode mode = RefreshMode::FAST_REFRESH, bool turnOffScreen = false);
   // Windowed update: drive only the physical rect. x and w must be
   // byte-aligned (multiples of 8). X3 falls back to a full displayBuffer.

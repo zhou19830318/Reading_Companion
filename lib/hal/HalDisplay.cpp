@@ -69,6 +69,12 @@ void HalDisplay::displayBuffer(HalDisplay::RefreshMode mode, bool turnOffScreen)
   LOG_INF("EPD", "buffer mode=%d ms=%lu", static_cast<int>(mode), millis() - t0);
 }
 
+void HalDisplay::displayBufferBlackPulseClean(bool turnOffScreen) {
+  const uint32_t t0 = millis();
+  einkDisplay.displayBufferBlackPulseClean(turnOffScreen);
+  LOG_INF("EPD", "buffer clean ms=%lu", millis() - t0);
+}
+
 void HalDisplay::refreshDisplay(HalDisplay::RefreshMode mode, bool turnOffScreen) {
   if (gpio.deviceIsX3() && mode == RefreshMode::HALF_REFRESH) {
     einkDisplay.requestResync(1);
