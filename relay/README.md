@@ -217,6 +217,43 @@ curl -s -H "Authorization: Bearer $TOKEN" -H "X-Device-Id: reading-companion-001
      "localhost:8080/api/v1/learning/review?limit=10" | jq .
 ```
 
+## 番茄钟 API（/api/v1/pomodoro/）
+
+番茄钟专注会话的数据面（统计/热力图数据源，非计时器本体——计时在设备
+本地跑）。设备 token 认证（`Authorization` + `X-Device-Id`，与其它端点
+一致）；**nginx 必须代理 `/api/v1/pomodoro/`**——dev/prod 两份 conf 均已
+包含，未配置时 8080 会落进兜底 `location /` 返回 404。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/v1/pomodoro/sessions` | 批量上报完成会话 `{"sessions":[{clientEventId,kind,startedAt,endedAt,minutes,completed}]}` → `{ok,accepted,stored}`；`clientEventId` UNIQUE 幂等，重试 `stored`=0 |
+| GET | `/api/v1/pomodoro/stats?days=30` | 按日专注聚合 → `{days:[{date,focusMinutes,sessions,completed}],totals:{...}}`；仅 `kind=work` 计入 focusMinutes，days 钳制 1-366 |
+
+- **kind**：`work` / `break` / `long_break`（`MIN_MINUTES=1`、`MAX_MINUTES=180`）。
+  休息段照存但不计入 focusMinutes——设备端可重建完整周期，统计只看专注。
+- **completed**：`false` = 用户提前结束（部分会话照实上报 minutes）。
+- **日期分组**：按 `startedAt` 的日期前缀分组（设备本地日），窗口下界用
+  服务器 UTC 日——边界可差数小时，对阅读友好型统计可接受，服务器不掺和
+  设备时区。稀疏返回：无 work 会话的日期不出现，客户端自行补零。
+- 批量上限 `POMODORO_MAX_SESSION_BATCH = 50`。
+- **日志**（journalctl -u reading-companion-relay）：`pomodoro session
+  sync`（requested/stored）、`pomodoro stats`（days/rows）、`pomodoro auth
+  rejected`（401/403 原因，WARNING）。
+- **能力键**：`GET /api/v1/device/config` → `features.pomodoro`。固件据此
+  隐藏番茄钟菜单（旧 relay 无此键 = 功能关闭）。
+- 幂等与学习侧同一模式：设备离线积压可整批重发，UNIQUE(client_event_id)
+  兜底，无需应用层去重簿记。
+
+```bash
+TOKEN=...
+curl -s -H "Authorization: Bearer $TOKEN" -H "X-Device-Id: reading-companion-001" \
+     -H 'Content-Type: application/json' \
+     -d '{"sessions":[{"clientEventId":"p1","kind":"work","startedAt":"2026-10-29T09:00:00+08:00","endedAt":"2026-10-29T09:25:00+08:00","minutes":25,"completed":true}]}' \
+     localhost:8080/api/v1/pomodoro/sessions | jq .   # 经 nginx 验证代理
+curl -s -H "Authorization: Bearer $TOKEN" -H "X-Device-Id: reading-companion-001" \
+     "localhost:8080/api/v1/pomodoro/stats?days=30" | jq .
+```
+
 ## 部署与回滚
 
 完整运维手册（中文）：[VoiceRelay 部署手册](./DEPLOY.md)——打包、安装、

@@ -820,6 +820,21 @@ bool parseReviewResponse(const char* json, size_t len, ReviewSubmitResult& out) 
   return g_chatState.sawOk;
 }
 
+bool parsePomodoroSessionsResponse(const char* json, size_t len, PomodoroSyncResult& out) {
+  out = PomodoroSyncResult{};
+  g_chatState.begin(nullptr, 0, nullptr, 0);
+  if (json == nullptr || len == 0) return false;
+
+  g_chatParser.reset();
+  g_chatParser.feed(json, len);
+  if (g_chatParser.hasError()) return false;
+
+  out.ok = g_chatState.ok;
+  out.accepted = g_chatState.accepted;
+  out.error = g_chatState.error;
+  return g_chatState.sawOk;
+}
+
 bool parseImageResponse(const char* json, size_t len, ImageMeta& out, char* textOut, size_t textCap, ErrorCode& error) {
   out = ImageMeta{};
   g_chatState.begin(textOut, textCap, nullptr, 0, out.id, sizeof(out.id));
@@ -966,6 +981,56 @@ size_t buildReviewRequest(char* out, size_t cap, const char* word, int rating, c
   if (!appendLiteral(out, cap, pos, ",\"clientEventId\":\"")) return 0;
   if (!appendEscaped(out, cap, pos, clientEventId, strlen(clientEventId))) return 0;
   if (!appendLiteral(out, cap, pos, "\"}")) return 0;
+  if (!finishFrame(out, cap, pos)) return 0;
+  return pos;
+}
+
+namespace {
+
+bool validPomodoroEventId(const char* id) {
+  if (id == nullptr || strlen(id) != POMODORO_EVENT_ID_CHARS) return false;
+  for (size_t i = 0; i < POMODORO_EVENT_ID_CHARS; ++i) {
+    const char c = id[i];
+    if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+  }
+  return true;
+}
+
+bool validPomodoroKind(const char* kind) {
+  return kind != nullptr &&
+         (strcmp(kind, "work") == 0 || strcmp(kind, "break") == 0 || strcmp(kind, "long_break") == 0);
+}
+
+}  // namespace
+
+size_t buildPomodoroSessionsRequest(char* out, size_t cap, const PomodoroSessionWire* sessions, size_t count) {
+  if (out == nullptr || cap == 0 || sessions == nullptr || count == 0 || count > POMODORO_MAX_SESSION_BATCH) return 0;
+  size_t pos = 0;
+  if (!appendLiteral(out, cap, pos, "{\"sessions\":[")) return 0;
+  for (size_t i = 0; i < count; ++i) {
+    const PomodoroSessionWire& session = sessions[i];
+    if (!validPomodoroEventId(session.clientEventId) || !validPomodoroKind(session.kind) ||
+        session.startedAt == nullptr || session.startedAt[0] == '\0' || session.endedAt == nullptr ||
+        session.endedAt[0] == '\0' || session.minutes < 1 || session.minutes > 180) {
+      return 0;
+    }
+    char minutesBuf[8];
+    const int minutesLen = snprintf(minutesBuf, sizeof(minutesBuf), "%u", static_cast<unsigned>(session.minutes));
+    if (minutesLen <= 0) return 0;
+    if (i > 0 && !appendLiteral(out, cap, pos, ",")) return 0;
+    if (!appendLiteral(out, cap, pos, "{\"clientEventId\":\"")) return 0;
+    if (!appendEscaped(out, cap, pos, session.clientEventId, strlen(session.clientEventId))) return 0;
+    if (!appendLiteral(out, cap, pos, "\",\"kind\":\"")) return 0;
+    if (!appendEscaped(out, cap, pos, session.kind, strlen(session.kind))) return 0;
+    if (!appendLiteral(out, cap, pos, "\",\"startedAt\":\"")) return 0;
+    if (!appendEscaped(out, cap, pos, session.startedAt, strlen(session.startedAt))) return 0;
+    if (!appendLiteral(out, cap, pos, "\",\"endedAt\":\"")) return 0;
+    if (!appendEscaped(out, cap, pos, session.endedAt, strlen(session.endedAt))) return 0;
+    if (!appendLiteral(out, cap, pos, "\",\"minutes\":")) return 0;
+    if (!appendRaw(out, cap, pos, minutesBuf, static_cast<size_t>(minutesLen))) return 0;
+    if (!appendLiteral(out, cap, pos, session.completed ? ",\"completed\":true}" : ",\"completed\":false}")) return 0;
+  }
+  if (!appendLiteral(out, cap, pos, "]}")) return 0;
   if (!finishFrame(out, cap, pos)) return 0;
   return pos;
 }

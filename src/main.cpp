@@ -39,6 +39,8 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "images/LoadingIcon.h"
+#include "pomodoro/PomodoroAlertActivity.h"
+#include "pomodoro/PomodoroSession.h"
 #include "util/ButtonNavigator.h"
 #include "util/ScreenshotUtil.h"
 
@@ -794,6 +796,35 @@ void loop() {
       } else if (cmd == "GO_WORKBENCH") {
         // Debug: jump straight to the workbench screen (no menu navigation).
         activityManager.goToWorkbench();
+      } else if (cmd == "POMODORO_STATE") {
+        // Debug: report the focus-timer state for device tests. state is the
+        // PomodoroSession::State ordinal (0 Idle, 1 Work, 2 WorkDone, 3 Break,
+        // 4 BreakDone).
+        logSerial.printf("POMODORO_STATE state=%d paused=%d remaining=%u pending=%u\n",
+                         static_cast<int>(POMODORO.state()), POMODORO.isPaused() ? 1 : 0,
+                         static_cast<unsigned>(POMODORO.remainingMinutes()),
+                         static_cast<unsigned>(POMODORO.pendingCount()));
+      } else if (cmd == "POMODORO" || cmd.startsWith("POMODORO ")) {
+        // Debug: start a session without the menu. Usage: CMD:POMODORO [workMin]
+        // [breakMin] — defaults 1/1 so a full work->alert->break cycle can be
+        // observed in about two minutes.
+        String args = cmd.substring(8);
+        args.trim();
+        unsigned work = 1;
+        unsigned brk = 1;
+        if (args.length() > 0) {
+          const int space = args.indexOf(' ');
+          if (space < 0) {
+            work = args.toInt();
+          } else {
+            work = args.substring(0, space).toInt();
+            brk = args.substring(space + 1).toInt();
+          }
+          if (work == 0) work = 1;
+          if (brk == 0) brk = 1;
+        }
+        POMODORO.start(static_cast<uint8_t>(work), static_cast<uint8_t>(brk));
+        logSerial.printf("POMODORO started work=%u break=%u\n", work, brk);
       } else if (cmd.startsWith("VOICE_TX ")) {
         // Debug: stand in for the STT step — sends `text` as one chat round
         // trip so the gateway's answer can be captured from serial without
@@ -887,7 +918,10 @@ void loop() {
   WIFI_IDLE.poll();
 
   const unsigned long sleepTimeoutMs = SETTINGS.getSleepTimeoutMs();
-  if (sleepTimeoutMs > 0 && millis() - lastActivityTime >= sleepTimeoutMs) {
+  // A running focus countdown must not be preempted by the idle sleep timer:
+  // the panel would go dark and the alert would never be seen. The power
+  // button still sleeps (an explicit gesture), which ends the session.
+  if (sleepTimeoutMs > 0 && millis() - lastActivityTime >= sleepTimeoutMs && !POMODORO.blocksAutoSleep()) {
     LOG_DBG("SLP", "Auto-sleep triggered after %lu ms of inactivity", sleepTimeoutMs);
     enterDeepSleep(true);
     // This should never be hit as `enterDeepSleep` calls esp_deep_sleep_start
@@ -922,6 +956,14 @@ void loop() {
   const unsigned long activityStartTime = millis();
   activityManager.loop();
   const unsigned long activityDuration = millis() - activityStartTime;
+
+  // Focus timer: advance the countdown and surface a finished phase. Pushing
+  // here is safe — activityManager.loop() drains its pending actions before
+  // returning, so the alert becomes current on the next iteration.
+  const PomodoroSession::Event focusEvent = POMODORO.tick();
+  if (focusEvent != PomodoroSession::Event::None) {
+    activityManager.pushActivity(std::make_unique<PomodoroAlertActivity>(renderer, mappedInputManager, focusEvent));
+  }
 
   const unsigned long loopDuration = millis() - loopStartTime;
   if (loopDuration > maxLoopDuration) {

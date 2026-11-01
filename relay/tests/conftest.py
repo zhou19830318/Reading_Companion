@@ -21,6 +21,8 @@ os.environ.setdefault("MOCK_ASR_PARTIAL_INTERVAL_MS", "200")
 os.environ.setdefault("MOCK_ASR_FINAL_DELAY_MS", "50")
 os.environ.setdefault("MOCK_LLM_DELTA_INTERVAL_MS", "10")
 os.environ.setdefault("MOCK_LLM_DELTA_CHARS", "4")
-# Session-scoped scratch dir: the learning store opens in every TestClient
-# lifespan, and the default run/learning would land in the checkout.
+# Session-scoped scratch dirs: the learning and pomodoro stores open in every
+# TestClient lifespan, and the default run/learning + run/pomodoro would land
+# in the checkout.
 os.environ.setdefault("RELAY_LEARNING_DIR", tempfile.mkdtemp(prefix="relay-learning-test-"))
+os.environ.setdefault("RELAY_POMODORO_DIR", tempfile.mkdtemp(prefix="relay-pomodoro-test-"))

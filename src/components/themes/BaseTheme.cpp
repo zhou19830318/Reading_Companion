@@ -16,6 +16,7 @@
 #include "components/UITheme.h"
 #include "components/icons/bookmark.h"
 #include "fontIds.h"
+#include "pomodoro/PomodoroSession.h"
 
 // Internal constants
 namespace {
@@ -996,6 +997,18 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
     renderer.drawText(SMALL_FONT_ID, rightClusterX - progressTextWidth, textY, progressStr);
 
     rightClusterWidth += progressTextWidth;
+  }
+
+  // Focus-timer countdown (right cluster, left of the progress text). The
+  // reader's minute tick requests the repaint that refreshes it.
+  if (POMODORO.blocksAutoSleep()) {
+    char focusStr[24];
+    snprintf(focusStr, sizeof(focusStr), tr(STR_SLEEP_TIMER_VALUE_FORMAT),
+             static_cast<unsigned>(POMODORO.remainingMinutes()));
+    const int focusTextWidth = renderer.getTextWidth(SMALL_FONT_ID, focusStr);
+    const int focusGap = rightClusterWidth > 0 ? 10 : 0;
+    renderer.drawText(SMALL_FONT_ID, rightClusterX - rightClusterWidth - focusGap - focusTextWidth, textY, focusStr);
+    rightClusterWidth += focusGap + focusTextWidth;
   }
 
   // Draw Progress Bar

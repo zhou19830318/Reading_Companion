@@ -52,6 +52,9 @@ class EpubReaderActivity final : public Activity {
   bool showBookmarkMessage = false;
   bool ignoreNextConfirmRelease = false;
   bool currentPageBookmarked = false;
+  // Last focus-timer minute painted in the status bar; repaints only when the
+  // displayed minute changes (0 while no countdown is running).
+  uint8_t lastFocusMinute_ = 0;
   bool bookmarkRemoved = false;  // true when last toggle removed (controls popup text)
   std::vector<BookmarkEntry> cachedBookmarks;
   // Tracks whether this book is currently removed from Recent Books by the

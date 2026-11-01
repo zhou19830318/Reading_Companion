@@ -11,6 +11,8 @@ Routes (docs section 17.5):
   GET  /api/v1/learning/words   device token: word book listing
   POST /api/v1/learning/words   device token: word book batch add
   POST /api/v1/learning/review  device token: review event (idempotent)
+  POST /api/v1/pomodoro/sessions device token: completed focus sessions (idempotent)
+  GET  /api/v1/pomodoro/stats   device token: daily focus aggregates
   GET  /metrics                 prometheus, internal exposure only
 """
 
@@ -28,7 +30,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel
 
 from . import SERVICE_NAME, __version__
-from . import admin_page, dict_source, learning_store, metrics, protocol, t2i
+from . import admin_page, dict_source, learning_store, metrics, pomodoro_store, protocol, t2i
 from .auth import check_admin, check_device
 from .config import Settings, get_settings
 from .logging_setup import setup_logging
@@ -71,12 +73,18 @@ async def lifespan(app: FastAPI):
     learning.open()
     app.state.learning = learning
     log.info("learning store ready", extra={"db": str(learning.db_path)})
+    # Pomodoro focus sessions: same one-connection-per-process pattern.
+    pomodoro = pomodoro_store.PomodoroStore(settings.pomodoro_db_path)
+    pomodoro.open()
+    app.state.pomodoro = pomodoro
+    log.info("pomodoro store ready", extra={"db": str(pomodoro.db_path)})
     yield
     # Graceful shutdown: stop accepting, cancel upstream work in bounded time.
     sessions: set[VoiceSession] = app.state.sessions
     if sessions:
         log.info("cancelling sessions at shutdown", extra={"count": len(sessions)})
         await asyncio.gather(*(s.abort("server_shutdown") for s in list(sessions)), return_exceptions=True)
+    pomodoro.close()
     learning.close()
 
 
@@ -135,6 +143,9 @@ async def device_config(request: Request):
             # fails without it), so reaching this endpoint means learning is
             # available. Firmware gates its learning menu on this key.
             "learning": True,
+            # Pomodoro focus timer: same lifespan-store reasoning as learning.
+            # Firmware gates its focus-timer menu on this key.
+            "pomodoro": True,
         },
     }
 
@@ -589,8 +600,9 @@ async def image_asset(asset_id: str, request: Request):
 LEARNING_MAX_WORD_BATCH = 200
 
 
-def _learning_device(settings: Settings, request: Request) -> tuple[str | None, JSONResponse | None]:
-    """Auth for /learning/*: device token only (the device is the sole client).
+def _data_device(settings: Settings, request: Request, feature: str) -> tuple[str | None, JSONResponse | None]:
+    """Auth for device data endpoints (/learning/*, /pomodoro/*): device token
+    only (the device is the sole client of each).
 
     Returns (device_id, None) on success or (None, error_response).
     """
@@ -600,11 +612,16 @@ def _learning_device(settings: Settings, request: Request) -> tuple[str | None, 
     except ProtocolError as exc:
         # nginx keeps the status code, but only this line tells the operator
         # why a device call was rejected (bad token vs wrong device id).
-        log.warning("learning auth rejected", extra={"code": exc.code.value, "detail": exc.detail})
+        log.warning(f"{feature} auth rejected", extra={"code": exc.code.value, "detail": exc.detail})
         return None, JSONResponse(
             status_code=401 if exc.code == ErrorCode.UNAUTHORIZED else 403,
             content={"error": exc.code.value},
         )
+
+
+def _learning_device(settings: Settings, request: Request) -> tuple[str | None, JSONResponse | None]:
+    """Auth for /learning/* (log tag "learning auth rejected")."""
+    return _data_device(settings, request, "learning")
 
 
 class LearningWordsRequest(BaseModel):
@@ -701,6 +718,86 @@ async def learning_review(request: Request, body: LearningReviewRequest):
         extra={"deviceId": device_id, "word": word, "rating": body.rating, "duplicate": not stored},
     )
     return {"ok": True, "duplicate": not stored}
+
+
+# --------------------------------------------------------------------------
+# pomodoro focus sessions (device token; session upload + daily stats)
+# --------------------------------------------------------------------------
+
+POMODORO_MAX_SESSION_BATCH = 50
+
+
+class PomodoroSessionItem(BaseModel):
+    clientEventId: str
+    kind: str  # work | break | long_break (validated at the edge)
+    startedAt: str  # device-local ISO8601 as written by the device clock
+    endedAt: str
+    minutes: int
+    completed: bool = True  # False = user ended early (partial session)
+
+
+class PomodoroSessionsRequest(BaseModel):
+    sessions: list[PomodoroSessionItem]
+
+
+def _pomodoro_device(settings: Settings, request: Request) -> tuple[str | None, JSONResponse | None]:
+    """Auth for /pomodoro/* (log tag "pomodoro auth rejected")."""
+    return _data_device(settings, request, "pomodoro")
+
+
+@app.post("/api/v1/pomodoro/sessions")
+async def pomodoro_sessions(request: Request, body: PomodoroSessionsRequest):
+    settings = get_settings()
+    device_id, error = _pomodoro_device(settings, request)
+    if error is not None:
+        return error
+    sessions = body.sessions
+    if not sessions or len(sessions) > POMODORO_MAX_SESSION_BATCH:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "invalid_sessions", "max": POMODORO_MAX_SESSION_BATCH},
+        )
+    entries: list[dict] = []
+    for s in sessions:
+        if (
+            not s.clientEventId
+            or s.kind not in pomodoro_store.SESSION_KINDS
+            or not s.startedAt
+            or not s.endedAt
+            or not pomodoro_store.MIN_MINUTES <= s.minutes <= pomodoro_store.MAX_MINUTES
+        ):
+            return JSONResponse(
+                status_code=400,
+                content={"error": "invalid_session", "allowedKinds": list(pomodoro_store.SESSION_KINDS)},
+            )
+        entries.append(
+            {
+                "client_event_id": s.clientEventId,
+                "kind": s.kind,
+                "started_at": s.startedAt,
+                "ended_at": s.endedAt,
+                "minutes": s.minutes,
+                "completed": 1 if s.completed else 0,
+            }
+        )
+    stored = app.state.pomodoro.record_sessions(device_id, entries)
+    log.info(
+        "pomodoro session sync",
+        extra={"deviceId": device_id, "requested": len(entries), "stored": stored},
+    )
+    return {"ok": True, "accepted": len(entries), "stored": stored}
+
+
+@app.get("/api/v1/pomodoro/stats")
+async def pomodoro_stats(request: Request, days: int = 30):
+    settings = get_settings()
+    device_id, error = _pomodoro_device(settings, request)
+    if error is not None:
+        return error
+    days = max(1, min(days, 366))
+    stats = app.state.pomodoro.stats(device_id, days)
+    log.info("pomodoro stats", extra={"deviceId": device_id, "days": days, "rows": len(stats["days"])})
+    return stats
 
 
 async def _noop(_piece: str) -> None:

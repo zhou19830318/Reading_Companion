@@ -314,6 +314,51 @@ size_t buildImageEditRequest(char* out, size_t cap, const char* requestId, const
 // token, e.g. a transport-level failure).
 bool parseImageResponse(const char* json, size_t len, ImageMeta& out, char* textOut, size_t textCap, ErrorCode& error);
 
+// ── pomodoro endpoint (专注计时 session sync) ─────────────────────────────
+//
+// POST <origin>/api/v1/pomodoro/sessions with
+//   {"sessions":[{"clientEventId":"<32 hex>","kind":"work",
+//     "startedAt":"2026-10-30T08:00:00","endedAt":"2026-10-30T08:25:00",
+//     "minutes":25,"completed":true}, ...]}
+// (relay/relay/main.py pomodoro_sessions). Success body
+// {"ok":true,"accepted":N,"stored":N}; errors as
+// {"error":"invalid_session"} or {"error":"invalid_sessions","max":50}.
+// clientEventId is the relay's idempotency key: a retried batch never
+// double-counts. The relay accepts at most POMODORO_MAX_SESSION_BATCH entries
+// and kinds work|break|long_break with minutes 1..180.
+
+constexpr size_t POMODORO_MAX_SESSION_BATCH = 50;
+constexpr size_t POMODORO_EVENT_ID_CHARS = 32;  // 32 lowercase hex digits
+constexpr size_t POMODORO_EVENT_ID_CAP = POMODORO_EVENT_ID_CHARS + 1;
+// "YYYY-MM-DDTHH:MM:SS" + NUL. The relay groups stats by the first 10 chars.
+constexpr size_t POMODORO_TIMESTAMP_CAP = 20;
+
+struct PomodoroSessionWire {
+  const char* clientEventId = nullptr;  // 32 lowercase hex
+  const char* kind = nullptr;           // "work" | "break" | "long_break"
+  const char* startedAt = nullptr;      // ISO-8601, device-local time
+  const char* endedAt = nullptr;
+  uint16_t minutes = 0;  // 1..180
+  bool completed = true;
+};
+
+struct PomodoroSyncResult {
+  bool ok = false;                    // body carried "ok" (true)
+  int32_t accepted = -1;              // echoed batch size; -1 = absent
+  ErrorCode error = ErrorCode::None;  // {"error":...} / {"code":...} body
+};
+
+// Builds the batch body. Returns 0 (and never a partial frame) when any entry
+// is invalid, the batch is empty or over POMODORO_MAX_SESSION_BATCH, or the
+// frame does not fit `cap`.
+size_t buildPomodoroSessionsRequest(char* out, size_t cap, const PomodoroSessionWire* sessions, size_t count);
+
+// True when the body carried "ok" (the relay stored or already had every
+// entry — `stored` may be lower than `accepted` on an idempotent retry, which
+// is still a success). On false, out.error holds the token from an
+// {"error":...} body so the transport can map 401/400 without a second parser.
+bool parsePomodoroSessionsResponse(const char* json, size_t len, PomodoroSyncResult& out);
+
 // ── PCM framing ──────────────────────────────────────────────────────────
 //
 // The recorder produces 100 ms chunks (1600 samples); the wire wants 40 ms

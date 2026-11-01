@@ -84,6 +84,7 @@ id -u voice-relay >/dev/null 2>&1 || \
 mkdir -p "$RELAY_ROOT"/{releases,logs,run,deploy} "$ENV_DIR" "$RELEASE"
 mkdir -p "$RELAY_ROOT/run/t2i"
 mkdir -p "$RELAY_ROOT/run/learning"
+mkdir -p "$RELAY_ROOT/run/pomodoro"
 chown -R voice-relay:voice-relay "$RELAY_ROOT"
 
 section "release $TS"
@@ -133,7 +134,8 @@ if [[ -f "$ENV_FILE" ]]; then
     # Backfill keys added after the first install (never clobber operator values).
     for kv in MAX_WS_CONNECTIONS=32 MAX_SESSIONS_PER_DEVICE=1 DICT_SOURCE=local \
               T2I_PROVIDER=mock "T2I_ASSET_DIR=$RELAY_ROOT/run/t2i" \
-              "RELAY_LEARNING_DIR=$RELAY_ROOT/run/learning"; do
+              "RELAY_LEARNING_DIR=$RELAY_ROOT/run/learning" \
+              "RELAY_POMODORO_DIR=$RELAY_ROOT/run/pomodoro"; do
         key=${kv%%=*}
         grep -q "^${key}=" "$ENV_FILE" || echo "$kv" >> "$ENV_FILE"
     done
@@ -192,6 +194,8 @@ T2I_ASSET_DIR=$RELAY_ROOT/run/t2i
 # Vocabulary learning SQLite database: same run/ rule as the t2i assets
 # (survives release swaps, writable inside the unit's ReadWritePaths).
 RELAY_LEARNING_DIR=$RELAY_ROOT/run/learning
+# Pomodoro focus-session SQLite database: same run/ rule as learning.
+RELAY_POMODORO_DIR=$RELAY_ROOT/run/pomodoro
 # Sessions may run concurrently; keep within the DashScope account quota.
 MAX_CONCURRENT_SESSIONS=4
 # Multiple onepage devices: cap open sockets and sessions per device.

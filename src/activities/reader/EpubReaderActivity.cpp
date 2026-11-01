@@ -48,6 +48,8 @@
 #include "activities/voice/VoiceActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "pomodoro/PomodoroPresetActivity.h"
+#include "pomodoro/PomodoroSession.h"
 #include "util/BookmarkUtil.h"
 #include "util/ScreenshotUtil.h"
 
@@ -695,6 +697,18 @@ void EpubReaderActivity::loop() {
     return;
   }
 
+  // Focus-timer countdown lives in the status bar; repaint only when the
+  // displayed minute changes so an idle page never refreshes once per second.
+  if (POMODORO.blocksAutoSleep()) {
+    const uint8_t shownMinute = POMODORO.remainingMinutes();
+    if (shownMinute != lastFocusMinute_) {
+      lastFocusMinute_ = shownMinute;
+      requestUpdate();
+    }
+  } else {
+    lastFocusMinute_ = 0;
+  }
+
   // End-of-Book screen reached (currentSpineIndex == spine count) means the book is
   // finished. Two independent finished-book features key off this same condition.
   const bool atEndOfBook = currentSpineIndex > 0 && currentSpineIndex >= epub->getSpineItemsCount();
@@ -1132,6 +1146,22 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
     case EpubReaderMenuActivity::MenuAction::REVIEW: {
       startActivityForResult(std::make_unique<ReviewActivity>(renderer, mappedInput),
                              [this](const ActivityResult&) { requestUpdate(); });
+      break;
+    }
+    case EpubReaderMenuActivity::MenuAction::FOCUS_TIMER: {
+      // One dynamic row: start a session when idle, otherwise pause/resume.
+      if (POMODORO.isActive()) {
+        POMODORO.togglePause();
+        requestUpdate();
+      } else {
+        startActivityForResult(std::make_unique<PomodoroPresetActivity>(renderer, mappedInput),
+                               [this](const ActivityResult&) { requestUpdate(); });
+      }
+      break;
+    }
+    case EpubReaderMenuActivity::MenuAction::FOCUS_END: {
+      POMODORO.endSession();
+      requestUpdate();
       break;
     }
     case EpubReaderMenuActivity::MenuAction::VOICE_NOTE: {

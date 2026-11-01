@@ -161,10 +161,13 @@ sudo systemctl restart reading-companion-relay
 | 开通生图 | `T2I_PROVIDER=dashscope`（或 `openai` 配 `T2I_BASE_URL`/`T2I_API_KEY`；`mock`=本地占位图零成本） |
 | 轮换设备 token | `RELAY_DEVICE_TOKEN=...`（或 `RELAY_DEVICE_TOKENS=device:token,...` 按设备区分） |
 | 词库学习数据位置 | `RELAY_LEARNING_DIR`（默认 `run/learning`；生产钉在 `$RELAY_ROOT/run/learning`，跨 release 持久，无需改 systemd unit） |
+| 番茄钟会话数据位置 | `RELAY_POMODORO_DIR`（默认 `run/pomodoro`；生产钉在 `$RELAY_ROOT/run/pomodoro`，同词库规则） |
 
 字典数据随 release 发布（`DICT_SOURCE=local`），升级 release 即升级词库；改成 `DICT_SOURCE=llm` 可回退到模型生成卡片（可能有事实错误，不推荐）。
 
 词库学习数据（生词本、复习记录，SQLite）存放在 `RELAY_LEARNING_DIR`，位于 release 目录之外的 `run/` 树中：升级与回滚都不会动它；备份即拷走该目录下的 `learning.db*` 文件。
+
+番茄钟会话数据（专注/休息段记录，SQLite）存放在 `RELAY_POMODORO_DIR`，规则与词库完全一致；备份即拷走该目录下的 `pomodoro.db*` 文件。
 
 ## 5. 升级
 

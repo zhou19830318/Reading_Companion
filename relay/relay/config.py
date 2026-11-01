@@ -105,6 +105,13 @@ class Settings(BaseSettings):
     # the database survives upgrades and rollbacks without a unit change.
     relay_learning_dir: str = Field("", alias="RELAY_LEARNING_DIR")
 
+    # --- pomodoro focus sessions --------------------------------------------
+    # Directory holding pomodoro.db (SQLite, stdlib). Empty = "run/pomodoro"
+    # under the working directory; production pins it to
+    # /opt/reading-companion-relay/run/pomodoro (same run/ rule as learning:
+    # survives release swaps, writable inside the unit's ReadWritePaths).
+    relay_pomodoro_dir: str = Field("", alias="RELAY_POMODORO_DIR")
+
     # --- text-to-image cards ------------------------------------------------
     # "mock" (default): draw a placeholder locally, no cloud call and no cost —
     # the whole endpoint/asset path is exercised. "dashscope": wanx task +
@@ -225,6 +232,11 @@ class Settings(BaseSettings):
     def learning_db_path(self) -> Path:
         base = Path(self.relay_learning_dir) if self.relay_learning_dir else Path("run/learning")
         return base / "learning.db"
+
+    @property
+    def pomodoro_db_path(self) -> Path:
+        base = Path(self.relay_pomodoro_dir) if self.relay_pomodoro_dir else Path("run/pomodoro")
+        return base / "pomodoro.db"
 
     @property
     def allowed_devices(self) -> list[str]:

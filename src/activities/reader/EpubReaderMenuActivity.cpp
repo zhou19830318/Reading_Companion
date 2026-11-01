@@ -3,9 +3,12 @@
 #include <GfxRenderer.h>
 #include <I18n.h>
 
+#include <cstdio>
+
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "pomodoro/PomodoroSession.h"
 
 EpubReaderMenuActivity::EpubReaderMenuActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                                const std::string& title, const int currentPage, const int totalPages,
@@ -24,7 +27,7 @@ std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuI
                                                                                      bool hasBookmarks,
                                                                                      bool hasVoiceNote) {
   std::vector<MenuItem> items;
-  items.reserve(19);
+  items.reserve(21);
   items.push_back({MenuAction::SELECT_CHAPTER, StrId::STR_SELECT_CHAPTER});
   if (hasFootnotes) {
     items.push_back({MenuAction::FOOTNOTES, StrId::STR_FOOTNOTES});
@@ -45,6 +48,14 @@ std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuI
   items.push_back({MenuAction::REVIEW, StrId::STR_REVIEW_TODAY});
   items.push_back({MenuAction::ROTATE_SCREEN, StrId::STR_ORIENTATION});
   items.push_back({MenuAction::AUTO_PAGE_TURN, StrId::STR_AUTO_TURN_PAGES_PER_MIN});
+  // Focus timer: one dynamic row (start / pause / resume) plus an end row
+  // that only exists while a session is active.
+  items.push_back({MenuAction::FOCUS_TIMER,
+                   POMODORO.isActive() ? (POMODORO.isPaused() ? StrId::STR_FOCUS_RESUME : StrId::STR_FOCUS_PAUSE)
+                                       : StrId::STR_FOCUS_TIMER});
+  if (POMODORO.isActive()) {
+    items.push_back({MenuAction::FOCUS_END, StrId::STR_FOCUS_END});
+  }
   items.push_back({MenuAction::GO_TO_PERCENT, StrId::STR_GO_TO_PERCENT});
   items.push_back({MenuAction::SCREENSHOT, StrId::STR_SCREENSHOT_BUTTON});
   items.push_back({MenuAction::DISPLAY_QR, StrId::STR_DISPLAY_QR});
@@ -139,6 +150,14 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
         } else if (value == MenuAction::AUTO_PAGE_TURN) {
           // Render current page turn value on the right edge of the content area.
           return pageTurnLabels[selectedPageTurnOption];
+        } else if (value == MenuAction::FOCUS_TIMER && POMODORO.blocksAutoSleep()) {
+          // Live remaining time for the running (or paused) countdown. drawList
+          // consumes the pointer before the next row, so one static buffer is
+          // safe and keeps the lambda's const char* return type.
+          static char remaining[24];
+          snprintf(remaining, sizeof(remaining), tr(STR_SLEEP_TIMER_VALUE_FORMAT),
+                   static_cast<unsigned>(POMODORO.remainingMinutes()));
+          return static_cast<const char*>(remaining);
         } else {
           return "";
         }

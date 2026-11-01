@@ -29,7 +29,11 @@ class EpubReaderMenuActivity final : public Activity {
     READER_SETTINGS,
     ASK_AI,
     DICTIONARY,
-    REVIEW
+    REVIEW,
+    // Focus timer: one dynamic row (start / pause / resume) plus an end row
+    // while a session is active.
+    FOCUS_TIMER,
+    FOCUS_END
   };
 
   explicit EpubReaderMenuActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const std::string& title,
