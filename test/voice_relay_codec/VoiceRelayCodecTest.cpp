@@ -111,6 +111,18 @@ TEST(VoiceRelayCodec, ParsesErrorWithWireRetryable) {
   EXPECT_EQ(e.seq, 7u);
 }
 
+TEST(VoiceRelayCodec, ParsesNoSpeechAndQuotaErrorCodes) {
+  const Event noSpeech =
+      parseOk(R"({"type":"error","requestId":"r","sessionId":"s","code":"ASR_NO_SPEECH","message":"m"})");
+  EXPECT_EQ(noSpeech.code, ErrorCode::AsrNoSpeech);
+  EXPECT_FALSE(noSpeech.retryable);
+
+  const Event quota =
+      parseOk(R"({"type":"error","requestId":"r","sessionId":"s","code":"ASR_QUOTA_EXHAUSTED","message":"m"})");
+  EXPECT_EQ(quota.code, ErrorCode::AsrQuotaExhausted);
+  EXPECT_FALSE(quota.retryable);
+}
+
 TEST(VoiceRelayCodec, ErrorWithoutRetryableFallsBackToLocalPolicy) {
   const Event transient =
       parseOk(R"({"type":"error","requestId":"r","sessionId":"s","code":"LLM_CONNECTION_ERROR","message":"m"})");
@@ -161,6 +173,8 @@ TEST(VoiceRelayCodec, NamesRoundTrip) {
   EXPECT_STREQ(eventTypeName(EventType::AsrPartial), "asr.partial");
   EXPECT_STREQ(eventTypeName(EventType::SessionDone), "session.done");
   EXPECT_STREQ(errorCodeName(ErrorCode::AsrConnectionError), "ASR_CONNECTION_ERROR");
+  EXPECT_STREQ(errorCodeName(ErrorCode::AsrNoSpeech), "ASR_NO_SPEECH");
+  EXPECT_STREQ(errorCodeName(ErrorCode::AsrQuotaExhausted), "ASR_QUOTA_EXHAUSTED");
   EXPECT_STREQ(errorCodeName(ErrorCode::ServerOverloaded), "SERVER_OVERLOADED");
   EXPECT_STREQ(errorCodeName(ErrorCode::Unknown), "UNKNOWN");
 }

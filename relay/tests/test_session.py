@@ -220,3 +220,14 @@ async def test_transition_table_rejects_illegal_moves():
     assert SessionState.SESSION_STARTED not in _TRANSITIONS[SessionState.LLM_RUNNING]
     assert SessionState.DONE in _TRANSITIONS[SessionState.LLM_RUNNING]
     assert SessionState.CANCELLED in _TRANSITIONS[SessionState.RECEIVING_AUDIO]
+
+
+@pytest.mark.asyncio
+async def test_empty_asr_final_is_no_speech_not_internal_error():
+    h = Harness(MOCK_ASR_TEXT="")
+    s = await h.new_session()
+    await s.handle_audio_start(AudioStart(requestId="req-1", sessionId=s.session_id))
+    await s.handle_binary(frame(40))
+    await s.handle_audio_end(AudioEnd(requestId="req-1", sessionId=s.session_id))
+    assert s.state == SessionState.FAILED
+    assert h.frames[-1]["code"] == "ASR_NO_SPEECH"

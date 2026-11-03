@@ -83,6 +83,8 @@ enum class ErrorCode : uint8_t {
   AsrConnectionError,
   AsrAuthError,
   AsrRateLimited,
+  AsrNoSpeech,
+  AsrQuotaExhausted,
   LlmConnectionError,
   LlmAuthError,
   LlmRateLimited,

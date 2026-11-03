@@ -10,6 +10,7 @@ using OpenClaw::ChatHistoryFormat::buildLine;
 using OpenClaw::ChatHistoryFormat::DATE_PATH_SIZE;
 using OpenClaw::ChatHistoryFormat::dayPath;
 using OpenClaw::ChatHistoryFormat::daysFromCivil;
+using OpenClaw::ChatHistoryFormat::formatChatMessageTime;
 using OpenClaw::ChatHistoryFormat::formatStampForOffset;
 using OpenClaw::ChatHistoryFormat::groupDaysByName;
 using OpenClaw::ChatHistoryFormat::historyDayRowLabel;
@@ -18,6 +19,7 @@ using OpenClaw::ChatHistoryFormat::historyGroupLabel;
 using OpenClaw::ChatHistoryFormat::HistoryLevel;
 using OpenClaw::ChatHistoryFormat::isoWeekdayMon1;
 using OpenClaw::ChatHistoryFormat::parseDayDate;
+using OpenClaw::ChatHistoryFormat::parseIsoUtcSeconds;
 using OpenClaw::ChatHistoryFormat::parseLine;
 using OpenClaw::ChatHistoryFormat::STAMP_SIZE;
 using OpenClaw::ChatHistoryFormat::weekOfMonth;
@@ -43,6 +45,76 @@ std::string roundTrip(const std::string& text, size_t cap = 512) {
 }
 
 }  // namespace
+
+TEST(ChatHistoryRelayTimestamp, ParsesUtcIsoAndAppliesOffset) {
+  int64_t sec = 0;
+  const char* ts = "2026-09-27T12:00:00+00:00";
+  ASSERT_TRUE(parseIsoUtcSeconds(ts, strlen(ts), sec));
+  EXPECT_EQ(sec, NOON_UTC_2026_09_27 / 1000);
+  char clock[6];
+  ASSERT_TRUE(OpenClaw::ChatHistoryFormat::formatTimeForOffset(clock, sizeof(clock), sec * 1000, 48 + 32));
+  EXPECT_STREQ(clock, "20:00");
+}
+
+TEST(ChatHistoryRelayTimestamp, AcceptsZAndFractionalSeconds) {
+  int64_t sec = 0;
+  const char* z = "2026-09-27T12:00:00Z";
+  ASSERT_TRUE(parseIsoUtcSeconds(z, strlen(z), sec));
+  EXPECT_EQ(sec, NOON_UTC_2026_09_27 / 1000);
+  const char* frac = "2026-09-27T12:00:00.250+00:00";
+  ASSERT_TRUE(parseIsoUtcSeconds(frac, strlen(frac), sec));
+  EXPECT_EQ(sec, NOON_UTC_2026_09_27 / 1000);
+}
+
+TEST(ChatHistoryRelayTimestamp, RejectsMalformedInput) {
+  int64_t sec = 0;
+  EXPECT_FALSE(parseIsoUtcSeconds(nullptr, 0, sec));
+  EXPECT_FALSE(parseIsoUtcSeconds("2026-09-27", 10, sec));
+  EXPECT_FALSE(parseIsoUtcSeconds("2026-13-27T12:00:00Z", 20, sec));
+  EXPECT_FALSE(parseIsoUtcSeconds("2026-09-27T12:00:00junk", 22, sec));
+  EXPECT_FALSE(parseIsoUtcSeconds("2026-09-27T12:00:00+08", 22, sec));
+}
+
+TEST(ChatHistoryMessageTime, TodayOmitsDate) {
+  char stamp[24];
+  ASSERT_TRUE(formatChatMessageTime(stamp, sizeof(stamp), NOON_UTC_2026_09_27, NOON_UTC_2026_09_27 + 3600 * 1000LL, 48,
+                                    "Yesterday"));
+  EXPECT_STREQ(stamp, "12:00");
+}
+
+TEST(ChatHistoryMessageTime, YesterdayUsesTranslatedLabel) {
+  char stamp[24];
+  ASSERT_TRUE(formatChatMessageTime(stamp, sizeof(stamp), NOON_UTC_2026_09_27 - 86400 * 1000LL, NOON_UTC_2026_09_27, 48,
+                                    "Yesterday"));
+  EXPECT_STREQ(stamp, "Yesterday 12:00");
+}
+
+TEST(ChatHistoryMessageTime, OlderMessagesShowFullDate) {
+  char stamp[24];
+  ASSERT_TRUE(formatChatMessageTime(stamp, sizeof(stamp), NOON_UTC_2026_09_27 - 3 * 86400 * 1000LL, NOON_UTC_2026_09_27,
+                                    48, "Yesterday"));
+  EXPECT_STREQ(stamp, "2026-09-24 12:00");
+}
+
+TEST(ChatHistoryMessageTime, NonZeroOffsetShiftsTheDayAndHour) {
+  char stamp[24];
+  // 2026-09-27 23:30 UTC = 2026-09-28 07:30 in UTC+8.
+  ASSERT_TRUE(formatChatMessageTime(stamp, sizeof(stamp),
+                                    MIDNIGHT_UTC_2026_09_27 + 23 * 3600 * 1000LL + 30 * 60 * 1000LL,
+                                    MIDNIGHT_UTC_2026_09_27 + 24 * 3600 * 1000LL, 48 + 32, "Yesterday"));
+  EXPECT_STREQ(stamp, "7:30");
+}
+
+TEST(ChatHistoryMessageTime, UnsyncedClockFallsBackToFullDate) {
+  char stamp[24];
+  ASSERT_TRUE(formatChatMessageTime(stamp, sizeof(stamp), NOON_UTC_2026_09_27, 1600000000000LL, 48, "Yesterday"));
+  EXPECT_STREQ(stamp, "2026-09-27 12:00");
+}
+
+TEST(ChatHistoryMessageTime, RejectsPreSaneMessageEpoch) {
+  char stamp[24];
+  EXPECT_FALSE(formatChatMessageTime(stamp, sizeof(stamp), 1600000000000LL - 1, NOON_UTC_2026_09_27, 48, "Yesterday"));
+}
 
 TEST(ChatHistoryDayPath, UtcMidnightAndNoon) {
   char path[DATE_PATH_SIZE];

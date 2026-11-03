@@ -25,6 +25,7 @@ enum class HomeMenuItem {
   VOICE,
   WORKBENCH,
   FILE_TRANSFER,
+  PIGEON,
   SETTINGS_MENU
 };
 
@@ -101,6 +102,7 @@ class ActivityManager {
   void goToVoice();
   void goToAiAssistant();
   void goToWorkbench();
+  void goToPigeon();
   void goToSleep(bool fromTimeout = false);
   void goToBoot();
   void goToFullScreenMessage(std::string message, EpdFontFamily::Style style = EpdFontFamily::REGULAR);

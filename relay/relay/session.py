@@ -301,7 +301,7 @@ class VoiceSession:
         # If finish() produced no final, the provider falls back to the last
         # partial; only a completely silent ASR errors out.
         if self._transcript is None:
-            await self._fail(ErrorCode.INTERNAL_ERROR, "no transcript")
+            await self._fail(ErrorCode.ASR_NO_SPEECH, "no transcript")
             return
         if self.mode == "dictation":
             # Dictation: the transcript is the whole product, no LLM turn.

@@ -23,6 +23,7 @@
 #include "components/icons/image24.h"
 #include "components/icons/library.h"
 #include "components/icons/mic24.h"
+#include "components/icons/pigeon.h"
 #include "components/icons/recent.h"
 #include "components/icons/review.h"
 #include "components/icons/settings2.h"
@@ -93,6 +94,8 @@ const uint8_t* iconForName(UIIcon icon, int size) {
         return WorkbenchIcon;
       case UIIcon::Review:
         return ReviewIcon;
+      case UIIcon::PigeonChat:
+        return PigeonIcon;
       default:
         return nullptr;
     }

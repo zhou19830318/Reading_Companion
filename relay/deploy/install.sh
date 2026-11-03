@@ -85,6 +85,7 @@ mkdir -p "$RELAY_ROOT"/{releases,logs,run,deploy} "$ENV_DIR" "$RELEASE"
 mkdir -p "$RELAY_ROOT/run/t2i"
 mkdir -p "$RELAY_ROOT/run/learning"
 mkdir -p "$RELAY_ROOT/run/pomodoro"
+mkdir -p "$RELAY_ROOT/run/pigeon"
 chown -R voice-relay:voice-relay "$RELAY_ROOT"
 
 section "release $TS"
@@ -135,7 +136,8 @@ if [[ -f "$ENV_FILE" ]]; then
     for kv in MAX_WS_CONNECTIONS=32 MAX_SESSIONS_PER_DEVICE=1 DICT_SOURCE=local \
               T2I_PROVIDER=mock "T2I_ASSET_DIR=$RELAY_ROOT/run/t2i" \
               "RELAY_LEARNING_DIR=$RELAY_ROOT/run/learning" \
-              "RELAY_POMODORO_DIR=$RELAY_ROOT/run/pomodoro"; do
+              "RELAY_POMODORO_DIR=$RELAY_ROOT/run/pomodoro" \
+              "RELAY_PIGEON_DIR=$RELAY_ROOT/run/pigeon"; do
         key=${kv%%=*}
         grep -q "^${key}=" "$ENV_FILE" || echo "$kv" >> "$ENV_FILE"
     done
@@ -196,6 +198,8 @@ T2I_ASSET_DIR=$RELAY_ROOT/run/t2i
 RELAY_LEARNING_DIR=$RELAY_ROOT/run/learning
 # Pomodoro focus-session SQLite database: same run/ rule as learning.
 RELAY_POMODORO_DIR=$RELAY_ROOT/run/pomodoro
+# Pigeon device-to-device messages: same run/ rule as learning.
+RELAY_PIGEON_DIR=$RELAY_ROOT/run/pigeon
 # Sessions may run concurrently; keep within the DashScope account quota.
 MAX_CONCURRENT_SESSIONS=4
 # Multiple onepage devices: cap open sockets and sessions per device.

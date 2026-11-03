@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from relay.config import Settings
-from relay.providers.asr_dashscope import DashScopeAsrProvider
+from relay.providers.asr_dashscope import DashScopeAsrProvider, _map_task_failure
 from relay.providers.base import ProviderError
 
 
@@ -109,3 +109,19 @@ async def test_finish_timeout_without_any_result_is_retryable_connection_error()
     with pytest.raises(ProviderError) as exc:
         await provider.finish()
     assert exc.value.code.value == "ASR_CONNECTION_ERROR"
+
+
+def test_quota_failure_maps_to_explicit_quota_code():
+    err = _map_task_failure(
+        {
+            "error_code": "AllocationQuota.FreeTierOnly",
+            "error_message": "The free quota has been exhausted.",
+        }
+    )
+    assert err.code.value == "ASR_QUOTA_EXHAUSTED"
+    assert "allocationquota.freetieronly" in err.detail.lower()
+
+
+def test_plain_rate_limit_stays_retryable():
+    err = _map_task_failure({"error_code": "Throttling.RateQuota", "error_message": "too many requests"})
+    assert err.code.value == "ASR_RATE_LIMITED"

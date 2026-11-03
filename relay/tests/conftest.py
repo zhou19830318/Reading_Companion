@@ -26,3 +26,4 @@ os.environ.setdefault("MOCK_LLM_DELTA_CHARS", "4")
 # in the checkout.
 os.environ.setdefault("RELAY_LEARNING_DIR", tempfile.mkdtemp(prefix="relay-learning-test-"))
 os.environ.setdefault("RELAY_POMODORO_DIR", tempfile.mkdtemp(prefix="relay-pomodoro-test-"))
+os.environ.setdefault("RELAY_PIGEON_DIR", tempfile.mkdtemp(prefix="relay-pigeon-test-"))

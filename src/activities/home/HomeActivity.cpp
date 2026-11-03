@@ -24,10 +24,10 @@
 
 void HomeActivity::buildMenu() {
   gridLabels = {
-      tr(STR_BROWSE_FILES),  tr(STR_MENU_RECENT_BOOKS), reviewLabel.empty() ? tr(STR_REVIEW_TODAY) : reviewLabel,
-      tr(STR_VOICE),         tr(STR_WORKBENCH),         tr(STR_FILE_TRANSFER),
-      tr(STR_SETTINGS_TITLE)};
-  gridIcons = {Folder, Recent, Review, Mic, Workbench, Transfer, Settings};
+      tr(STR_BROWSE_FILES), tr(STR_MENU_RECENT_BOOKS), reviewLabel.empty() ? tr(STR_REVIEW_TODAY) : reviewLabel,
+      tr(STR_VOICE),        tr(STR_WORKBENCH),         tr(STR_FILE_TRANSFER),
+      tr(STR_PIGEON),       tr(STR_SETTINGS_TITLE)};
+  gridIcons = {Folder, Recent, Review, Mic, Workbench, Transfer, PigeonChat, Settings};
 
   if (hasOpdsServers) {
     gridLabels.insert(gridLabels.begin() + 2, tr(STR_OPDS_BROWSER));
@@ -226,6 +226,9 @@ void HomeActivity::loop() {
         case HomeMenuItem::FILE_TRANSFER:
           onFileTransferOpen();
           break;
+        case HomeMenuItem::PIGEON:
+          onPigeonOpen();
+          break;
         case HomeMenuItem::SETTINGS_MENU:
           onSettingsOpen();
           break;
@@ -303,3 +306,5 @@ void HomeActivity::onReviewOpen() { activityManager.goToReview(); }
 void HomeActivity::onVoiceOpen() { activityManager.goToAiAssistant(); }
 
 void HomeActivity::onWorkbenchOpen() { activityManager.goToWorkbench(); }
+
+void HomeActivity::onPigeonOpen() { activityManager.goToPigeon(); }

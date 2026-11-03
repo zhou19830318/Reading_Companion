@@ -48,8 +48,14 @@ def test_per_device_map_wins_over_shared_token():
     with pytest.raises(ProtocolError) as exc:
         check_device(s, "Bearer shared-token", "dev-a")
     assert exc.value.code == ErrorCode.UNAUTHORIZED
-    # unknown device falls back to the shared token
-    assert check_device(s, "Bearer shared-token", "dev-c") == "dev-c"
+    # A configured map is authoritative: an unknown id cannot borrow the
+    # shared token (the old fall-through let a leaked shared token
+    # impersonate arbitrary ids).
+    with pytest.raises(ProtocolError) as exc:
+        check_device(s, "Bearer shared-token", "dev-c")
+    assert exc.value.code == ErrorCode.UNAUTHORIZED
+    with pytest.raises(ProtocolError):
+        check_device(s, "Bearer token-a", "")
 
 
 def test_allowed_device_ids_pin_the_device():

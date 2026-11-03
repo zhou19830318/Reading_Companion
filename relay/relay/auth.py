@@ -5,8 +5,10 @@ Header contract (docs section 17.5):
     X-Device-Id: <device-id>
     X-Voice-Protocol: 1
 
-Tokens are compared in constant time. A per-device token map wins over the
-shared token; an empty ALLOWED_DEVICE_IDS accepts any device id that holds a
+Tokens are compared in constant time. When a per-device token map is
+configured, only ids in that map are accepted — the shared token is a
+development fallback for deployments with no map, never an escape hatch for an
+unknown id. An empty ALLOWED_DEVICE_IDS accepts any device id that holds a
 valid token (development), a non-empty list pins the ids.
 """
 
@@ -34,14 +36,17 @@ def check_device(settings: Settings, authorization: str | None, device_id: str |
 
     device_id = (device_id or "").strip()
     token_map = settings.device_token_map()
-    if device_id and device_id in token_map:
-        expected = token_map[device_id]
-        if not _ct_eq(token, expected):
+    if token_map:
+        # A configured map is authoritative: an unknown id must not borrow the
+        # shared token, and an empty id cannot be attributed to any device.
+        if not device_id or device_id not in token_map:
+            raise ProtocolError(ErrorCode.UNAUTHORIZED, "unknown device id")
+        if not _ct_eq(token, token_map[device_id]):
             raise ProtocolError(ErrorCode.UNAUTHORIZED, "token mismatch")
     elif settings.relay_device_token:
         if not _ct_eq(token, settings.relay_device_token):
             raise ProtocolError(ErrorCode.UNAUTHORIZED, "token mismatch")
-    elif not token_map:
+    else:
         # No tokens configured at all: refuse rather than run open.
         raise ProtocolError(ErrorCode.UNAUTHORIZED, "no device token configured")
 

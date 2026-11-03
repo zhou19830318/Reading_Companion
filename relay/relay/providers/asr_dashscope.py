@@ -58,6 +58,11 @@ def _map_task_failure(header: dict) -> ProviderError:
     message = str(header.get("error_message") or header.get("message") or "")
     if "invalid" in code and "key" in code or "authentication" in code or "unauthorized" in code:
         return ProviderError(ErrorCode.ASR_AUTH_ERROR, f"task-failed: {code} {message}")
+    # DashScope reports exhausted free quota as AllocationQuota.FreeTierOnly;
+    # keep it distinct from a transient rate limit so the device can tell the
+    # user to stop retrying immediately (and fall back to the legacy STT).
+    if "allocationquota" in code or "freetier" in code or "free tier" in message.lower():
+        return ProviderError(ErrorCode.ASR_QUOTA_EXHAUSTED, f"task-failed: {code} {message}")
     if "throttl" in code or "rate" in code or "limit" in code:
         return ProviderError(ErrorCode.ASR_RATE_LIMITED, f"task-failed: {code} {message}")
     return ProviderError(ErrorCode.ASR_CONNECTION_ERROR, f"task-failed: {code} {message}")

@@ -96,6 +96,12 @@ class VoiceActivity final : public Activity {
     questionSeed_ = seed;
   }
 
+  // Pigeon chat: a recognized utterance is the message, so hand the
+  // transcript straight back to the caller instead of opening the edit
+  // keyboard. Ask-AI and image prompts keep the editor (they benefit from
+  // reviewing/editing before the round trip); only the caller opts in.
+  void setAutoSendTranscript(bool on) { autoSendTranscript_ = on; }
+
   // Gateway-chat override for the Workbench to-do card: its round must reach
   // the OpenClaw agent — the only backend that can create the cron job the
   // card lists on the way back. A configured relay is skipped for this
@@ -198,6 +204,9 @@ class VoiceActivity final : public Activity {
   // saveNoteFromTranscript(), Back → discard (state back to Idle, no SD
   // write). Also the serial inject path (CMD:VOICE_TX) in note mode.
   void openNoteEditor();
+  // Note/question tail: editor by default, or the direct result when
+  // autoSendTranscript_ is set (Pigeon).
+  void deliverDictationTranscript();
   void startSession();
   void sendToOpenClaw();
   // Issues the owed chat.send (oweSend_) once the session reaches Connected.
@@ -355,6 +364,8 @@ class VoiceActivity final : public Activity {
   // reports false so the round cannot be answered by a relay LLM with no
   // scheduling tool.
   bool gatewayChat_ = false;
+  // Pigeon opt-in: return the transcript via KeyboardResult without editing.
+  bool autoSendTranscript_ = false;
   // NoteStore::append line scratch, same rationale as historyLine_ (an
   // escaped NTF1 line is at most LINE_CAP bytes; caller-owned PSRAM).
   char* noteLine_ = nullptr;

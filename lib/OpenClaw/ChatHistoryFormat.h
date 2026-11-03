@@ -155,6 +155,65 @@ inline void civilFromDays(const int64_t days, int& year, int& month, int& day) {
   day = static_cast<int>(d);
 }
 
+// Defined below with the other calendar helpers; the parser here needs it.
+int64_t daysFromCivil(int year, int month, int day);
+
+inline int chatHistoryTwoDigits(const char* p) { return (p[0] - '0') * 10 + (p[1] - '0'); }
+
+// Parses the relay's message timestamp, "YYYY-MM-DDTHH:MM:SS+00:00" (the
+// pigeon API uses datetime.isoformat(timespec="seconds")). The trailing
+// timezone may be "Z", a numeric +/-HH:MM offset, absent, or preceded by a
+// fractional second; anything else is rejected. Returns UTC epoch seconds —
+// callers apply SETTINGS.clockUtcOffsetQ through formatTimeForOffset().
+// Pure so test/chat_history can pin the wire-to-wall-clock conversion.
+inline bool parseIsoUtcSeconds(const char* s, const size_t len, int64_t& epochSeconds) {
+  if (s == nullptr || len < 19) return false;
+  if (s[4] != '-' || s[7] != '-' || (s[10] != 'T' && s[10] != ' ') || s[13] != ':' || s[16] != ':') {
+    return false;
+  }
+  for (size_t i = 0; i < 19; ++i) {
+    if (i == 4 || i == 7 || i == 10 || i == 13 || i == 16) continue;
+    if (s[i] < '0' || s[i] > '9') return false;
+  }
+  const int year = (s[0] - '0') * 1000 + (s[1] - '0') * 100 + (s[2] - '0') * 10 + (s[3] - '0');
+  const int month = chatHistoryTwoDigits(s + 5);
+  const int day = chatHistoryTwoDigits(s + 8);
+  const int hour = chatHistoryTwoDigits(s + 11);
+  const int minute = chatHistoryTwoDigits(s + 14);
+  const int second = chatHistoryTwoDigits(s + 17);
+  if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59 || second > 59) {
+    return false;
+  }
+
+  int64_t utc = daysFromCivil(year, month, day) * 86400 + hour * 3600 + minute * 60 + second;
+
+  size_t pos = 19;
+  if (pos < len && s[pos] == '.') {
+    ++pos;
+    const size_t digitsStart = pos;
+    while (pos < len && s[pos] >= '0' && s[pos] <= '9') ++pos;
+    if (pos == digitsStart) return false;
+  }
+  if (pos < len) {
+    if (s[pos] == 'Z') {
+      ++pos;
+    } else if ((s[pos] == '+' || s[pos] == '-') && pos + 5 < len && s[pos + 3] == ':') {
+      const int offHour = chatHistoryTwoDigits(s + pos + 1);
+      const int offMinute = chatHistoryTwoDigits(s + pos + 4);
+      if (offHour > 23 || offMinute > 59) return false;
+      int offset = offHour * 3600 + offMinute * 60;
+      if (s[pos] == '-') offset = -offset;
+      utc -= offset;
+      pos += 6;
+    } else {
+      return false;
+    }
+  }
+  if (pos != len) return false;
+  epochSeconds = utc;
+  return true;
+}
+
 // Clamped quarter-hour offset (biased encoding) applied to an epoch.
 inline int64_t localEpochSeconds(const int64_t epochMs, const int utcOffsetQuarterHoursBiased) {
   int q = utcOffsetQuarterHoursBiased - 48;
@@ -306,6 +365,43 @@ inline bool formatTimeForOffset(char* out, const size_t cap, const int64_t epoch
   const int64_t localSec = localEpochSeconds(epochMs, utcOffsetQuarterHoursBiased);
   const int64_t secsOfDay = ((localSec % 86400) + 86400) % 86400;
   snprintf(out, cap, "%02d:%02d", static_cast<int>(secsOfDay / 3600), static_cast<int>((secsOfDay / 60) % 60));
+  return true;
+}
+
+// Chat-bubble stamp (needs cap >= 18): today shows "8:00", yesterday shows
+// "<yesterdayLabel> 8:00", anything older shows "2026-11-03 8:00". The hour
+// is not zero-padded, matching the reading app's casual message timestamps.
+// `nowMs` decides which label applies; when it is below the sane-epoch floor
+// the relative label is unavailable and the full date is shown instead.
+// `yesterdayLabel` is caller-translated so this layer stays i18n-free.
+inline bool formatChatMessageTime(char* out, const size_t cap, const int64_t epochMs, const int64_t nowMs,
+                                  const int utcOffsetQuarterHoursBiased, const char* yesterdayLabel) {
+  if (out == nullptr || cap < 18) return false;
+  if (epochMs < MIN_SANE_EPOCH_MS) return false;
+  const int64_t localSec = localEpochSeconds(epochMs, utcOffsetQuarterHoursBiased);
+  const int64_t localDay = localSec >= 0 ? localSec / 86400 : (localSec - 86399) / 86400;
+  const int64_t secsOfDay = ((localSec % 86400) + 86400) % 86400;
+  const int hour = static_cast<int>(secsOfDay / 3600);
+  const int minute = static_cast<int>((secsOfDay / 60) % 60);
+
+  if (nowMs >= MIN_SANE_EPOCH_MS) {
+    const int64_t nowLocalSec = localEpochSeconds(nowMs, utcOffsetQuarterHoursBiased);
+    const int64_t today = nowLocalSec >= 0 ? nowLocalSec / 86400 : (nowLocalSec - 86399) / 86400;
+    if (localDay == today) {
+      snprintf(out, cap, "%d:%02d", hour, minute);
+      return true;
+    }
+    if (localDay == today - 1 && yesterdayLabel != nullptr && yesterdayLabel[0] != '\0') {
+      snprintf(out, cap, "%s %d:%02d", yesterdayLabel, hour, minute);
+      return true;
+    }
+  }
+
+  int year = 0;
+  int month = 0;
+  int day = 0;
+  civilFromDays(localDay, year, month, day);
+  snprintf(out, cap, "%04d-%02d-%02d %d:%02d", year, month, day, hour, minute);
   return true;
 }
 

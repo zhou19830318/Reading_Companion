@@ -21,16 +21,17 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections import deque
 from contextlib import asynccontextmanager
 
 import orjson
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from . import SERVICE_NAME, __version__
-from . import admin_page, dict_source, learning_store, metrics, pomodoro_store, protocol, t2i
+from . import admin_page, dict_source, learning_store, metrics, pigeon_store, pomodoro_store, protocol, t2i
 from .auth import check_admin, check_device
 from .config import Settings, get_settings
 from .logging_setup import setup_logging
@@ -78,12 +79,26 @@ async def lifespan(app: FastAPI):
     pomodoro.open()
     app.state.pomodoro = pomodoro
     log.info("pomodoro store ready", extra={"db": str(pomodoro.db_path)})
+    # Pigeon: durable store-and-forward plus ephemeral presence. Presence is
+    # intentionally in-process (single worker); a restart just clears the
+    # online list until the next heartbeat.
+    pigeon = pigeon_store.PigeonStore(
+        settings.pigeon_db_path,
+        ttl_days=settings.pigeon_message_ttl_days,
+        max_per_recipient=settings.pigeon_max_messages_per_recipient,
+    )
+    pigeon.open()
+    app.state.pigeon = pigeon
+    app.state.pigeon_presence = pigeon_store.PigeonPresence(settings.pigeon_presence_ttl_seconds)
+    app.state.pigeon_rate = {}
+    log.info("pigeon store ready", extra={"db": str(pigeon.db_path)})
     yield
     # Graceful shutdown: stop accepting, cancel upstream work in bounded time.
     sessions: set[VoiceSession] = app.state.sessions
     if sessions:
         log.info("cancelling sessions at shutdown", extra={"count": len(sessions)})
         await asyncio.gather(*(s.abort("server_shutdown") for s in list(sessions)), return_exceptions=True)
+    pigeon.close()
     pomodoro.close()
     learning.close()
 
@@ -146,6 +161,8 @@ async def device_config(request: Request):
             # Pomodoro focus timer: same lifespan-store reasoning as learning.
             # Firmware gates its focus-timer menu on this key.
             "pomodoro": True,
+            # Pigeon device-to-device messages (store-and-forward + presence).
+            "pigeon": True,
         },
     }
 
@@ -798,6 +815,200 @@ async def pomodoro_stats(request: Request, days: int = 30):
     stats = app.state.pomodoro.stats(device_id, days)
     log.info("pomodoro stats", extra={"deviceId": device_id, "days": days, "rows": len(stats["days"])})
     return stats
+
+
+# --------------------------------------------------------------------------
+# pigeon device-to-device messages (device token; heartbeat + inbox + send)
+# --------------------------------------------------------------------------
+
+PIGEON_SEND_WINDOW_SECONDS = 60.0
+PIGEON_MAX_CLIENT_EVENT_ID = 80
+
+
+class PigeonHeartbeatRequest(BaseModel):
+    name: str = ""
+
+
+class PigeonSendRequest(BaseModel):
+    to: str
+    text: str
+    clientEventId: str = ""
+
+
+class PigeonAckRequest(BaseModel):
+    ids: list[int] = Field(default_factory=list)
+    upToId: int | None = None
+
+
+def _pigeon_device(settings: Settings, request: Request) -> tuple[str | None, JSONResponse | None]:
+    """Auth for /pigeon/* (log tag "pigeon auth rejected")."""
+    return _data_device(settings, request, "pigeon")
+
+
+def _pigeon_known_devices(settings: Settings) -> list[str]:
+    """Ids the relay can address: pinned ids plus per-device token entries."""
+    return sorted(set(settings.allowed_devices) | set(settings.device_token_map()))
+
+
+def _pigeon_devices(settings: Settings, self_id: str) -> list[dict]:
+    """All addressable peers, online or not.
+
+    The durable device registry (written by every heartbeat) is what makes an
+    offline device selectable. A configured deployment also lists pinned ids
+    that have never checked in, so an admin can pre-provision a reader.
+    """
+    presence = app.state.pigeon_presence
+    registered = {row["id"]: row for row in app.state.pigeon.devices(exclude_id=self_id)}
+    known = _pigeon_known_devices(settings)
+    ids = set(known) if known else set(registered)
+    ids.discard(self_id)
+    devices = [
+        {
+            "id": device_id,
+            "name": presence.name(device_id) or registered.get(device_id, {}).get("name", "") or device_id,
+            "online": presence.is_online(device_id),
+        }
+        for device_id in ids
+    ]
+    # Online first, then by display name/id, so the small firmware list cap
+    # never hides a live peer behind a pile of stale registrations.
+    devices.sort(key=lambda d: (not d["online"], d["name"].lower(), d["id"]))
+    return devices
+
+
+def _pigeon_rate_ok(device_id: str, limit: int) -> bool:
+    now = time.monotonic()
+    buckets: dict[str, deque[float]] = app.state.pigeon_rate
+    bucket = buckets.setdefault(device_id, deque())
+    while bucket and now - bucket[0] >= PIGEON_SEND_WINDOW_SECONDS:
+        bucket.popleft()
+    if len(bucket) >= max(1, limit):
+        return False
+    bucket.append(now)
+    return True
+
+
+@app.post("/api/v1/pigeon/heartbeat")
+async def pigeon_heartbeat(request: Request, body: PigeonHeartbeatRequest | None = None):
+    settings = get_settings()
+    device_id, error = _pigeon_device(settings, request)
+    if error is not None:
+        return error
+    name = (body.name if body else "") or request.headers.get("x-device-name", "")
+    app.state.pigeon.touch_device(device_id, name)
+    app.state.pigeon_presence.touch(device_id, name)
+    log.info("pigeon heartbeat", extra={"deviceId": device_id, "deviceName": name[:32]})
+    return {
+        "ok": True,
+        "self": {"id": device_id, "name": app.state.pigeon_presence.name(device_id) or device_id},
+        "devices": _pigeon_devices(settings, device_id),
+        "unread": app.state.pigeon.unread_count(device_id),
+    }
+
+
+@app.post("/api/v1/pigeon/send")
+async def pigeon_send(request: Request, body: PigeonSendRequest):
+    settings = get_settings()
+    device_id, error = _pigeon_device(settings, request)
+    if error is not None:
+        return error
+    text = body.text.strip()
+    if not text:
+        return JSONResponse(status_code=400, content={"error": "empty_text"})
+    if len(text.encode("utf-8")) > settings.pigeon_max_text_bytes:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "text_too_long", "maxBytes": settings.pigeon_max_text_bytes},
+        )
+    if len(body.clientEventId) > PIGEON_MAX_CLIENT_EVENT_ID:
+        return JSONResponse(status_code=400, content={"error": "client_event_id_too_long"})
+    recipient = body.to.strip()
+    if not recipient or recipient == device_id:
+        return JSONResponse(status_code=400, content={"error": "invalid_recipient"})
+    known = _pigeon_known_devices(settings)
+    allowed = recipient in known if known else app.state.pigeon.has_device(recipient)
+    if not allowed:
+        return JSONResponse(status_code=404, content={"error": "unknown_recipient"})
+    if not _pigeon_rate_ok(device_id, settings.pigeon_rate_limit_per_minute):
+        log.warning("pigeon send rate limited", extra={"deviceId": device_id})
+        return JSONResponse(status_code=429, content={"error": "rate_limited"})
+
+    message = app.state.pigeon.send(device_id, recipient, text, body.clientEventId)
+    log.info(
+        "pigeon send",
+        extra={
+            "deviceId": device_id,
+            "to": recipient,
+            "messageId": message["id"],
+            "duplicate": message["duplicate"],
+            "bytes": len(text.encode("utf-8")),
+        },
+    )
+    return {"ok": True, "message": message, "duplicate": message["duplicate"]}
+
+
+@app.get("/api/v1/pigeon/inbox")
+async def pigeon_inbox(request: Request, after: int = 0, limit: int = 50):
+    settings = get_settings()
+    device_id, error = _pigeon_device(settings, request)
+    if error is not None:
+        return error
+    after = max(0, after)
+    messages = app.state.pigeon.inbox(device_id, after_id=after, limit=limit)
+    latest = messages[-1]["id"] if messages else after
+    return {
+        "messages": messages,
+        "unread": app.state.pigeon.unread_count(device_id),
+        "latestId": latest,
+    }
+
+
+@app.post("/api/v1/pigeon/ack")
+async def pigeon_ack(request: Request, body: PigeonAckRequest):
+    settings = get_settings()
+    device_id, error = _pigeon_device(settings, request)
+    if error is not None:
+        return error
+    if not body.ids and body.upToId is None:
+        return JSONResponse(status_code=400, content={"error": "missing_ids"})
+    acked = app.state.pigeon.ack(device_id, ids=body.ids, up_to_id=body.upToId)
+    return {"ok": True, "acked": acked}
+
+
+@app.get("/api/v1/pigeon/history")
+async def pigeon_history(request: Request, peer: str = "", limit: int = 50):
+    settings = get_settings()
+    device_id, error = _pigeon_device(settings, request)
+    if error is not None:
+        return error
+    peer = peer.strip()
+    if not peer:
+        return JSONResponse(status_code=400, content={"error": "missing_peer"})
+    known = _pigeon_known_devices(settings)
+    allowed = peer in known if known else app.state.pigeon.has_device(peer)
+    if not allowed:
+        return JSONResponse(status_code=404, content={"error": "unknown_peer"})
+    return {
+        "peer": peer,
+        "messages": app.state.pigeon.history(device_id, peer, limit=limit),
+    }
+
+
+@app.post("/api/v1/pigeon/clear")
+async def pigeon_clear(request: Request, peer: str = ""):
+    settings = get_settings()
+    device_id, error = _pigeon_device(settings, request)
+    if error is not None:
+        return error
+    peer = peer.strip()
+    if not peer:
+        return JSONResponse(status_code=400, content={"error": "missing_peer"})
+    known = _pigeon_known_devices(settings)
+    allowed = peer in known if known else app.state.pigeon.has_device(peer)
+    if not allowed:
+        return JSONResponse(status_code=404, content={"error": "unknown_peer"})
+    deleted = app.state.pigeon.clear_conversation(device_id, peer)
+    return {"ok": True, "deleted": deleted}
 
 
 async def _noop(_piece: str) -> None:

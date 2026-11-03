@@ -44,6 +44,8 @@ class ErrorCode(str, Enum):
     ASR_CONNECTION_ERROR = "ASR_CONNECTION_ERROR"
     ASR_AUTH_ERROR = "ASR_AUTH_ERROR"
     ASR_RATE_LIMITED = "ASR_RATE_LIMITED"
+    ASR_NO_SPEECH = "ASR_NO_SPEECH"
+    ASR_QUOTA_EXHAUSTED = "ASR_QUOTA_EXHAUSTED"
     LLM_CONNECTION_ERROR = "LLM_CONNECTION_ERROR"
     LLM_AUTH_ERROR = "LLM_AUTH_ERROR"
     LLM_RATE_LIMITED = "LLM_RATE_LIMITED"
@@ -62,6 +64,8 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.ASR_CONNECTION_ERROR: "语音识别服务连接失败",
     ErrorCode.ASR_AUTH_ERROR: "语音识别服务认证失败",
     ErrorCode.ASR_RATE_LIMITED: "语音识别服务繁忙",
+    ErrorCode.ASR_NO_SPEECH: "未识别到语音，请靠近麦克风重试",
+    ErrorCode.ASR_QUOTA_EXHAUSTED: "语音识别额度已用完，请稍后再试",
     ErrorCode.LLM_CONNECTION_ERROR: "回答服务连接失败",
     ErrorCode.LLM_AUTH_ERROR: "回答服务认证失败",
     ErrorCode.LLM_RATE_LIMITED: "回答服务繁忙",
@@ -80,6 +84,8 @@ RETRYABLE: dict[ErrorCode, bool] = {
     ErrorCode.ASR_CONNECTION_ERROR: True,
     ErrorCode.ASR_AUTH_ERROR: False,
     ErrorCode.ASR_RATE_LIMITED: True,
+    ErrorCode.ASR_NO_SPEECH: False,
+    ErrorCode.ASR_QUOTA_EXHAUSTED: False,
     ErrorCode.LLM_CONNECTION_ERROR: True,
     ErrorCode.LLM_AUTH_ERROR: False,
     ErrorCode.LLM_RATE_LIMITED: True,

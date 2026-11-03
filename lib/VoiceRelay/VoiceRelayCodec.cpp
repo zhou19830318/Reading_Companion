@@ -49,6 +49,10 @@ const char* errorCodeName(ErrorCode code) {
       return "ASR_AUTH_ERROR";
     case ErrorCode::AsrRateLimited:
       return "ASR_RATE_LIMITED";
+    case ErrorCode::AsrNoSpeech:
+      return "ASR_NO_SPEECH";
+    case ErrorCode::AsrQuotaExhausted:
+      return "ASR_QUOTA_EXHAUSTED";
     case ErrorCode::LlmConnectionError:
       return "LLM_CONNECTION_ERROR";
     case ErrorCode::LlmAuthError:
@@ -236,6 +240,8 @@ ErrorCode codeFromWire(const char* s, size_t n) {
       {"ASR_CONNECTION_ERROR", ErrorCode::AsrConnectionError},
       {"ASR_AUTH_ERROR", ErrorCode::AsrAuthError},
       {"ASR_RATE_LIMITED", ErrorCode::AsrRateLimited},
+      {"ASR_NO_SPEECH", ErrorCode::AsrNoSpeech},
+      {"ASR_QUOTA_EXHAUSTED", ErrorCode::AsrQuotaExhausted},
       {"LLM_CONNECTION_ERROR", ErrorCode::LlmConnectionError},
       {"LLM_AUTH_ERROR", ErrorCode::LlmAuthError},
       {"LLM_RATE_LIMITED", ErrorCode::LlmRateLimited},

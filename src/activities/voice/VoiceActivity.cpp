@@ -57,8 +57,8 @@ bool VoiceActivity::injectTranscript(const char* text) {
   snprintf(self.transcript_, sizeof(self.transcript_), "%s", text);
   self.haveTranscript_ = true;
   LOG_INF("VOICE", "serial inject: %u bytes", static_cast<unsigned>(strlen(self.transcript_)));
-  if (self.noteContext_.valid || self.questionInput_) {
-    self.openNoteEditor();
+  if (self.dictationMode()) {
+    self.deliverDictationTranscript();
     return true;
   }
   self.sendToOpenClaw();
@@ -621,6 +621,10 @@ const char* VoiceActivity::relayErrorReason() const {
     case EC::AsrRateLimited:
     case EC::LlmRateLimited:
       return tr(STR_VOICE_RELAY_BUSY);
+    case EC::AsrNoSpeech:
+      return tr(STR_STT_NO_SPEECH);
+    case EC::AsrQuotaExhausted:
+      return tr(STR_VOICE_RELAY_QUOTA);
     case EC::Unauthorized:
     case EC::DeviceNotAllowed:
     case EC::AsrAuthError:
@@ -691,7 +695,7 @@ void VoiceActivity::relayFallbackOrFail(const char* reason) {
       // the legacy path's finishTranscription() hands it over.
       LOG_INF("VOICE", "relay dictation fallback: transcript in hand");
       recorder_.close();
-      openNoteEditor();
+      deliverDictationTranscript();
       return;
     }
     // ASR already landed; only the relay's LLM half failed, so the fallback
@@ -725,9 +729,9 @@ void VoiceActivity::settleRelaySuccess() {
     // The socket stays up for the keyboard's next round (its 60 s idle close
     // is caught by the upkeep poll). Same release order as
     // finishTranscription(): free the PCM, then hand the transcript to the
-    // keyboard (语音书签 / custom question).
+    // keyboard (语音书签 / custom question) or straight back to Pigeon.
     recorder_.close();
-    openNoteEditor();
+    deliverDictationTranscript();
     return;
   }
   if (relayReplyLen_ == 0) {
@@ -915,8 +919,8 @@ void VoiceActivity::finishTranscription(SttClient::Result result) {
   // Manual mode parks the transcript in Review; the user sends with Confirm
   // (§8.6). Auto sends immediately, as before. Note mode parks the transcript
   // in the keyboard instead of saving it outright (语音书签 shortcut).
-  if (noteContext_.valid || questionInput_) {
-    openNoteEditor();
+  if (dictationMode()) {
+    deliverDictationTranscript();
     return;
   }
   if (SETTINGS.voiceAutoSend == 0) {
@@ -1046,6 +1050,16 @@ void VoiceActivity::deleteSelectedNote() {
   noteDeleteArmed_ = false;
   LOG_INF("VOICE", "note deleted, %u left in %s", static_cast<unsigned>(noteEntryCount_), noteContext_.bookBase);
   requestUpdate();
+}
+
+void VoiceActivity::deliverDictationTranscript() {
+  if (questionInput_ && autoSendTranscript_) {
+    LOG_INF("VOICE", "auto-send question transcript (%u bytes)", static_cast<unsigned>(strlen(transcript_)));
+    setResult(KeyboardResult{transcript_});
+    finish();
+    return;
+  }
+  openNoteEditor();
 }
 
 void VoiceActivity::openNoteEditor() {

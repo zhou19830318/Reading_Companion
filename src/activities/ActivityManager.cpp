@@ -17,6 +17,7 @@
 #include "home/RecentBooksActivity.h"
 #include "learning/ReviewActivity.h"
 #include "network/CrossPointWebServerActivity.h"
+#include "pigeon/PigeonDeviceListActivity.h"
 #include "reader/ReaderActivity.h"
 #include "settings/OpdsServerListActivity.h"
 #include "settings/SettingsActivity.h"
@@ -235,6 +236,10 @@ void ActivityManager::goToAiAssistant() { replaceActivity(std::make_unique<AiHub
 
 void ActivityManager::goToWorkbench() { replaceActivity(std::make_unique<WorkbenchActivity>(renderer, mappedInput)); }
 
+void ActivityManager::goToPigeon() {
+  replaceActivity(std::make_unique<PigeonDeviceListActivity>(renderer, mappedInput));
+}
+
 bool ActivityManager::injectVoiceTranscript(const char* text) { return VoiceActivity::injectTranscript(text); }
 
 void ActivityManager::goToSleep(bool fromTimeout) {
@@ -263,6 +268,8 @@ void ActivityManager::goHome(HomeMenuItem initialMenuItem) {
       initialMenuItem = HomeMenuItem::REVIEW;
     } else if (activityName == "Voice") {
       initialMenuItem = HomeMenuItem::VOICE;
+    } else if (activityName == "PigeonDevices" || activityName == "PigeonConversation") {
+      initialMenuItem = HomeMenuItem::PIGEON;
     } else if (activityName == "Settings") {
       initialMenuItem = HomeMenuItem::SETTINGS_MENU;
     }

@@ -112,6 +112,21 @@ class Settings(BaseSettings):
     # survives release swaps, writable inside the unit's ReadWritePaths).
     relay_pomodoro_dir: str = Field("", alias="RELAY_POMODORO_DIR")
 
+    # --- pigeon device-to-device messages ----------------------------------
+    # Directory holding pigeon.db (SQLite, stdlib). Empty = "run/pigeon"
+    # under the working directory; production pins it to
+    # /opt/reading-companion-relay/run/pigeon (same run/ rule as learning and
+    # pomodoro: survives release swaps, writable inside the unit's
+    # ReadWritePaths).
+    relay_pigeon_dir: str = Field("", alias="RELAY_PIGEON_DIR")
+    # Keep the relay's copy bounded. Devices fetch history on entry and keep
+    # no long-term local archive, so these are delivery-retention limits.
+    pigeon_message_ttl_days: int = Field(7, alias="PIGEON_MESSAGE_TTL_DAYS")
+    pigeon_max_messages_per_recipient: int = Field(100, alias="PIGEON_MAX_MESSAGES_PER_RECIPIENT")
+    pigeon_max_text_bytes: int = Field(512, alias="PIGEON_MAX_TEXT_BYTES")
+    pigeon_rate_limit_per_minute: int = Field(30, alias="PIGEON_RATE_LIMIT_PER_MINUTE")
+    pigeon_presence_ttl_seconds: float = Field(45.0, alias="PIGEON_PRESENCE_TTL_SECONDS")
+
     # --- text-to-image cards ------------------------------------------------
     # "mock" (default): draw a placeholder locally, no cloud call and no cost —
     # the whole endpoint/asset path is exercised. "dashscope": wanx task +
@@ -237,6 +252,11 @@ class Settings(BaseSettings):
     def pomodoro_db_path(self) -> Path:
         base = Path(self.relay_pomodoro_dir) if self.relay_pomodoro_dir else Path("run/pomodoro")
         return base / "pomodoro.db"
+
+    @property
+    def pigeon_db_path(self) -> Path:
+        base = Path(self.relay_pigeon_dir) if self.relay_pigeon_dir else Path("run/pigeon")
+        return base / "pigeon.db"
 
     @property
     def allowed_devices(self) -> list[str]:
