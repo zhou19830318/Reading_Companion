@@ -16,6 +16,8 @@
 ```
 
 - 设备**只持有 token**，云厂商 API Key 只存在服务器上。
+- 飞鸽传书走同一个 relay 的 HTTPS JSON（`/api/v1/pigeon/`，由 nginx 代理），
+  只共享设备认证，不经过 DashScope/OpenClaw。
 - 进程由 systemd 托管，单进程（多 worker 会破坏全局限流计数，见 README "Multiple onepage devices"）。
 
 ## 服务器目录结构
@@ -24,7 +26,7 @@
 |---|---|
 | `/opt/reading-companion-relay/releases/<TS>/` | 每次安装生成的时间戳 release（`relay/`、`dict-data/`、`requirements.txt`、独立 `.venv`、`pip-freeze.txt`） |
 | `/opt/reading-companion-relay/current` | 指向生效 release 的软链（回滚=改指旧 release） |
-| `/opt/reading-companion-relay/logs/`、`run/` | 日志与可写运行时目录（含 `run/t2i/` 生图资产，systemd 沙箱仅放行这两处写入） |
+| `/opt/reading-companion-relay/logs/`、`run/` | 日志与可写运行时目录（含 `run/t2i/` 生图资产、`run/learning/`、`run/pomodoro/`、`run/pigeon/`；systemd 沙箱仅放行这两处写入） |
 | `/etc/reading-companion/voice-relay.env` | **唯一存放密钥的文件**（root:voice-relay，640） |
 | `/etc/systemd/system/reading-companion-relay.service` | systemd 单元（install.sh 安装） |
 | `/etc/nginx/sites-available/reading-companion-relay.conf` | nginx 站点（dev=8080 / prod=443） |
@@ -142,6 +144,10 @@ sudo bash /tmp/voice-relay-<TS>/deploy/install.sh \
    Token:      <RELAY_DEVICE_TOKEN>
    ```
 
+   多台设备共用同一个 relay 时必须使用**不同的 Device ID**（例如
+   `reading-companion-001` / `reading-companion-002`）；飞鸽传书会按这些
+   ID 互相发现和寻址。
+
 3. 保存（设备侧 Voice Relay 开关默认开启）。设备端 MiMo 语音 key 与 OpenClaw 可留空——relay 同时取代两者。
 
 ## 4. 密钥与配置变更
@@ -162,12 +168,53 @@ sudo systemctl restart reading-companion-relay
 | 轮换设备 token | `RELAY_DEVICE_TOKEN=...`（或 `RELAY_DEVICE_TOKENS=device:token,...` 按设备区分） |
 | 词库学习数据位置 | `RELAY_LEARNING_DIR`（默认 `run/learning`；生产钉在 `$RELAY_ROOT/run/learning`，跨 release 持久，无需改 systemd unit） |
 | 番茄钟会话数据位置 | `RELAY_POMODORO_DIR`（默认 `run/pomodoro`；生产钉在 `$RELAY_ROOT/run/pomodoro`，同词库规则） |
+| 飞鸽传书消息库 | `RELAY_PIGEON_DIR`（默认 `run/pigeon`）；`PIGEON_MESSAGE_TTL_DAYS`（7）、`PIGEON_MAX_MESSAGES_PER_RECIPIENT`（100）、`PIGEON_MAX_TEXT_BYTES`（512）、`PIGEON_RATE_LIMIT_PER_MINUTE`（30）、`PIGEON_PRESENCE_TTL_SECONDS`（45） |
 
 字典数据随 release 发布（`DICT_SOURCE=local`），升级 release 即升级词库；改成 `DICT_SOURCE=llm` 可回退到模型生成卡片（可能有事实错误，不推荐）。
 
 词库学习数据（生词本、复习记录，SQLite）存放在 `RELAY_LEARNING_DIR`，位于 release 目录之外的 `run/` 树中：升级与回滚都不会动它；备份即拷走该目录下的 `learning.db*` 文件。
 
 番茄钟会话数据（专注/休息段记录，SQLite）存放在 `RELAY_POMODORO_DIR`，规则与词库完全一致；备份即拷走该目录下的 `pomodoro.db*` 文件。
+
+### 4.1 飞鸽传书（设备间消息）
+
+飞鸽传书消息存放在 `RELAY_PIGEON_DIR`（生产为
+`$RELAY_ROOT/run/pigeon/pigeon.db`，WAL 模式会同时有 `-wal` / `-shm`），
+和词库/番茄钟一样位于 release 目录之外，升级或回滚都不影响消息。备份时
+先停服或使用 SQLite 在线备份，再拷走 `pigeon.db*`；恢复时停服后放回原路径
+再启动：
+
+```bash
+sudo systemctl stop reading-companion-relay
+sudo cp -a /opt/reading-companion-relay/run/pigeon/pigeon.db* /path/to/backup/
+# 恢复：停服后把备份文件放回 run/pigeon/，再 start
+sudo systemctl start reading-companion-relay
+```
+
+- **设备注册**：每台设备通过 `POST /api/v1/pigeon/heartbeat` 注册，已注册设备
+  离线时仍可作为收件人；presence 在线状态只存在进程内，relay 重启后由下一次
+  heartbeat 自动恢复。管理员可在 `ALLOWED_DEVICE_IDS` 或
+  `RELAY_DEVICE_TOKENS` 中预置设备 ID，这样设备首次上线前就能被寻址。
+- **保留与清理**：发送时自动删除超过 `PIGEON_MESSAGE_TTL_DAYS` 的消息，
+  并只保留每个接收方最近 `PIGEON_MAX_MESSAGES_PER_RECIPIENT` 条。需要立即
+  清空某段会话时，在设备端进入会话按“清空聊天”（会删除双方消息），或调用：
+
+  ```bash
+  TOKEN=...   # 设备 token
+  curl -s -X POST \
+    -H "Authorization: Bearer $TOKEN" -H "X-Device-Id: reading-companion-001" \
+    "localhost:8080/api/v1/pigeon/clear?peer=reading-companion-002" | jq .
+  # {"ok":true,"deleted":N}
+  ```
+
+  这是**双向硬删除**，没有“只删本机”选项，也不会留下墓碑；操作前确认
+  对方也同意删除。
+- **限额**：正文最大 512 UTF-8 字节、每发送方 30 条/分钟、每接收方保留
+  100 条；超出时 `send` 返回 `text_too_long` / `rate_limited`，设备会显示
+  发送失败。调大上限前先确认设备端输入与显示能接受。
+- **监控**：`journalctl -u reading-companion-relay | grep pigeon` 可看到
+  heartbeat、send、auth rejected 与 rate limited 日志；`pigeon.db` 只含
+  消息元数据和正文，备份文件按敏感数据保管。
 
 ## 5. 升级
 
@@ -196,9 +243,16 @@ journalctl -u reading-companion-relay --since "5 min ago" | grep contracts   # �
 curl -s localhost:8000/healthz | jq .                 # 存活
 curl -s localhost:8000/readyz  | jq .                 # asr/llm/dict/t2i 配置状态
 curl -s localhost:8080/healthz | jq .                 # 经 nginx（dev）
+# 飞鸽传书能力键（需设备 token + X-Device-Id）
+curl -s -H "Authorization: Bearer $TOKEN" -H "X-Device-Id: reading-companion-001" \
+     localhost:8080/api/v1/device/config | jq '.features.pigeon'   # true
 ```
 
 - `/readyz` 里 `"dict": "local"` 才说明离线字典生效；`local_missing_data` 表示 release 缺 `dict-data/`。
+- 飞鸽传书联系人看不到对方：确认两台设备填了不同 Device ID、指向同一个 relay，
+  且都已成功 heartbeat；可直接查注册表：
+  `sudo python3 -c "import sqlite3;print(sqlite3.connect('/opt/reading-companion-relay/run/pigeon/pigeon.db').execute('select device_id,name,last_seen from devices').fetchall())"`。
+  看不到 `features.pigeon` 说明设备连到了旧 relay，重新部署即可。
 - Windows 日志：安装目录 `logs\voice-relay-service.out.log` / `.err.log`；管理页打不开时先 `.\voice-relay-service.exe status`。
 - 无硬件联调：`python tools/test_client.py --pcm speech.wav`（协议）；`--realtime` 走真实上游；4 设备压测 `tools/load_test.py --clients 4 --rounds 5`。
 - 设备连不上：先确认安全组 8080、nginx 站点已 enable、token 与 env 一致（`sudo grep RELAY_DEVICE_TOKEN /etc/reading-companion/voice-relay.env`）。
@@ -219,4 +273,7 @@ curl -s localhost:8080/healthz | jq .                 # 经 nginx（dev）
 - Windows 防火墙规则只对“专用网络”放行 8080/tcp；公网使用请加 Caddy/nginx 反代 wss://。
 - systemd 沙箱：`ProtectSystem=strict` + 仅放行 `logs/`、`run/` 两个写路径；`NoNewPrivileges`、`PrivateTmp`。
 - 设备认证靠 `Authorization: Bearer` + 可选 `ALLOWED_DEVICE_IDS` 白名单；空 token 配置拒绝启动。
+- 飞鸽传书正文以明文存放在 `run/pigeon/pigeon.db`（仅服务器磁盘，不经云端）；
+  备份、快照和磁盘镜像同样包含这些内容，按敏感数据管理。清空接口只删除
+  消息，不删除设备注册表。
 - 结构化日志带脱敏过滤，API key 不可能被打印。

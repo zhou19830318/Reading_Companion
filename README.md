@@ -14,6 +14,7 @@ CrossPoint 是开源电子书阅读器固件——社区共建、完全可折腾
 - **ESP32-C61 支持** —— 新增 `onepage` PlatformIO 环境与板卡定义、内嵌板卡 SDK（`open-onepage-sdk`，非子模块）、核心与 HAL 各处的 `#ifdef ONEPAGE_C61` 保护。
 - **简体与繁体中文界面** —— 新增 i18n 翻译与 SD 卡 CJK 字体回退。
 - **AI 语音助手** —— 按住说话、对接自建网关的智能体对话：语音经内置 **VoiceRelay** 服务器流转，智能体对话走 **OpenClaw**。设备端聊天历史、设备审批流程与云端 API 密钥只存放在你自己的服务器上。
+- **飞鸽传书** —— 两台 OnePage 通过同一个自建 relay 互发消息：在线实时收取、离线存储转发；支持语音转文字直达发送、键盘输入、按“当天 / 昨天 / 日期”显示消息时间，以及一键清空双方会话。消息由 relay 保存，默认保留 7 天 / 每接收方 100 条。
 - **AI 生图** —— 设备端文生图：生成、浏览设备端历史画廊、删除图片、或设为书籍封面——由 relay 的 t2i 提供方驱动。
 - **离线词典查询** —— 不离开书籍即可查词，由 relay 的离线词典卡（`relay/dict-data/`，无云端调用）提供。
 - **自建 VoiceRelay 服务器** —— 仓库自带 FastAPI 服务（`relay/`）：实时语音识别、流式 LLM 与图片生成统一在一个 API 之下，附 systemd/nginx 部署脚本、测试与离线词典数据。
@@ -55,7 +56,7 @@ CrossPoint 是开源电子书阅读器固件——社区共建、完全可折腾
 
 - **个性化**：多套主题（Classic、Lyra、Lyra Extended、RoundedRaff）、睡眠屏幕模式、前 / 侧键重映射、状态栏控制、电源键行为、刷新节奏等。
 
-- **AI 工具**：语音助手、带设备端历史的文生图、阅读内词典查询与预设提问快捷方式——全部由自建的 [VoiceRelay](./relay/README.md) / OpenClaw 网关支撑。
+- **AI 工具**：语音助手、带设备端历史的文生图、阅读内词典查询与预设提问快捷方式，以及设备间 **飞鸽传书**——全部由自建的 [VoiceRelay](./relay/README.md) / OpenClaw 网关支撑。
 
 - **本地化**：28 种界面语言（含简体与繁体中文），支持 RTL（希伯来语）。Web 界面单独双语（中文 / EN），不依赖设备语言。
 
@@ -184,6 +185,28 @@ esptool.py --chip esp32c3 --port /dev/ttyACM0 --baud 921600 write_flash 0x10000 
 
 ---
 
+## 飞鸽传书（设备间消息）
+
+两台（或多台）OnePage 共用同一个 [VoiceRelay](./relay/README.md)，即可通过它的
+`/api/v1/pigeon/` API 互发消息；不依赖 OpenClaw，也不依赖云端消息服务。
+
+**准备**
+
+1. 按 [部署手册](./relay/DEPLOY.md) 安装或升级 relay；设备与 relay 之间的 token 沿用 VoiceRelay 配置。
+2. 每台设备在 Web UI 的 **Voice Relay** 卡片填写相同的 Relay URL 和 Token，但 **Device ID 必须不同**（例如 `reading-companion-001` / `reading-companion-002`）；Device ID 同时作为联系人显示名。
+3. 两台设备都进入一次 **飞鸽传书**，让 relay 通过 heartbeat 完成设备注册。已注册的设备离线时仍会出现在联系人列表中，消息会保留到对方下次上线。
+
+**使用**
+
+- 首页 → **飞鸽传书** → 选择联系人。
+- `Confirm`：按住说话，松开后先做语音识别，识别成功即直接发送。
+- `Left`：键盘输入。
+- `Up` / `Down`：滚动消息。
+- `Right`：清空当前会话；会同时删除双方设备上的消息，需二次确认且不可恢复。
+- 设备不保存长期聊天记录；打开会话时从 relay 拉取历史，打开期间每秒轮询新消息。relay 默认保留 7 天、每接收方最多 100 条，可用 `PIGEON_MESSAGE_TTL_DAYS` / `PIGEON_MAX_MESSAGES_PER_RECIPIENT` 调整（见 [relay/README.md](./relay/README.md)）。
+
+---
+
 ## 文档
 
 完整索引：[docs/README.md](./docs/README.md)。
@@ -309,11 +332,12 @@ Windows 上可能需要少量调整。
 | `lib/hal` | 硬件抽象 —— `HalDisplay` / `HalGPIO` / `HalStorage`；**所有** SD 访问都经由 `HalStorage`（SdFat 非线程安全） |
 | `lib/EpdFont`、`lib/I18n`、`lib/Logging`、`lib/Memory` | 字体、翻译、日志、分配辅助（`makeUniqueNoThrow`、PSRAM 分配器） |
 | `lib/OpenClaw`、`lib/VoiceRelay`、`lib/voice`、`lib/NetBootstrap`、`lib/OpdsParser` | 语音助手与 AI 客户端（OpenClaw 智能体对话、VoiceRelay 语音 / 对话 / 图片协议、STT）、网关与网络辅助 |
+| `lib/Pigeon`、`src/activities/pigeon/` | 飞鸽传书：relay HTTP 客户端、设备列表、会话界面、语音 / 键盘发送、按时间显示与双向清空 |
 | `open-onepage-sdk/` | 内嵌的 OnePage C61 板卡 SDK（EInkDisplay、InputManager、BatteryMonitor、SDCardManager）—— 非子模块，经 `platformio.ini` 的 `symlink://` 条目接入 |
 | `boards/`、`partitions.csv`、`sdkconfig.onepage` | C61 目标的 PlatformIO 板卡定义与 flash / PSRAM 配置 |
 | `scripts/` | 构建辅助 —— `build_html.py`、`sync_web_core.py`、`gen_i18n.py`、`debugging_monitor.py` |
 | `src/network/html/` | Web 界面源页面；`*.generated.h` 产物已 gitignore，每次构建重新生成 |
-| `relay/` | 自建 **VoiceRelay** FastAPI 服务器 —— 实时 ASR、流式 LLM、图片生成（`relay/relay/`）、离线词典数据（`dict-data/`）、部署脚本与测试 |
+| `relay/` | 自建 **VoiceRelay** FastAPI 服务器 —— 实时 ASR、流式 LLM、图片生成、飞鸽传书消息存储（`relay/relay/`）、离线词典数据（`dict-data/`）、部署脚本与测试 |
 | `docs/` | 完整文档索引（[docs/README.md](./docs/README.md)） |
 | `test/`、`simulator/` | 可在主机运行的单元测试与 WASM/Arduino 主机模拟器 |
 

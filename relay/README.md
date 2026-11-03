@@ -22,7 +22,10 @@ device ──WS /api/v1/voice/stream──▶ relay ── WSS ──▶ DashSco
 - 中继 → 设备：`session.started`、`asr.partial`、`asr.final`、`llm.start`、
   `llm.delta`、`llm.final`、`session.done`、`error`
   （错误码：`BAD_PROTOCOL`、`UNAUTHORIZED`、`SERVER_OVERLOADED`、
-  `ASR_CONNECTION_ERROR`、`ASR_AUTH_ERROR`、`ASR_RATE_LIMITED`……）。
+  `ASR_CONNECTION_ERROR`、`ASR_AUTH_ERROR`、`ASR_RATE_LIMITED`、
+  `ASR_NO_SPEECH`、`ASR_QUOTA_EXHAUSTED`……）。
+- `session.start` 的 `mode` 可选 `relay`（默认，ASR + LLM）或 `dictation`
+  （只返回 ASR transcript）；飞鸽传书的语音输入使用 `dictation`。
 - 带内错误不会关闭连接；协议/认证违规才会关闭。
 - 握手请求头：`Authorization: Bearer <token>`、`X-Device-Id`、
   `X-Voice-Protocol: 1`。
@@ -32,10 +35,11 @@ device ──WS /api/v1/voice/stream──▶ relay ── WSS ──▶ DashSco
 ## 认证（文档 17.5 节）
 
 `RELAY_DEVICE_TOKEN` 是共享 token；`RELAY_DEVICE_TOKENS` 可按
-`deviceId:token,...` 的形式为各设备固定专属 token（设备级条目优先于共享
-token）。`ALLOWED_DEVICE_IDS` 可选地对设备 id 做白名单。配置为空时
-拒绝以开放模式运行。`RELAY_ADMIN_TOKEN` 启用仅管理员可用的
-`POST /api/v1/chat` 文本调试接口。
+`deviceId:token,...` 的形式为各设备固定专属 token。**一旦配置了设备映射，
+它就成为唯一认证来源**：只有映射中的 Device ID 能通过，共享 token 不再为
+未知 ID 兜底（共享 token 仅用于没有映射的部署）。`ALLOWED_DEVICE_IDS`
+可再对设备 id 做白名单。两者都为空时拒绝以开放模式运行。
+`RELAY_ADMIN_TOKEN` 启用仅管理员可用的 `POST /api/v1/chat` 文本调试接口。
 
 ## 多台 onepage 设备（多设备设计）
 
@@ -252,6 +256,64 @@ curl -s -H "Authorization: Bearer $TOKEN" -H "X-Device-Id: reading-companion-001
      localhost:8080/api/v1/pomodoro/sessions | jq .   # 经 nginx 验证代理
 curl -s -H "Authorization: Bearer $TOKEN" -H "X-Device-Id: reading-companion-001" \
      "localhost:8080/api/v1/pomodoro/stats?days=30" | jq .
+```
+
+## 飞鸽传书 API（/api/v1/pigeon/）
+
+设备间消息的数据面：持久化存储转发 + 进程内在线状态。设备和其它数据端点
+使用同一套 token 认证（`Authorization: Bearer` + `X-Device-Id`）；
+**nginx 必须代理 `/api/v1/pigeon/`**——dev/prod 两份 conf 均已包含。
+消息不经过 DashScope，也不依赖 OpenClaw。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/v1/pigeon/heartbeat` | 注册/刷新设备 `{"name":"书房"}` → `{ok,self,devices,unread}`；`devices` 同时给出在线/离线联系人与 `online` 标记 |
+| POST | `/api/v1/pigeon/send` | `{"to":"reading-companion-002","text":"...","clientEventId":"..."}` → `{ok,message,duplicate}`；同一 `clientEventId` 重试幂等 |
+| GET | `/api/v1/pigeon/inbox?after=<id>&limit=50` | 拉取 `id > after` 的未读/新消息 → `{messages,unread,latestId}`；`limit` 1-100 |
+| POST | `/api/v1/pigeon/ack` | `{"ids":[1,2]}` 或 `{"upToId":42}` → `{ok,acked}`；标记已读，`upToId` 同时覆盖更早消息 |
+| GET | `/api/v1/pigeon/history?peer=<id>&limit=50` | 双向会话历史（按 id 升序）→ `{peer,messages}`；`limit` 1-100 |
+| POST | `/api/v1/pigeon/clear?peer=<id>` | **双向硬删除**该会话 → `{ok,deleted}`；无墓碑，双方设备都会失去这些消息 |
+
+- **设备注册**：每次 heartbeat 写入 `devices` 表并刷新进程内 presence；
+  presence TTL 默认 45 秒（`PIGEON_PRESENCE_TTL_SECONDS`），relay 重启后清空，
+  设备下次 heartbeat 自动恢复。已注册设备即使离线也可被选为收件人，
+  消息留到对方上线；`ALLOWED_DEVICE_IDS` / `RELAY_DEVICE_TOKENS` 中预置的
+  id 无需先上线即可寻址。
+- **收发限制**：正文 UTF-8 最多 512 字节（`PIGEON_MAX_TEXT_BYTES`）；
+  每个发送方 30 条/分钟（`PIGEON_RATE_LIMIT_PER_MINUTE`，超限 429
+  `rate_limited`）；空文本、发给自己、未注册收件人、`clientEventId` 超过
+  80 字符均返回 400/404。
+- **保留**：发送时清理超过 `PIGEON_MESSAGE_TTL_DAYS`（默认 7 天）的消息，
+  并只保留每个接收方最近 `PIGEON_MAX_MESSAGES_PER_RECIPIENT`（默认 100）条。
+  设备端不保存长期聊天记录，打开会话时以 `/history` 为准。
+- **清空语义**：`clear` 删除双方之间全部消息，没有“仅本机删除”选项；
+  设备端确认框会明确提示双方都会删除。清空后 relay 不再返回旧消息，
+  对方下次进入会话也会看到空历史。
+- **数据文件**：`pigeon.db`（SQLite + WAL）位于 `RELAY_PIGEON_DIR`，
+  默认 `run/pigeon/`；运维备份/清理见 [DEPLOY.md](./DEPLOY.md)。
+- **日志**（journalctl -u reading-companion-relay）：`pigeon heartbeat`
+  （deviceId/deviceName）、`pigeon send`（to/messageId/duplicate/bytes）、
+  `pigeon auth rejected`（401/403 原因，WARNING）、`pigeon send rate limited`
+  （WARNING）。
+- **能力键**：`GET /api/v1/device/config` → `features.pigeon`。固件据此
+  显示飞鸽传书入口；旧 relay 无此键时入口隐藏。
+
+```bash
+TOKEN=...
+AUTH=(-H "Authorization: Bearer $TOKEN" -H "X-Device-Id: reading-companion-001")
+
+curl -s "${AUTH[@]}" -H 'Content-Type: application/json' \
+     -d '{"name":"书房"}' localhost:8080/api/v1/pigeon/heartbeat | jq .
+
+curl -s "${AUTH[@]}" -H 'Content-Type: application/json' \
+     -d '{"to":"reading-companion-002","text":"在吗？","clientEventId":"demo-1"}' \
+     localhost:8080/api/v1/pigeon/send | jq .
+
+curl -s "${AUTH[@]}" \
+     'localhost:8080/api/v1/pigeon/history?peer=reading-companion-002' | jq .
+
+curl -s -X POST "${AUTH[@]}" \
+     'localhost:8080/api/v1/pigeon/clear?peer=reading-companion-002' | jq .
 ```
 
 ## 部署与回滚
