@@ -157,9 +157,9 @@ void VoiceActivity::onEnter() {
   //
   // Bring the network up first when it is down: without it, the STT upload
   // and the chat.send both fail at the moment the user presses Confirm, long
-  // after the screen said it was ready. WifiSelectionActivity tries the last
-  // known network on entry (autoConnect defaults to true) and only falls back
-  // to the scan list, so the usual case is one automatic connect, not a detour.
+  // after the screen said it was ready. WifiSelectionActivity scans on entry
+  // (autoConnect defaults to true) and connects the saved network with the
+  // strongest signal, so the usual case is one automatic connect, not a detour.
   if (WiFi.status() != WL_CONNECTED) {
     LOG_INF("VOICE", "no network, opening Wi-Fi selection");
     startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),

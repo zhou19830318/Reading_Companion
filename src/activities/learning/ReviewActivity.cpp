@@ -40,7 +40,7 @@ void ReviewActivity::onEnter() {
   // The radio may have powered itself down (WifiIdleManager, 60 s of quiet):
   // the offline branch in loadQueue() never reconnects, so a configured relay
   // would stay unreachable for the whole session. Offer the picker the way
-  // Voice/WordCard do; WifiSelection auto-connects the last known network and
+  // Voice/WordCard do; WifiSelection auto-connects the strongest saved network and
   // the LoadingQueue branch runs loadQueue() once the result lands.
   // started_ guards the one loop() that may run before the push is processed.
   if (state_ != State::Failed && relayConfigured_ && WiFi.status() != WL_CONNECTED) {

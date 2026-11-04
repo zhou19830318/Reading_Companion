@@ -662,7 +662,7 @@ void WorkbenchActivity::onEnter() {
   session_.setNotifier(this, &WorkbenchActivity::onSessionNotifyTrampoline);
   // Page-open sync (D1: 6 h cache / 开页同步 / no polling). With the radio off
   // this page now brings it up itself: requestSync() detours through
-  // WifiSelectionActivity (auto-connects the saved network, then resumes the
+  // WifiSelectionActivity (auto-connects the strongest saved network, then resumes the
   // round), so the cards fill in on a cold boot instead of only after some
   // other page — Voice — happened to raise the radio first. The OK key re-arms
   // the same round at any time.
@@ -770,7 +770,7 @@ void WorkbenchActivity::requestSync() {
   if (netUp) ensureGatewayLink();
   if (sync_ != Sync::Idle) return;  // one round at a time
   if (!netUp) {
-    // Same detour Voice takes: WifiSelectionActivity auto-connects the saved
+    // Same detour Voice takes: WifiSelectionActivity auto-connects the strongest saved
     // network on entry and the round resumes from the result callback.
     LOG_INF("WBA", "no network, opening Wi-Fi selection for weather sync");
     startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),

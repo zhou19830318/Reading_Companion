@@ -22,7 +22,7 @@ struct WifiNetworkInfo {
 
 // WiFi selection states
 enum class WifiSelectionState {
-  AUTO_CONNECTING,    // Trying to connect to the last known network
+  AUTO_CONNECTING,    // Trying a saved network selected from a scan
   SCANNING,           // Scanning for networks
   NETWORK_LIST,       // Displaying available networks
   PASSWORD_ENTRY,     // Entering password for selected network
@@ -80,21 +80,20 @@ class WifiSelectionActivity final : public Activity {
 
   // Connection timeout
   static constexpr unsigned long CONNECTION_TIMEOUT_MS = 15000;
-  // Fallback candidates get a shorter leash: the first attempt is the network
-  // the user actually used last, while these are "maybe it is in range" guesses,
-  // and waiting 15 s x 8 stored credentials would look like a hang.
+  // Only the first auto-selected network gets the full timeout. Later
+  // candidates are weaker guesses, and waiting 15 s x 8 stored credentials
+  // would look like a hang.
   static constexpr unsigned long FALLBACK_TIMEOUT_MS = 8000;
   unsigned long connectionStartTime = 0;
   unsigned long connectionTimeoutMs = CONNECTION_TIMEOUT_MS;
 
-  // Fallback walk over the other saved networks. The initial auto-connect only
-  // ever tries the last-used SSID; when that fails we scan once, then step
-  // forward through the sorted list (saved first, strongest signal first)
-  // instead of reporting failure while a usable credential sits in the store.
-  // The cursor only ever moves forward, so no network is tried twice and the
-  // scan runs once for the whole walk — no per-candidate rescan cost.
+  // Auto-connect walk. On entry we scan once, then step forward through the
+  // saved networks in the scan results (strongest signal first). The cursor
+  // only ever moves forward, so no network is tried twice and the scan runs
+  // once for the whole walk — no per-candidate rescan cost.
   bool autoCandidateMode = false;
   size_t autoCandidateCursor = 0;
+  bool autoAttempted = false;
 
   void renderNetworkList(const Rect* screen, const ThemeMetrics* metrics) const;
   void renderPasswordEntry(const Rect* screen, const ThemeMetrics* metrics) const;
@@ -110,6 +109,7 @@ class WifiSelectionActivity final : public Activity {
   void attemptConnection(unsigned long timeoutMs = CONNECTION_TIMEOUT_MS);
   void checkConnectionStatus();
   bool tryNextAutoCandidate();
+  bool tryLastConnectedCandidate();
   std::string getSignalStrengthIndicator(int32_t rssi) const;
 
   void onComplete(bool connected);
