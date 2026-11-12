@@ -38,7 +38,8 @@ device ──WS /api/v1/voice/stream──▶ relay ── WSS ──▶ DashSco
 `deviceId:token,...` 的形式为各设备固定专属 token。**一旦配置了设备映射，
 它就成为唯一认证来源**：只有映射中的 Device ID 能通过，共享 token 不再为
 未知 ID 兜底（共享 token 仅用于没有映射的部署）。`ALLOWED_DEVICE_IDS`
-可再对设备 id 做白名单。两者都为空时拒绝以开放模式运行。
+可再对设备 id 做白名单。两者都为空时拒绝以开放模式运行。使用
+`/admin/devices` 后，非空注册表优先于此处的环境变量规则（见“服务端设备管理”）。
 `RELAY_ADMIN_TOKEN` 启用仅管理员可用的 `POST /api/v1/chat` 文本调试接口。
 
 ## 多台 onepage 设备（多设备设计）
@@ -315,6 +316,105 @@ curl -s "${AUTH[@]}" \
 curl -s -X POST "${AUTH[@]}" \
      'localhost:8080/api/v1/pigeon/clear?peer=reading-companion-002' | jq .
 ```
+
+## 服务端设备管理（/admin/devices）
+
+relay 可以作为设备配置的单一来源：在 `/admin` 的“设备管理”中新增设备，保存
+Device ID、Relay URL、Token 和可选的微信读书 Key。设备仍用现有的
+`CloudConfig`（Relay URL / Token / Device ID）做首次认证，之后访问
+`/api/v1/device/config` 拉取更新；固件只在值变化时写 NVS。
+
+- 设备注册表在 `RELAY_DEVICE_DIR/devices.json`（默认 `run/devices`，0600），
+  生产安装脚本会放在 `/opt/reading-companion-relay/run/devices`。
+- **注册表一旦非空即成为设备鉴权权威**：未登记的 Device ID 会被拒绝，环境变量
+  `RELAY_DEVICE_TOKEN(S)` / `ALLOWED_DEVICE_IDS` 不再用于这些设备。迁移前先把
+  所有现有设备加入 `/admin/devices`。
+- 修改 Token 后旧 Token 保留 15 分钟，设备可在过渡期内拉取新 Token。
+- 每台设备可有独立微信读书 Key；未配置时回退到默认 Key。管理页不返回 Key，
+  只显示“已配置/未配置”。
+- 设备配置接口返回的 `relay.url` / `relay.deviceId` / `relay.token` 为空表示
+  “保留 NVS 原值”。
+
+```bash
+# 查看设备（仅本机 / 或带 X-Admin-Token）
+curl -s localhost:8080/admin/devices | jq .
+# 新增或更新（新增留空 token 会自动生成）
+curl -s -X POST localhost:8080/admin/devices \
+  -H 'Content-Type: application/json' \
+  -d '{"deviceId":"onepage-001","name":"客厅","relayUrl":"ws://host:8080/api/v1/voice/stream"}'
+# 拉取设备配置（示例 Token 以管理页实际值为准）
+curl -s localhost:8080/api/v1/device/config \
+  -H 'Authorization: Bearer <device-token>' -H 'X-Device-Id: onepage-001' | jq .
+```
+
+## 微信读书只读伴侣（/api/v1/weread/）
+
+设备侧不会接触官方 `wrk-` Key：relay 在服务端调用微信读书 Skill API，只返回
+压缩后的书架、进度和统计。Key 的配置顺序：
+
+1. `/admin/devices` 中该设备的专属 Key（最高优先级）；
+2. `/admin` 网页保存的默认 `<RELAY_WEREAD_DIR>/api_key`（0600，立即生效）；
+3. 项目根目录下名为 `微信读书key` 的文件；
+4. 环境变量 `WEREAD_API_KEY`。
+
+Key 必须形如 `wrk-...`，且只有只读权限；进度、笔记均不回写。接口需要设备
+鉴权（`Authorization: Bearer <device-token>` + `X-Device-Id`）：
+
+```bash
+AUTH=(-H "Authorization: Bearer <device-token>" -H "X-Device-Id: reading-companion-001")
+curl -s "${AUTH[@]}" 'localhost:8080/api/v1/weread/status' | jq .
+curl -s "${AUTH[@]}" 'localhost:8080/api/v1/weread/shelf?limit=12' | jq .
+curl -s "${AUTH[@]}" 'localhost:8080/api/v1/weread/book?bookId=33500935' | jq .
+curl -s "${AUTH[@]}" 'localhost:8080/api/v1/weread/stats?mode=overall' | jq .
+```
+
+nginx 必须代理 `/api/v1/weread/`——dev/prod 两份 conf 均已包含。设备端入口：
+Home > 微信读书（Settings 中也保留入口）。若 relay 没有配置 Key，会返回
+409 `not_configured`；官方 Key 失效会返回 502 `weread_auth`。
+
+## 行情快照 API（/api/v1/markets/）
+
+设备端 Home > 行情 展示 A 股/港股/美股指数与大宗商品，并可按代码查询个股。
+relay 只做只读代理和短期缓存，不下单、不生成价格。数据源：A 股/港股走腾讯
+（`web.ifzq.gtimg.cn`，分时与不复权日线），商品与美股 1mo/1y 优先走 Yahoo
+（`query1.finance.yahoo.com`）。美股指数 1d 分时优先走 CNBC
+`ts-api.cnbc.com/harmony/app/charts/1D.json`（gzip 压缩，含最近两个交易日
+04:00–20:00 的 1 分钟线；relay 只保留 09:30–16:00 常规时段，解析结果缓存
+5 分钟，时间戳按 `America/New_York` 解析）。Yahoo 不可达时（例如中国大陆网络）
+自动回退：美股 1d 再试东方财富 `push2his.eastmoney.com/api/qt/stock/trends2/get`
+（公开 `ut` 令牌，需带 `Referer: https://quote.eastmoney.com/` 与浏览器
+`User-Agent`——东方财富会对脚本化的 UA 直接断连；指数 secid
+`100.SPX`/`100.NDX`/`100.DJIA`，个股先试 `105.<ticker>` 再试 `106.<ticker>`，
+服务端按 `Asia/Shanghai` 解析时间戳；其边缘节点会无响应地掐断云主机出口 IP，
+因此只作兜底），失败再退腾讯 `qt.gtimg.cn` 的当日
+末点；美股指数 1mo/1y 走腾讯 `web.ifzq.gtimg.cn`，个股 1mo/1y 走新浪
+`US_MinKService.getDailyK`，商品走新浪 `hq.sinajs.cn`/`GlobalFuturesService`。
+每张卡片都带 `source`（`cnbc`/`yahoo`/`tencent`/`sina`/`eastmoney`），如实反映
+本次取数的上游。若上述上游同时不可达且美股休市，美股
+1d 卡片可能只剩腾讯的单个末点；其余周期不受影响。公开行情不保证实时，所有
+卡片都标记为延时。
+
+接口需要设备鉴权（`Authorization: Bearer <device-token>` + `X-Device-Id`）：
+
+| GET | 说明 |
+|---|---|
+| `/api/v1/markets/board?group=cn\|hk\|us\|commodity` | 固定看板，返回该组最多 4 张卡片；每张含 `price/change/changePct/previousClose/high/low/asOf/points` |
+| `/api/v1/markets/chart?instrument=sse&period=1d\|1mo\|1y` | 指数/商品的单张卡片与曲线（1d 用分时，1mo/1y 用日线，点数压缩到 ≤96） |
+| `/api/v1/markets/lookup?code=600519&period=1d` | 按代码查个股：`600519`/`SH600519`、`00700`/`HK00700`、`AAPL`/`US.AAPL`；也支持 `BRK.B` |
+
+```bash
+AUTH=(-H "Authorization: Bearer <device-token>" -H "X-Device-Id: reading-companion-001")
+curl -s "${AUTH[@]}" 'localhost:8080/api/v1/markets/board?group=cn' | jq .
+curl -s "${AUTH[@]}" 'localhost:8080/api/v1/markets/chart?instrument=gold&period=1y' | jq .
+curl -s "${AUTH[@]}" 'localhost:8080/api/v1/markets/lookup?code=600519' | jq .
+```
+
+**nginx 必须代理 `/api/v1/markets/`**——dev/prod 两份 conf 均已包含，部署后可用
+`localhost:8080/...` 冒烟。缓存：1d 报价默认 60 秒（`MARKET_QUOTE_TTL_S`），
+1mo/1y 曲线 15 分钟（`MARKET_CHART_TTL_S`）；上游失败时回退最近缓存并标记
+`stale`，最长保留 24 小时（`MARKET_STALE_S`）。上游限流返回
+`rate_limited`，不可用返回 `upstream_unavailable`，非法代码/组/周期返回 400。
+行情仅供参考，请勿用于交易。
 
 ## 部署与回滚
 

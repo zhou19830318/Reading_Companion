@@ -31,7 +31,19 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field
 
 from . import SERVICE_NAME, __version__
-from . import admin_page, dict_source, learning_store, metrics, pigeon_store, pomodoro_store, protocol, t2i
+from . import (
+    admin_page,
+    device_store,
+    dict_source,
+    learning_store,
+    markets,
+    metrics,
+    pigeon_store,
+    pomodoro_store,
+    protocol,
+    t2i,
+    weread,
+)
 from .auth import check_admin, check_device
 from .config import Settings, get_settings
 from .logging_setup import setup_logging
@@ -92,6 +104,26 @@ async def lifespan(app: FastAPI):
     app.state.pigeon_presence = pigeon_store.PigeonPresence(settings.pigeon_presence_ttl_seconds)
     app.state.pigeon_rate = {}
     log.info("pigeon store ready", extra={"db": str(pigeon.db_path)})
+    # Server-managed device registry. Environment tokens remain the fallback
+    # for an unmanaged deployment; once devices.json has entries it is
+    # authoritative for device URL/token and per-device WeRead keys.
+    app.state.devices = device_store.make_store(settings)
+    log.info(
+        "device registry ready",
+        extra={"path": str(app.state.devices.path), "devices": len(app.state.devices.ids())},
+    )
+    # WeRead: server-side key + short-lived shelf/progress caches. No database
+    # and no writes to the reading account; the official Skill API is read-only.
+    app.state.weread = weread.WeReadStore(settings, app.state.devices)
+    log.info(
+        "weread bridge ready",
+        extra={
+            "configured": app.state.weread.configured,
+            "source": app.state.weread.source(),
+            "skill_version": settings.weread_skill_version,
+        },
+    )
+    app.state.markets = markets.MarketStore(settings)
     yield
     # Graceful shutdown: stop accepting, cancel upstream work in bounded time.
     sessions: set[VoiceSession] = app.state.sessions
@@ -130,13 +162,16 @@ async def readyz():
 async def device_config(request: Request):
     settings = get_settings()
     try:
-        check_device(
+        device_id = check_device(
             settings,
             request.headers.get("authorization"),
             request.headers.get("x-device-id"),
+            request.app.state.devices,
         )
     except ProtocolError as exc:
         return JSONResponse(status_code=401 if exc.code == ErrorCode.UNAUTHORIZED else 403, content={"error": exc.code.value})
+    device = request.app.state.devices.config_for(device_id) or {}
+    relay_url = device.get("relayUrl") or settings.relay_public_url.strip()
     return {
         "protocolVersion": protocol.PROTOCOL_VERSION,
         "audio": {
@@ -148,6 +183,14 @@ async def device_config(request: Request):
         "limits": {
             "maxAudioSeconds": settings.max_audio_seconds,
             "maxReplyChars": settings.max_reply_chars,
+        },
+        "relay": {
+            # Empty fields mean "keep the value already in the reader's NVS".
+            # The token is returned so a server-side rotation can be picked up
+            # by the same authenticated config pull.
+            "url": relay_url,
+            "deviceId": device_id,
+            "token": device.get("token", ""),
         },
         "features": {
             "partialAsr": settings.asr_provider == "mock" or True,
@@ -163,8 +206,111 @@ async def device_config(request: Request):
             "pomodoro": True,
             # Pigeon device-to-device messages (store-and-forward + presence).
             "pigeon": True,
+            "markets": True,
         },
     }
+
+
+def _device_or_error(request: Request) -> tuple[str | None, JSONResponse | None]:
+    settings = get_settings()
+    try:
+        device_id = check_device(
+            settings,
+            request.headers.get("authorization"),
+            request.headers.get("x-device-id"),
+            request.app.state.devices,
+        )
+    except ProtocolError as exc:
+        code = 401 if exc.code == ErrorCode.UNAUTHORIZED else 403
+        return None, JSONResponse(status_code=code, content={"ok": False, "error": exc.code.value})
+    return device_id, None
+
+
+@app.get("/api/v1/markets/board")
+async def market_board(request: Request, group: str = "cn"):
+    _, error = _device_or_error(request)
+    if error is not None:
+        return error
+    try:
+        return JSONResponse(content=await request.app.state.markets.board(group),
+                            headers={"Cache-Control": "no-store"})
+    except markets.MarketError as exc:
+        return JSONResponse(status_code=exc.status, content={"ok": False, "error": exc.code})
+
+
+@app.get("/api/v1/markets/chart")
+async def market_chart(request: Request, instrument: str = "sse", period: str = "1d"):
+    _, error = _device_or_error(request)
+    if error is not None:
+        return error
+    try:
+        card = await request.app.state.markets.get(instrument, period)
+        return JSONResponse(content={"ok": True, "card": card}, headers={"Cache-Control": "no-store"})
+    except markets.MarketError as exc:
+        return JSONResponse(status_code=exc.status, content={"ok": False, "error": exc.code})
+
+
+@app.get("/api/v1/markets/lookup")
+async def market_lookup(request: Request, code: str = "", period: str = "1d"):
+    _, error = _device_or_error(request)
+    if error is not None:
+        return error
+    try:
+        card = await request.app.state.markets.get(code, period, stock=True)
+        return JSONResponse(content={"ok": True, "card": card}, headers={"Cache-Control": "no-store"})
+    except markets.MarketError as exc:
+        return JSONResponse(status_code=exc.status, content={"ok": False, "error": exc.code})
+
+
+def _weread_or_error(exc: weread.WeReadError) -> JSONResponse:
+    if exc.detail:
+        log.warning("weread upstream error", extra={"code": exc.code, "detail": exc.detail})
+    return JSONResponse(status_code=exc.status_code, content={"ok": False, "error": exc.code})
+
+
+@app.get("/api/v1/weread/status")
+async def weread_status(request: Request):
+    device_id, error = _device_or_error(request)
+    if error is not None:
+        return error
+    return JSONResponse(content=request.app.state.weread.status(device_id))
+
+
+@app.get("/api/v1/weread/shelf")
+async def weread_shelf(request: Request, limit: int = 20, offset: int = 0, refresh: bool = False):
+    device_id, error = _device_or_error(request)
+    if error is not None:
+        return error
+    try:
+        return JSONResponse(
+            content=await request.app.state.weread.shelf(
+                limit=limit, offset=offset, force=refresh, device_id=device_id
+            )
+        )
+    except weread.WeReadError as exc:
+        return _weread_or_error(exc)
+
+
+@app.get("/api/v1/weread/book")
+async def weread_book(request: Request, bookId: str = ""):  # noqa: N803 - gateway spelling
+    device_id, error = _device_or_error(request)
+    if error is not None:
+        return error
+    try:
+        return JSONResponse(content=await request.app.state.weread.book(bookId, device_id=device_id))
+    except weread.WeReadError as exc:
+        return _weread_or_error(exc)
+
+
+@app.get("/api/v1/weread/stats")
+async def weread_stats(request: Request, mode: str = "overall"):
+    device_id, error = _device_or_error(request)
+    if error is not None:
+        return error
+    try:
+        return JSONResponse(content=await request.app.state.weread.stats(mode, device_id=device_id))
+    except weread.WeReadError as exc:
+        return _weread_or_error(exc)
 
 
 @app.get("/metrics")
@@ -197,6 +343,7 @@ async def voice_stream(websocket: WebSocket) -> None:
             settings,
             websocket.headers.get("authorization"),
             websocket.headers.get("x-device-id"),
+            websocket.app.state.devices,
         )
     except ProtocolError as exc:
         log.warning("ws auth rejected", extra={"code": exc.code.value, "detail": exc.detail})
@@ -400,7 +547,7 @@ def _text_endpoint_guard(settings: Settings, request: Request) -> JSONResponse |
     except ProtocolError:
         pass
     try:
-        check_device(settings, authorization, request.headers.get("x-device-id"))
+        check_device(settings, authorization, request.headers.get("x-device-id"), request.app.state.devices)
         return None
     except ProtocolError:
         return JSONResponse(status_code=401, content={"error": ErrorCode.UNAUTHORIZED.value})
@@ -624,7 +771,12 @@ def _data_device(settings: Settings, request: Request, feature: str) -> tuple[st
     Returns (device_id, None) on success or (None, error_response).
     """
     try:
-        device_id = check_device(settings, request.headers.get("authorization"), request.headers.get("x-device-id"))
+        device_id = check_device(
+            settings,
+            request.headers.get("authorization"),
+            request.headers.get("x-device-id"),
+            request.app.state.devices,
+        )
         return device_id, None
     except ProtocolError as exc:
         # nginx keeps the status code, but only this line tells the operator

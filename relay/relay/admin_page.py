@@ -96,12 +96,19 @@ def device_credentials(settings: Settings) -> tuple[str, str]:
     return (allowed[0] if allowed else DEFAULT_DEVICE_ID), ""
 
 
-def _status(settings: Settings) -> dict:
+def _status(settings: Settings, devices: list[dict] | None = None) -> dict:
     report = settings.ready_report()
     ready = report["asr"] == "configured" and report["llm"] == "configured"
     device_id, token = device_credentials(settings)
     lan_ips = _lan_ips()
     relay_url = settings.relay_public_url.strip()
+    # Once /admin/devices has rows the registry is authoritative; show the
+    # first managed device rather than the now-unused environment fallback.
+    if devices:
+        first = devices[0]
+        device_id = first.get("deviceId") or device_id
+        token = first.get("deviceToken") or ""
+        relay_url = first.get("relayUrl") or relay_url
     if not relay_url:
         host = lan_ips[0] if lan_ips else "<this-host-ip>"
         relay_url = f"ws://{host}:{settings.relay_port}/api/v1/voice/stream"
@@ -152,7 +159,15 @@ ADMIN_HTML = """<!doctype html>
   code { font:13px/1.6 ui-monospace, "Cascadia Mono", Consolas, monospace; word-break:break-all; flex:1; min-width:0; }
   button { font:13px inherit; padding:5px 12px; border-radius:8px; border:1px solid var(--line); background:transparent; color:var(--fg); cursor:pointer; }
   button:hover { border-color:var(--muted); }
+  input[type="password"], input[type="text"] { width:100%; margin-top:2px; padding:7px 10px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--fg); font:13px ui-monospace, "Cascadia Mono", Consolas, monospace; }
   .chips { display:flex; gap:8px; flex-wrap:wrap; }
+  .device { border-top:1px solid var(--line); padding:10px 0; }
+  .device:first-of-type { border-top:0; }
+  .device-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .device-id { font:600 13px ui-monospace, "Cascadia Mono", Consolas, monospace; word-break:break-all; }
+  .device-actions { margin-left:auto; display:flex; gap:6px; }
+  .device-meta { color:var(--muted); font-size:12px; margin-top:3px; word-break:break-all; }
+  .device-form-title { color:var(--muted); font-weight:400; margin-left:6px; }
   .chip { font-size:12px; padding:3px 9px; border-radius:999px; border:1px solid var(--line); }
   .chip.ok { color:var(--ok); border-color:var(--ok); }
   .chip.warn { color:var(--warn); border-color:var(--warn); }
@@ -172,7 +187,7 @@ ADMIN_HTML = """<!doctype html>
 </header>
 <main>
   <section class="card">
-    <h2>设备配置 <small>阅读器 Web UI → 设置 → Voice Relay</small></h2>
+    <h2>设备配置 <small>注册表非空时显示第一台受管设备，否则为环境变量回退</small></h2>
     <label>Relay URL</label>
     <div class="row"><code id="relayUrl">…</code><button data-copy="relayUrl">复制</button></div>
     <label>Device ID</label>
@@ -183,7 +198,48 @@ ADMIN_HTML = """<!doctype html>
       <button id="reveal" type="button">显示</button>
       <button data-copy="tokenValue" type="button">复制</button>
     </div>
-    <p class="hint">把以上三项填入阅读器的 Web UI 后保存；设备端 Voice Relay 开关默认开启。</p>
+    <p class="hint">首次使用可在下方“设备管理”新增设备；设备用现有 URL / Token / Device ID 认证后会拉取服务端配置。新增设备后，未登记的 Device ID 将不能访问 relay。</p>
+  </section>
+
+  <section class="card">
+    <h2>设备管理 <small>服务端保存 Relay URL / Token / Device ID / 微信读书 Key</small></h2>
+    <div id="deviceList"><p class="hint">加载中…</p></div>
+    <form id="deviceForm" autocomplete="off">
+      <h2 style="margin-top:16px">新增 / 编辑设备 <span class="device-form-title" id="deviceFormTitle"></span></h2>
+      <label for="device-id">Device ID</label>
+      <input type="text" id="device-id" placeholder="onepage-001" spellcheck="false">
+      <label for="device-name">名称（可选）</label>
+      <input type="text" id="device-name" placeholder="客厅阅读器" spellcheck="false">
+      <label for="device-url">Relay URL</label>
+      <input type="text" id="device-url" placeholder="ws://host:8080/api/v1/voice/stream" spellcheck="false">
+      <label for="device-token">Token（新增留空自动生成；编辑留空保持不变）</label>
+      <input type="text" id="device-token" spellcheck="false">
+      <label for="device-weread">微信读书 Key（留空保持不变）</label>
+      <input type="password" id="device-weread" placeholder="wrk-..." spellcheck="false">
+      <label style="display:flex;align-items:center;gap:8px;margin-top:10px">
+        <input type="checkbox" id="device-clear-weread" style="width:auto;margin:0"> 清除该设备的微信读书 Key
+      </label>
+      <div class="row" style="margin-top:10px">
+        <button id="deviceSave" type="submit">保存设备</button>
+        <button id="deviceNew" type="button">新增设备</button>
+      </div>
+      <p class="hint">设备先用现有的 URL / Token / Device ID 认证，之后可从 <code>/api/v1/device/config</code> 拉取这里的配置；Token 变更后有 15 分钟旧 Token 过渡期。</p>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>默认微信读书 Key <small>未绑定设备时使用</small></h2>
+    <div class="row">
+      <span id="wereadBadge" class="chip">读取中…</span>
+      <span id="wereadSource" class="hint"></span>
+    </div>
+    <label for="wereadKey">官方 Skill API Key</label>
+    <input type="password" id="wereadKey" placeholder="wrk-..." autocomplete="off" spellcheck="false">
+    <div class="row" style="margin-top:10px">
+      <button id="wereadSave" type="button">保存 Key</button>
+      <button id="wereadClear" type="button">清除本机 Key</button>
+    </div>
+    <p class="hint">在微信读书 Skill 页面获取 <code>wrk-</code> Key，粘贴到这里保存。Key 不会下发到阅读器；设备端只需配置上面的 Relay URL、Device ID 和 Token。只读，不会回写阅读进度。</p>
   </section>
 
   <section class="card">
@@ -209,6 +265,8 @@ ADMIN_HTML = """<!doctype html>
 <div id="toast"></div>
 <script>
 let tokenValue = "";
+const adminToken = new URLSearchParams(location.search).get("token") || "";
+const adminHeaders = adminToken ? { "X-Admin-Token": adminToken } : {};
 const $ = (id) => document.getElementById(id);
 function chip(cls, text) { const el = document.createElement("span"); el.className = "chip " + cls; el.textContent = text; return el; }
 function providerChip(name, value) {
@@ -220,9 +278,136 @@ async function copyText(text, label) {
   try { await navigator.clipboard.writeText(text); toast(label + " 已复制"); }
   catch (e) { const ta = document.createElement("textarea"); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove(); toast(label + " 已复制"); }
 }
+function escapeHtml(value) {
+  return String(value == null ? "" : value).replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+}
+let deviceRows = [];
+function deviceFormReset() {
+  for (const id of ["device-id", "device-name", "device-url", "device-token", "device-weread"]) $(id).value = "";
+  $("device-id").readOnly = false;
+  $("device-weread").placeholder = "wrk-...";
+  $("device-clear-weread").checked = false;
+  $("deviceFormTitle").textContent = "";
+}
+function deviceEdit(device) {
+  $("device-id").value = device.deviceId || "";
+  $("device-id").readOnly = true;
+  $("device-name").value = device.name || "";
+  $("device-url").value = device.relayUrl || "";
+  $("device-token").value = device.deviceToken || "";
+  $("device-weread").value = "";
+  $("device-weread").placeholder = device.hasWereadKey ? "已保存；留空保持不变" : "wrk-...";
+  $("device-clear-weread").checked = false;
+  $("deviceFormTitle").textContent = "· " + (device.deviceId || "");
+  $("deviceForm").scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+function renderDevices(devices) {
+  deviceRows = devices || [];
+  const root = $("deviceList");
+  root.replaceChildren();
+  if (!deviceRows.length) {
+    const hint = document.createElement("p");
+    hint.className = "hint";
+    hint.textContent = "还没有服务端设备，当前使用环境变量中的默认 Token。新增一台设备后，设备配置以本页为准。";
+    root.appendChild(hint);
+    return;
+  }
+  for (const device of deviceRows) {
+    const row = document.createElement("div");
+    row.className = "device";
+    const token = device.deviceToken ? "••••••••" : "(未配置)";
+    row.innerHTML =
+      '<div class="device-head"><span class="device-id">' + escapeHtml(device.deviceId) + "</span>" +
+      '<span class="chip ' + (device.hasWereadKey ? "ok" : "warn") + '">' + (device.hasWereadKey ? "微信读书已配置" : "微信读书未配置") + "</span>" +
+      '<span class="device-actions"><button type="button" data-device-action="edit">编辑</button><button type="button" data-device-action="delete">删除</button></span></div>' +
+      '<div class="device-meta">' + escapeHtml(device.name || "未命名") + " · Token " + token +
+      (device.relayUrl ? " · " + escapeHtml(device.relayUrl) : "") + "</div>";
+    row.querySelector('[data-device-action="edit"]').addEventListener("click", () => deviceEdit(device));
+    row.querySelector('[data-device-action="delete"]').addEventListener("click", () => deleteDevice(device.deviceId));
+    root.appendChild(row);
+  }
+}
+async function devicesRefresh() {
+  try {
+    const res = await fetch("/admin/devices", { cache: "no-store", headers: adminHeaders });
+    if (!res.ok) throw new Error(String(res.status));
+    const body = await res.json();
+    renderDevices(body.devices || []);
+  } catch (e) {
+    $("deviceList").innerHTML = '<p class="hint">设备列表读取失败</p>';
+  }
+}
+async function deleteDevice(deviceId) {
+  if (!confirm("删除设备 " + deviceId + "？删除后该设备不能再访问 relay。")) return;
+  const res = await fetch("/admin/devices?deviceId=" + encodeURIComponent(deviceId), { method: "DELETE", headers: adminHeaders });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || !body.ok) { toast(body.message || "删除失败"); return; }
+  toast("设备已删除");
+  deviceFormReset();
+  devicesRefresh();
+}
+async function saveDevice() {
+  const deviceId = $("device-id").value.trim();
+  if (!/^[A-Za-z0-9._-]{1,64}$/.test(deviceId)) { toast("Device ID 只能包含字母、数字、. _ -"); return; }
+  const body = {
+    deviceId,
+    name: $("device-name").value.trim(),
+    relayUrl: $("device-url").value.trim(),
+    deviceToken: $("device-token").value.trim(),
+    clearWeread: $("device-clear-weread").checked
+  };
+  if ($("device-weread").value.trim()) body.apiKey = $("device-weread").value.trim();
+  const res = await fetch("/admin/devices", {
+    method: "POST", headers: { ...adminHeaders, "Content-Type": "application/json" }, body: JSON.stringify(body)
+  });
+  const result = await res.json().catch(() => ({}));
+  if (!res.ok || !result.ok) { toast(result.message || "保存失败"); return; }
+  toast("设备已保存");
+  deviceFormReset();
+  devicesRefresh();
+  wereadRefresh();
+}
+async function wereadRefresh() {
+  try {
+    const res = await fetch("/admin/weread", { cache: "no-store", headers: adminHeaders });
+    if (!res.ok) throw new Error(String(res.status));
+    const s = await res.json();
+    $("wereadBadge").textContent = s.configured ? "已配置" : "未配置";
+    $("wereadBadge").className = "chip " + (s.configured ? "ok" : "warn");
+    const labels = { file: "网页保存", project_file: "项目根目录文件", env: "环境变量", device: "设备专属" };
+    const source = labels[s.source] || "未设置";
+    const updated = s.keyUpdatedAt ? new Date(s.keyUpdatedAt * 1000).toLocaleString() : "";
+    $("wereadSource").textContent = source + (updated ? " · " + updated : "") + " · Skill " + (s.skillVersion || "?");
+  } catch (e) {
+    $("wereadBadge").textContent = "无法读取";
+    $("wereadBadge").className = "chip bad";
+    $("wereadSource").textContent = "";
+  }
+}
+async function saveWereadKey() {
+  const key = $("wereadKey").value.trim();
+  if (!key) { toast("请先粘贴 API Key"); return; }
+  const res = await fetch("/admin/weread", {
+    method: "POST", headers: { ...adminHeaders, "Content-Type": "application/json" },
+    body: JSON.stringify({ apiKey: key })
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || !body.ok) { toast(body.message || "保存失败"); return; }
+  $("wereadKey").value = "";
+  toast("微信读书 Key 已保存");
+  wereadRefresh();
+}
+async function clearWereadKey() {
+  const res = await fetch("/admin/weread", { method: "DELETE", headers: adminHeaders });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || !body.ok) { toast(body.message || "清除失败"); return; }
+  const src = body.source === "project_file" ? "项目根目录文件" : (body.source === "env" ? "环境变量" : "");
+  toast(body.configured ? ("已清除网页 Key，仍在用" + src) : "微信读书 Key 已清除");
+  wereadRefresh();
+}
 async function refresh() {
   try {
-    const res = await fetch("/admin/status", { cache: "no-store" });
+    const res = await fetch("/admin/status", { cache: "no-store", headers: adminHeaders });
     if (!res.ok) throw new Error(String(res.status));
     const s = await res.json();
     $("badge").textContent = s.ready ? "运行中 · 已就绪" : "运行中 · 配置不完整";
@@ -265,8 +450,16 @@ $("reveal").addEventListener("click", () => {
   el.dataset.shown = shown ? "0" : "1";
   $("reveal").textContent = shown ? "显示" : "隐藏";
 });
+$("wereadSave").addEventListener("click", saveWereadKey);
+$("wereadClear").addEventListener("click", clearWereadKey);
+$("deviceForm").addEventListener("submit", (ev) => { ev.preventDefault(); saveDevice(); });
+$("deviceNew").addEventListener("click", deviceFormReset);
 refresh();
+wereadRefresh();
+devicesRefresh();
 setInterval(refresh, 5000);
+setInterval(wereadRefresh, 30000);
+setInterval(devicesRefresh, 30000);
 </script>
 </body>
 </html>
@@ -290,4 +483,122 @@ def register_admin_routes(app: FastAPI) -> None:
         settings = get_settings()
         if not _authorized(request, settings):
             return JSONResponse(status_code=403, content={"error": "forbidden"})
-        return JSONResponse(content=_status(settings))
+        store = getattr(request.app.state, "devices", None)
+        devices = store.list() if store is not None else []
+        return JSONResponse(content=_status(settings, devices))
+
+    def _weread_store(request: Request):
+        store = getattr(request.app.state, "weread", None)
+        if store is None:
+            return None, JSONResponse(status_code=503, content={"ok": False, "error": "weread_unavailable"})
+        return store, None
+
+    def _devices_store(request: Request):
+        store = getattr(request.app.state, "devices", None)
+        if store is None:
+            return None, JSONResponse(status_code=503, content={"ok": False, "error": "devices_unavailable"})
+        return store, None
+
+    def _weread_device_id(request: Request) -> str:
+        return request.query_params.get("deviceId", "").strip()
+
+    @app.get("/admin/devices")
+    async def admin_devices(request: Request):
+        settings = get_settings()
+        if not _authorized(request, settings):
+            return JSONResponse(status_code=403, content={"ok": False, "error": "forbidden"})
+        store, error = _devices_store(request)
+        if error is not None:
+            return error
+        return JSONResponse(content={"ok": True, "devices": store.list()})
+
+    @app.post("/admin/devices")
+    async def admin_devices_save(request: Request):
+        settings = get_settings()
+        if not _authorized(request, settings):
+            return JSONResponse(status_code=403, content={"ok": False, "error": "forbidden"})
+        store, error = _devices_store(request)
+        if error is not None:
+            return error
+        try:
+            payload = await request.json()
+        except Exception:  # noqa: BLE001 - malformed admin form body
+            return JSONResponse(status_code=400, content={"ok": False, "error": "invalid_json"})
+        if not isinstance(payload, dict):
+            return JSONResponse(status_code=400, content={"ok": False, "error": "invalid_json"})
+        try:
+            device = store.upsert(
+                payload.get("deviceId", ""),
+                name=payload.get("name") if "name" in payload else None,
+                relay_url=payload.get("relayUrl") if "relayUrl" in payload else None,
+                token=payload.get("deviceToken") or None,
+                weread_key=payload.get("apiKey") or None,
+                clear_weread=bool(payload.get("clearWeread", False)),
+            )
+        except ValueError as exc:
+            return JSONResponse(status_code=400, content={"ok": False, "error": "invalid_device", "message": str(exc)})
+        request.app.state.weread.invalidate(device["deviceId"])
+        return JSONResponse(content={"ok": True, "device": device})
+
+    @app.delete("/admin/devices")
+    async def admin_devices_delete(request: Request):
+        settings = get_settings()
+        if not _authorized(request, settings):
+            return JSONResponse(status_code=403, content={"ok": False, "error": "forbidden"})
+        store, error = _devices_store(request)
+        if error is not None:
+            return error
+        device_id = _weread_device_id(request)
+        if not device_id:
+            return JSONResponse(status_code=400, content={"ok": False, "error": "device_id_required"})
+        deleted = store.delete(device_id)
+        request.app.state.weread.invalidate(device_id)
+        return JSONResponse(content={"ok": True, "deleted": deleted, "deviceId": device_id})
+
+    @app.get("/admin/weread")
+    async def admin_weread_status(request: Request):
+        settings = get_settings()
+        if not _authorized(request, settings):
+            return JSONResponse(status_code=403, content={"ok": False, "error": "forbidden"})
+        store, error = _weread_store(request)
+        if error is not None:
+            return error
+        return JSONResponse(content=store.status(_weread_device_id(request)))
+
+    @app.post("/admin/weread")
+    async def admin_weread_save(request: Request):
+        settings = get_settings()
+        if not _authorized(request, settings):
+            return JSONResponse(status_code=403, content={"ok": False, "error": "forbidden"})
+        store, error = _weread_store(request)
+        if error is not None:
+            return error
+        try:
+            payload = await request.json()
+        except Exception:  # noqa: BLE001 - malformed admin form body
+            return JSONResponse(status_code=400, content={"ok": False, "error": "invalid_json"})
+        key = payload.get("apiKey") if isinstance(payload, dict) else None
+        if not isinstance(key, str):
+            return JSONResponse(status_code=400, content={"ok": False, "error": "api_key_required"})
+        device_id = payload.get("deviceId", "") if isinstance(payload, dict) else ""
+        device_id = device_id.strip() if isinstance(device_id, str) else ""
+        try:
+            store.set_api_key(key, device_id=device_id)
+        except ValueError as exc:
+            return JSONResponse(status_code=400, content={"ok": False, "error": "invalid_api_key", "message": str(exc)})
+        return JSONResponse(content=store.status(device_id))
+
+    @app.delete("/admin/weread")
+    async def admin_weread_clear(request: Request):
+        settings = get_settings()
+        if not _authorized(request, settings):
+            return JSONResponse(status_code=403, content={"ok": False, "error": "forbidden"})
+        store, error = _weread_store(request)
+        if error is not None:
+            return error
+        try:
+            device_id = _weread_device_id(request)
+            store.clear_api_key(device_id=device_id)
+            return JSONResponse(content=store.status(device_id))
+        except ValueError as exc:
+            return JSONResponse(status_code=400, content={"ok": False, "error": "clear_failed", "message": str(exc)})

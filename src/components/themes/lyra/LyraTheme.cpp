@@ -22,6 +22,7 @@
 #include "components/icons/hotspot.h"
 #include "components/icons/image24.h"
 #include "components/icons/library.h"
+#include "components/icons/markets.h"
 #include "components/icons/mic24.h"
 #include "components/icons/pigeon.h"
 #include "components/icons/recent.h"
@@ -94,6 +95,8 @@ const uint8_t* iconForName(UIIcon icon, int size) {
         return WorkbenchIcon;
       case UIIcon::Review:
         return ReviewIcon;
+      case UIIcon::Market:
+        return MarketsIcon;
       case UIIcon::PigeonChat:
         return PigeonIcon;
       default:

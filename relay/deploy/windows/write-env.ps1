@@ -35,6 +35,11 @@ function New-HexToken([int]$Bytes) {
 
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $EnvFile) | Out-Null
 New-Item -ItemType Directory -Force -Path $T2IAssetDir | Out-Null
+$runDir = Split-Path -Parent $T2IAssetDir
+$deviceDir = Join-Path $runDir "devices"
+$wereadDir = Join-Path $runDir "weread"
+New-Item -ItemType Directory -Force -Path $deviceDir | Out-Null
+New-Item -ItemType Directory -Force -Path $wereadDir | Out-Null
 
 $token = New-HexToken 24
 $admin = New-HexToken 24
@@ -78,6 +83,8 @@ DICT_SOURCE=local
 DICT_DATA_DIR=$DictDataDir
 T2I_PROVIDER=mock
 T2I_ASSET_DIR=$T2IAssetDir
+RELAY_DEVICE_DIR=$deviceDir
+RELAY_WEREAD_DIR=$wereadDir
 MAX_CONCURRENT_SESSIONS=4
 MAX_WS_CONNECTIONS=32
 MAX_SESSIONS_PER_DEVICE=1

@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     # Empty list = any device id with a valid token. Production should pin the
     # real device id(s) so a leaked token cannot impersonate another device.
     allowed_device_ids: str = Field("", alias="ALLOWED_DEVICE_IDS")
+    # Server-managed device registry (devices.json, mode 0600). The admin page
+    # writes per-device relay URL/token/WeRead key here; the environment above
+    # remains the fallback for unmanaged deployments. Production pins this to
+    # /opt/reading-companion-relay/run/devices so it survives release swaps.
+    relay_device_dir: str = Field("", alias="RELAY_DEVICE_DIR")
     # Admin token for POST /api/v1/chat (text debug endpoint). Empty = the
     # endpoint is disabled (returns 404), per docs section 17.5.4.
     relay_admin_token: str = Field("", alias="RELAY_ADMIN_TOKEN")
@@ -126,6 +131,38 @@ class Settings(BaseSettings):
     pigeon_max_text_bytes: int = Field(512, alias="PIGEON_MAX_TEXT_BYTES")
     pigeon_rate_limit_per_minute: int = Field(30, alias="PIGEON_RATE_LIMIT_PER_MINUTE")
     pigeon_presence_ttl_seconds: float = Field(45.0, alias="PIGEON_PRESENCE_TTL_SECONDS")
+
+    # --- WeRead read-only companion ---------------------------------------
+    # The API key is configured from /admin and saved to api_key (mode 0600)
+    # under this directory. The relay also reads a project-root file named
+    # "微信读书key" (useful for a source checkout), and WEREAD_API_KEY is a
+    # bootstrap/fallback for EnvironmentFile deployments. A file saved from
+    # the admin page takes precedence and works without a restart.
+    # Production pins the directory to /opt/reading-companion-relay/run/weread
+    # so it survives release swaps (same run/ rule as learning/pigeon).
+    relay_weread_dir: str = Field("", alias="RELAY_WEREAD_DIR")
+    weread_api_key: str = Field("", alias="WEREAD_API_KEY")
+    weread_key_file: str = Field("", alias="WEREAD_KEY_FILE")
+    # Official Skill contract version; update when Tencent publishes a new
+    # gateway contract. Kept in config so a contract change is a config-only
+    # rollback rather than a relay redeploy.
+    weread_skill_version: str = Field("1.0.5", alias="WEREAD_SKILL_VERSION")
+    weread_timeout_s: float = Field(15.0, alias="WEREAD_TIMEOUT_S")
+    # The dashboard is a snapshot, not a live poll: cache the shelf for two
+    # minutes and per-book progress for thirty seconds. The device refreshes
+    # only when the screen is entered, so this bounds upstream calls without
+    # making the display feel stale.
+    weread_shelf_ttl_s: float = Field(120.0, alias="WEREAD_SHELF_TTL_S")
+    weread_progress_ttl_s: float = Field(30.0, alias="WEREAD_PROGRESS_TTL_S")
+    weread_stats_ttl_s: float = Field(300.0, alias="WEREAD_STATS_TTL_S")
+
+    # --- read-only market snapshots ---------------------------------------
+    # A US intraday card may chain two upstreams across a slow cross-border
+    # route; the device waits 18 s, so the server may spend most of it.
+    market_timeout_s: float = Field(10.0, ge=1, le=15, alias="MARKET_TIMEOUT_S")
+    market_quote_ttl_s: float = Field(60.0, ge=10, le=3600, alias="MARKET_QUOTE_TTL_S")
+    market_chart_ttl_s: float = Field(900.0, ge=60, le=86400, alias="MARKET_CHART_TTL_S")
+    market_stale_s: float = Field(86400.0, ge=3600, le=604800, alias="MARKET_STALE_S")
 
     # --- text-to-image cards ------------------------------------------------
     # "mock" (default): draw a placeholder locally, no cloud call and no cost —
@@ -257,6 +294,11 @@ class Settings(BaseSettings):
     def pigeon_db_path(self) -> Path:
         base = Path(self.relay_pigeon_dir) if self.relay_pigeon_dir else Path("run/pigeon")
         return base / "pigeon.db"
+
+    @property
+    def device_db_path(self) -> Path:
+        base = Path(self.relay_device_dir) if self.relay_device_dir else Path("run/devices")
+        return base / "devices.json"
 
     @property
     def allowed_devices(self) -> list[str]:

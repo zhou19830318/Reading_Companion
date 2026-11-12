@@ -86,6 +86,8 @@ mkdir -p "$RELAY_ROOT/run/t2i"
 mkdir -p "$RELAY_ROOT/run/learning"
 mkdir -p "$RELAY_ROOT/run/pomodoro"
 mkdir -p "$RELAY_ROOT/run/pigeon"
+mkdir -p "$RELAY_ROOT/run/devices"
+mkdir -p "$RELAY_ROOT/run/weread"
 chown -R voice-relay:voice-relay "$RELAY_ROOT"
 
 section "release $TS"
@@ -137,7 +139,9 @@ if [[ -f "$ENV_FILE" ]]; then
               T2I_PROVIDER=mock "T2I_ASSET_DIR=$RELAY_ROOT/run/t2i" \
               "RELAY_LEARNING_DIR=$RELAY_ROOT/run/learning" \
               "RELAY_POMODORO_DIR=$RELAY_ROOT/run/pomodoro" \
-              "RELAY_PIGEON_DIR=$RELAY_ROOT/run/pigeon"; do
+              "RELAY_PIGEON_DIR=$RELAY_ROOT/run/pigeon" \
+              "RELAY_DEVICE_DIR=$RELAY_ROOT/run/devices" \
+              "RELAY_WEREAD_DIR=$RELAY_ROOT/run/weread"; do
         key=${kv%%=*}
         grep -q "^${key}=" "$ENV_FILE" || echo "$kv" >> "$ENV_FILE"
     done
@@ -200,6 +204,10 @@ RELAY_LEARNING_DIR=$RELAY_ROOT/run/learning
 RELAY_POMODORO_DIR=$RELAY_ROOT/run/pomodoro
 # Pigeon device-to-device messages: same run/ rule as learning.
 RELAY_PIGEON_DIR=$RELAY_ROOT/run/pigeon
+# Server-managed device registry (Relay URL / Token / per-device WeRead Key).
+RELAY_DEVICE_DIR=$RELAY_ROOT/run/devices
+# Default WeRead key saved by /admin (per-device keys live in devices.json).
+RELAY_WEREAD_DIR=$RELAY_ROOT/run/weread
 # Sessions may run concurrently; keep within the DashScope account quota.
 MAX_CONCURRENT_SESSIONS=4
 # Multiple onepage devices: cap open sockets and sessions per device.

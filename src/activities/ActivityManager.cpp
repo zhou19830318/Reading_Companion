@@ -2,6 +2,7 @@
 
 #include <FontCacheManager.h>
 #include <HalPowerManager.h>
+#include <Memory.h>
 
 #include <algorithm>
 
@@ -16,6 +17,7 @@
 #include "home/HomeActivity.h"
 #include "home/RecentBooksActivity.h"
 #include "learning/ReviewActivity.h"
+#include "markets/MarketActivity.h"
 #include "network/CrossPointWebServerActivity.h"
 #include "pigeon/PigeonDeviceListActivity.h"
 #include "reader/ReaderActivity.h"
@@ -23,6 +25,7 @@
 #include "settings/SettingsActivity.h"
 #include "util/FullScreenMessageActivity.h"
 #include "voice/VoiceActivity.h"
+#include "weread/WeReadActivity.h"
 #include "workbench/WorkbenchActivity.h"
 
 void ActivityManager::begin() {
@@ -230,6 +233,17 @@ void ActivityManager::goToReader(std::string path) {
 
 void ActivityManager::goToReview() { replaceActivity(std::make_unique<ReviewActivity>(renderer, mappedInput)); }
 
+void ActivityManager::goToWeRead() { replaceActivity(std::make_unique<WeReadActivity>(renderer, mappedInput)); }
+
+void ActivityManager::goToMarkets() {
+  auto activity = makeUniqueNoThrow<MarketActivity>(renderer, mappedInput);
+  if (!activity) {
+    LOG_ERR("MARKET", "OOM: activity");
+    return;
+  }
+  replaceActivity(std::move(activity));
+}
+
 void ActivityManager::goToVoice() { replaceActivity(std::make_unique<VoiceActivity>(renderer, mappedInput)); }
 
 void ActivityManager::goToAiAssistant() { replaceActivity(std::make_unique<AiHubActivity>(renderer, mappedInput)); }
@@ -266,6 +280,10 @@ void ActivityManager::goHome(HomeMenuItem initialMenuItem) {
       initialMenuItem = HomeMenuItem::FILE_TRANSFER;
     } else if (activityName == "Review") {
       initialMenuItem = HomeMenuItem::REVIEW;
+    } else if (activityName == "WeRead") {
+      initialMenuItem = HomeMenuItem::WEREAD;
+    } else if (activityName == "Markets") {
+      initialMenuItem = HomeMenuItem::MARKETS;
     } else if (activityName == "Voice") {
       initialMenuItem = HomeMenuItem::VOICE;
     } else if (activityName == "PigeonDevices" || activityName == "PigeonConversation") {

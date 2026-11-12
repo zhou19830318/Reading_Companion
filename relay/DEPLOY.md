@@ -26,7 +26,7 @@
 |---|---|
 | `/opt/reading-companion-relay/releases/<TS>/` | 每次安装生成的时间戳 release（`relay/`、`dict-data/`、`requirements.txt`、独立 `.venv`、`pip-freeze.txt`） |
 | `/opt/reading-companion-relay/current` | 指向生效 release 的软链（回滚=改指旧 release） |
-| `/opt/reading-companion-relay/logs/`、`run/` | 日志与可写运行时目录（含 `run/t2i/` 生图资产、`run/learning/`、`run/pomodoro/`、`run/pigeon/`；systemd 沙箱仅放行这两处写入） |
+| `/opt/reading-companion-relay/logs/`、`run/` | 日志与可写运行时目录（含 `run/t2i/` 生图资产、`run/learning/`、`run/pomodoro/`、`run/pigeon/`、`run/devices/` 设备注册表、`run/weread/` 默认微信读书 Key；systemd 沙箱仅放行这两处写入） |
 | `/etc/reading-companion/voice-relay.env` | **唯一存放密钥的文件**（root:voice-relay，640） |
 | `/etc/systemd/system/reading-companion-relay.service` | systemd 单元（install.sh 安装） |
 | `/etc/nginx/sites-available/reading-companion-relay.conf` | nginx 站点（dev=8080 / prod=443） |
@@ -169,12 +169,26 @@ sudo systemctl restart reading-companion-relay
 | 词库学习数据位置 | `RELAY_LEARNING_DIR`（默认 `run/learning`；生产钉在 `$RELAY_ROOT/run/learning`，跨 release 持久，无需改 systemd unit） |
 | 番茄钟会话数据位置 | `RELAY_POMODORO_DIR`（默认 `run/pomodoro`；生产钉在 `$RELAY_ROOT/run/pomodoro`，同词库规则） |
 | 飞鸽传书消息库 | `RELAY_PIGEON_DIR`（默认 `run/pigeon`）；`PIGEON_MESSAGE_TTL_DAYS`（7）、`PIGEON_MAX_MESSAGES_PER_RECIPIENT`（100）、`PIGEON_MAX_TEXT_BYTES`（512）、`PIGEON_RATE_LIMIT_PER_MINUTE`（30）、`PIGEON_PRESENCE_TTL_SECONDS`（45） |
+| 服务端设备注册表 | `RELAY_DEVICE_DIR`（默认 `run/devices`；`devices.json` 存 Relay URL / Token / 每设备微信读书 Key，0600）。新增设备后注册表即成为设备鉴权权威 |
+| 默认微信读书 Key | `RELAY_WEREAD_DIR`（默认 `run/weread`；`api_key`，0600）；每设备 Key 在 `/admin/devices` 配置并优先于默认 Key |
+| 行情超时/缓存 | `MARKET_TIMEOUT_S`（10）、`MARKET_QUOTE_TTL_S`（60）、`MARKET_CHART_TTL_S`（900）、`MARKET_STALE_S`（86400）。行情只读代理腾讯/Yahoo/CNBC；美股指数 1d 优先 CNBC，东方财富（WAF 会掐断云主机 IP）、腾讯、新浪依次兜底。无密钥；nginx 已代理 `/api/v1/markets/` |
 
 字典数据随 release 发布（`DICT_SOURCE=local`），升级 release 即升级词库；改成 `DICT_SOURCE=llm` 可回退到模型生成卡片（可能有事实错误，不推荐）。
 
 词库学习数据（生词本、复习记录，SQLite）存放在 `RELAY_LEARNING_DIR`，位于 release 目录之外的 `run/` 树中：升级与回滚都不会动它；备份即拷走该目录下的 `learning.db*` 文件。
 
 番茄钟会话数据（专注/休息段记录，SQLite）存放在 `RELAY_POMODORO_DIR`，规则与词库完全一致；备份即拷走该目录下的 `pomodoro.db*` 文件。
+
+设备注册表与默认微信读书 Key 同样位于 release 之外的 `run/` 树：
+
+```bash
+sudo cp -a /opt/reading-companion-relay/run/devices/devices.json /path/to/backup/
+sudo cp -a /opt/reading-companion-relay/run/weread/api_key /path/to/backup/ 2>/dev/null || true
+```
+
+`devices.json` 含各设备 Token 与微信读书 Key，按密钥文件管理；恢复时停服后
+放回原路径再启动。注册表一旦非空，未登记的 Device ID 会被拒绝，迁移前先把
+所有在用的设备加入 `/admin/devices`。
 
 ### 4.1 飞鸽传书（设备间消息）
 
@@ -268,11 +282,11 @@ curl -s -H "Authorization: Bearer $TOKEN" -H "X-Device-Id: reading-companion-001
 
 ## 9. 安全基线
 
-- 密钥只在 `voice-relay.env`（root:voice-relay 640），永不入库、永不下发到设备、不回显到 Web UI。
+- 长期云密钥在 `voice-relay.env`（root:voice-relay 640）；设备 Token 与每设备微信读书 Key 在 `run/devices/devices.json`（0600），默认微信读书 Key 在 `run/weread/api_key`（0600）。它们永不入库、永不下发到设备（设备只拿到自己的 Token 和 relay 配置），也不回显到 Web UI。
 - 管理页面 `/admin` **仅本机可访问**（127.0.0.1/::1），nginx 不代理；需要远程时用 SSH 隧道或 `RELAY_ADMIN_TOKEN`。
 - Windows 防火墙规则只对“专用网络”放行 8080/tcp；公网使用请加 Caddy/nginx 反代 wss://。
 - systemd 沙箱：`ProtectSystem=strict` + 仅放行 `logs/`、`run/` 两个写路径；`NoNewPrivileges`、`PrivateTmp`。
-- 设备认证靠 `Authorization: Bearer` + 可选 `ALLOWED_DEVICE_IDS` 白名单；空 token 配置拒绝启动。
+- 设备认证靠 `Authorization: Bearer` + 可选 `ALLOWED_DEVICE_IDS` 白名单；空 token 配置拒绝启动。注册表非空时改用 `/admin/devices` 中的设备与 Token（旧 Token 轮换后保留 15 分钟）。
 - 飞鸽传书正文以明文存放在 `run/pigeon/pigeon.db`（仅服务器磁盘，不经云端）；
   备份、快照和磁盘镜像同样包含这些内容，按敏感数据管理。清空接口只删除
   消息，不删除设备注册表。

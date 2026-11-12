@@ -8,6 +8,9 @@
 
 class GfxRenderer;
 struct RecentBook;
+namespace Markets {
+struct Card;
+}
 
 struct Rect {
   int x;
@@ -127,6 +130,7 @@ enum UIIcon {
   Mic,
   Workbench,
   Review,
+  Market,
   PigeonChat
 };
 
@@ -284,6 +288,9 @@ class BaseTheme {
                      std::string title, const int paddingBottom = 0, const int textYOffset = 0,
                      const bool fillMargin = true, const bool isPageBookmarked = false) const;
   void drawHelpText(const GfxRenderer& renderer, Rect rect, const char* label) const;
+  void drawMarketCard(const GfxRenderer& renderer, Rect rect, const Markets::Card& card, bool selected,
+                      bool sparkline = true) const;
+  void drawMarketChart(const GfxRenderer& renderer, Rect rect, const Markets::Card& card, bool intraday) const;
   virtual void drawTextField(const GfxRenderer& renderer, Rect rect, const int textWidth, bool cursorMode = false,
                              int contentStartX = 0, int contentWidth = 0) const;
   virtual void drawKeyboardKey(const GfxRenderer& renderer, Rect rect, const char* label, const bool isSelected,
