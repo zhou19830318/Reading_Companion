@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 
 #include "BaseTheme.h"
 #include "components/UITheme.h"
@@ -24,14 +25,10 @@ const char* title(const Markets::Card& card, bool& known) {
                                    {"dow", StrId::STR_MARKET_DOW},       {"gold", StrId::STR_MARKET_GOLD},
                                    {"silver", StrId::STR_MARKET_SILVER}, {"wti", StrId::STR_MARKET_WTI},
                                    {"brent", StrId::STR_MARKET_BRENT}};
-  for (const auto& name : names) {
-    if (strcmp(card.id, name.id) == 0) {
-      known = true;
-      return I18N.get(name.label);
-    }
-  }
-  known = false;
-  return card.name;
+  const auto match =
+      std::find_if(std::begin(names), std::end(names), [&](const Name& name) { return strcmp(card.id, name.id) == 0; });
+  known = match != std::end(names);
+  return known ? I18N.get(match->label) : card.name;
 }
 
 // Rendering uses bounded stack text, never allocates one string per chart point.

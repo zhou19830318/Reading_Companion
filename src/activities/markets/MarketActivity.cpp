@@ -21,28 +21,40 @@ constexpr const char* PERIODS[] = {"1d", "1mo", "1y"};
 
 const char* groupLabel(int group) {
   switch (group) {
-    case 0: return tr(STR_MARKET_CN);
-    case 1: return tr(STR_MARKET_HK);
-    case 2: return tr(STR_MARKET_US);
-    default: return tr(STR_MARKET_COMMODITY);
+    case 0:
+      return tr(STR_MARKET_CN);
+    case 1:
+      return tr(STR_MARKET_HK);
+    case 2:
+      return tr(STR_MARKET_US);
+    default:
+      return tr(STR_MARKET_COMMODITY);
   }
 }
 
 const char* periodLabel(int period) {
   switch (period) {
-    case 0: return tr(STR_MARKET_PERIOD_1D);
-    case 1: return tr(STR_MARKET_PERIOD_1MO);
-    default: return tr(STR_MARKET_PERIOD_1Y);
+    case 0:
+      return tr(STR_MARKET_PERIOD_1D);
+    case 1:
+      return tr(STR_MARKET_PERIOD_1MO);
+    default:
+      return tr(STR_MARKET_PERIOD_1Y);
   }
 }
 
 const char* errorLabel(Markets::Client::Result result) {
   switch (result) {
-    case Markets::Client::Result::Config: return tr(STR_MARKET_CONFIG);
-    case Markets::Client::Result::Auth: return tr(STR_MARKET_AUTH);
-    case Markets::Client::Result::InvalidCode: return tr(STR_MARKET_BAD_CODE);
-    case Markets::Client::Result::Wifi: return tr(STR_MARKET_NO_WIFI);
-    default: return tr(STR_MARKET_FAILED);
+    case Markets::Client::Result::Config:
+      return tr(STR_MARKET_CONFIG);
+    case Markets::Client::Result::Auth:
+      return tr(STR_MARKET_AUTH);
+    case Markets::Client::Result::InvalidCode:
+      return tr(STR_MARKET_BAD_CODE);
+    case Markets::Client::Result::Wifi:
+      return tr(STR_MARKET_NO_WIFI);
+    default:
+      return tr(STR_MARKET_FAILED);
   }
 }
 }  // namespace
@@ -58,9 +70,7 @@ void MarketActivity::onEnter() {
   queueLoad();
 }
 
-void MarketActivity::onExit() {
-  Activity::onExit();
-}
+void MarketActivity::onExit() { Activity::onExit(); }
 
 void MarketActivity::queueLoad() {
   RenderLock lock;
@@ -137,8 +147,8 @@ void MarketActivity::load() {
 }
 
 void MarketActivity::search() {
-  auto keyboard = makeUniqueNoThrow<KeyboardEntryActivity>(
-      renderer, mappedInput, tr(STR_MARKET_ENTER_CODE), "", Markets::CODE_CAP - 1, InputType::Text);
+  auto keyboard = makeUniqueNoThrow<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_MARKET_ENTER_CODE), "",
+                                                           Markets::CODE_CAP - 1, InputType::Text);
   if (!keyboard) {
     LOG_ERR("MARKET", "OOM: keyboard");
     return;
@@ -249,7 +259,8 @@ void MarketActivity::render(RenderLock&&) {
     }
     GUI.drawHelpText(renderer, Rect{x, bottom - footer, width, footer}, tr(STR_MARKET_DISCLAIMER));
   }
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK),
+  const auto labels = mappedInput.mapLabels(
+      tr(STR_BACK),
       error != Markets::Client::Result::Ok ? tr(STR_RETRY) : (detail ? tr(STR_MARKET_REFRESH) : tr(STR_OPEN)),
       detail ? tr(STR_MARKET_PERIOD_PREV) : tr(STR_MARKET_SEARCH),
       detail ? tr(STR_MARKET_PERIOD_NEXT) : tr(STR_MARKET_GROUP));

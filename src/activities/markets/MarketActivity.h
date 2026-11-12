@@ -6,8 +6,7 @@
 
 class MarketActivity final : public Activity {
  public:
-  MarketActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-      : Activity("Markets", renderer, mappedInput) {}
+  MarketActivity(GfxRenderer& renderer, MappedInputManager& mappedInput) : Activity("Markets", renderer, mappedInput) {}
   void onEnter() override;
   void onExit() override;
   void loop() override;
