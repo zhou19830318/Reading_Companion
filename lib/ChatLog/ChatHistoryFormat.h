@@ -1,6 +1,5 @@
 #pragma once
 
-#include <OpenClawHandshake.h>
 #include <Utf8.h>
 
 #include <cstddef>
@@ -8,6 +7,8 @@
 #include <cstdio>
 #include <cstring>
 #include <string_view>
+
+#include "ChatTime.h"
 
 // Chat history on the SD card, one file per local day (plan §8.3):
 //
@@ -39,7 +40,7 @@
 //
 // Pure C++ — no ESP-IDF, no Arduino — so test/chat_history compiles the same
 // helpers the firmware uses.
-namespace OpenClaw {
+namespace ChatLog {
 namespace ChatHistoryFormat {
 
 // Root of the history store. Lives under the shared SD cache root the rest of
@@ -680,7 +681,7 @@ inline bool parseLine(std::string_view line, Entry& entry, char* textDst, const 
 // does not fit or not one entry has room (nothing to summarize).
 //
 // Pure C++ (host-tested). The caller bounds cap by the chat message cap; this
-// layer does not know it (OpenClawChat.h owns that constant).
+// layer does not know it (VoiceActivity owns that constant).
 inline bool buildSummaryPrompt(char* dst, const size_t cap, const Entry* entries, const size_t count, const char* pool,
                                const char* instruction, const char* youTag, const char* assistantTag) {
   // No minimum cap beyond what snprintf + the head check below enforce: a
@@ -918,4 +919,4 @@ inline bool historyDayRowLabel(char* dst, const size_t cap, const char* name, co
 }
 
 }  // namespace ChatHistoryFormat
-}  // namespace OpenClaw
+}  // namespace ChatLog

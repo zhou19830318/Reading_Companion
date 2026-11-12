@@ -10,7 +10,7 @@
 // that touches HalStorage for notes; the activities render from the structures
 // filled here and never open a file themselves.
 //
-// Memory discipline mirrors OpenClaw::ChatHistory: a book's notes are never
+// Memory discipline mirrors ChatLog::ChatHistory: a book's notes are never
 // loaded as one String. listBooks() reads file names only; load() streams the
 // file through NoteFormat::parseLine into a caller-owned PSRAM pool, keeping
 // the newest entries (the same front-packed-pool invariant as the chat day

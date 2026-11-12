@@ -23,7 +23,7 @@
 //   - append()    opens the day file in append mode, writes one line, closes.
 //                 One write per completed round trip, never per UI action —
 //                 same SPIFFS/SD throttling discipline as progress saves.
-namespace OpenClaw {
+namespace ChatLog {
 
 class ChatHistory {
  public:
@@ -94,4 +94,4 @@ class ChatHistory {
   static bool buildDayPath(char* out, size_t cap, const char* dayName);
 };
 
-}  // namespace OpenClaw
+}  // namespace ChatLog

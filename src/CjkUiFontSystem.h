@@ -11,7 +11,7 @@
 // Because both the bitmap render (renderCharImpl) and the layout measurement
 // (getTextBounds) go through the same getGlyph(), the fallback covers
 // rendering AND metrics. Besides the five UI fonts, builtin Noto faces that
-// draw user-visible CJK (e.g. the Workbench date line's Noto Serif 14) are
+// draw user-visible CJK (e.g. the home screen date line's Noto Serif 14) are
 // attached individually via attachTo().
 //
 // ONEPAGE_C61 only: the X4 build has no PSRAM to hold the CJK glyph cache.
@@ -39,7 +39,7 @@ class CjkUiFontSystem {
   // loadIfAvailable() returned true. `attachToUiFonts()` covers the five
   // builtin UI fonts the themes draw with (kept for call-site convenience);
   // `attachTo()` is the generic slot-based entry any other builtin EpdFont
-  // can use — needed e.g. for the Workbench date line (Noto Serif 14 draws
+  // can use — needed e.g. for the home screen date line (Noto Serif 14 draws
   // 年月日/星期, which the pure-Latin builtin has no glyphs for). Copies each
   // builtin EpdFontData into a mutable DRAM slot, sets its glyphMissHandler
   // to the CJK SdCardFont, and redirects EpdFont::data to the copy.
@@ -72,7 +72,7 @@ class CjkUiFontSystem {
   bool attached_ = false;
 
   // Fixed slot table for attached fonts: the five UI fonts plus the builtin
-  // Noto faces the Workbench draws CJK with (dates/weather) — capacity 7 is
+  // Noto Serif faces the reader draws CJK book text with — capacity 7 is
   // the whole planned set, so no dynamic allocation. Each slot is a mutable
   // EpdFontData copy (BSS, ~144B x7 in DRAM). All const pointer members still
   // reference the builtin flash arrays; only glyphMissHandler / glyphMissCtx

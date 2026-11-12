@@ -1,6 +1,7 @@
 #include "PigeonConversationActivity.h"
 
 #include <ChatHistoryFormat.h>
+#include <ChatTime.h>
 #include <CrossPointSettings.h>
 #include <I18n.h>
 #include <Logging.h>
@@ -31,11 +32,11 @@ constexpr size_t MESSAGE_STAMP_CAP = 24;
 // labelled, and older messages carry the full date.
 bool messageStamp(const Pigeon::Message& message, const int64_t nowMs, char* out, const size_t cap) {
   int64_t seconds = 0;
-  if (!OpenClaw::ChatHistoryFormat::parseIsoUtcSeconds(message.createdAt, strlen(message.createdAt), seconds)) {
+  if (!ChatLog::ChatHistoryFormat::parseIsoUtcSeconds(message.createdAt, strlen(message.createdAt), seconds)) {
     return false;
   }
-  return OpenClaw::ChatHistoryFormat::formatChatMessageTime(out, cap, seconds * 1000, nowMs, SETTINGS.clockUtcOffsetQ,
-                                                            tr(STR_YESTERDAY));
+  return ChatLog::ChatHistoryFormat::formatChatMessageTime(out, cap, seconds * 1000, nowMs, SETTINGS.clockUtcOffsetQ,
+                                                           tr(STR_YESTERDAY));
 }
 
 }  // namespace
@@ -381,7 +382,7 @@ void PigeonConversationActivity::render(RenderLock&&) {
       const int timeLineHeight = renderer.getTextHeight(UI_10_FONT_ID);
       const int availableHeight = messagesBottom - messagesTop - 2 * bubblePadY;
       const int maxLines = std::max(1, std::min(8, availableHeight / lineHeight));
-      const int64_t nowMs = OpenClaw::nowEpochMs();
+      const int64_t nowMs = ChatLog::nowEpochMs();
 
       std::vector<Bubble> bubbles;
       bubbles.reserve(8);

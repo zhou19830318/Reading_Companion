@@ -23,12 +23,15 @@
 #include "fontIds.h"
 
 void HomeActivity::buildMenu() {
-  gridLabels = {
-      tr(STR_BROWSE_FILES),  tr(STR_MENU_RECENT_BOOKS), reviewLabel.empty() ? tr(STR_REVIEW_TODAY) : reviewLabel,
-      tr(STR_WEREAD),        tr(STR_MARKETS),           tr(STR_VOICE),
-      tr(STR_WORKBENCH),     tr(STR_FILE_TRANSFER),     tr(STR_PIGEON),
-      tr(STR_SETTINGS_TITLE)};
-  gridIcons = {Folder, Recent, Review, Book, UIIcon::Market, Mic, Workbench, Transfer, PigeonChat, Settings};
+  gridLabels = {tr(STR_BROWSE_FILES),
+                tr(STR_MENU_RECENT_BOOKS),
+                reviewLabel.empty() ? tr(STR_REVIEW_TODAY) : reviewLabel,
+                tr(STR_MARKETS),
+                tr(STR_VOICE),
+                tr(STR_FILE_TRANSFER),
+                tr(STR_PIGEON),
+                tr(STR_SETTINGS_TITLE)};
+  gridIcons = {Folder, Recent, Review, UIIcon::Market, Mic, Transfer, PigeonChat, Settings};
 
   if (hasOpdsServers) {
     gridLabels.insert(gridLabels.begin() + 2, tr(STR_OPDS_BROWSER));
@@ -218,17 +221,11 @@ void HomeActivity::loop() {
         case HomeMenuItem::REVIEW:
           onReviewOpen();
           break;
-        case HomeMenuItem::WEREAD:
-          onWeReadOpen();
-          break;
         case HomeMenuItem::MARKETS:
           activityManager.goToMarkets();
           break;
         case HomeMenuItem::VOICE:
           onVoiceOpen();
-          break;
-        case HomeMenuItem::WORKBENCH:
-          onWorkbenchOpen();
           break;
         case HomeMenuItem::FILE_TRANSFER:
           onFileTransferOpen();
@@ -310,10 +307,6 @@ void HomeActivity::onOpdsBrowserOpen() { activityManager.goToBrowser(); }
 
 void HomeActivity::onReviewOpen() { activityManager.goToReview(); }
 
-void HomeActivity::onWeReadOpen() { activityManager.goToWeRead(); }
-
 void HomeActivity::onVoiceOpen() { activityManager.goToAiAssistant(); }
-
-void HomeActivity::onWorkbenchOpen() { activityManager.goToWorkbench(); }
 
 void HomeActivity::onPigeonOpen() { activityManager.goToPigeon(); }

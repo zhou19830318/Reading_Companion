@@ -7,11 +7,10 @@
 // Microphone capture session: chunked read, running level statistics, and the
 // two ways a capture ends — the duration cap and the no-audio guard.
 //
-// Extracted from MicrophoneTestActivity (docs/voice-openclaw-port-plan.md §8.2)
+// Extracted from the earlier standalone microphone test screen.
 // so the P0 bring-up screen and the voice screen share one capture path instead
 // of two copies drifting apart. The HAL is reached through HalMicrophone, so
-// this file is device-only and is deliberately NOT host-compilable — the same
-// split as lib/voice/SttClient.
+// this file is device-only and is deliberately NOT host-compilable.
 //
 // The caller drives it: begin() starts a capture, poll() reads one 100 ms chunk
 // per call (so an activity's loop() stays responsive), end() finalises. There is

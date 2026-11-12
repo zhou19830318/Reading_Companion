@@ -47,8 +47,9 @@ drivable without hands on the buttons (see `src/main.cpp`):
 |---------|--------|
 | `CMD:SCREENSHOT` | Dumps the whole framebuffer (`SCREENSHOT_START:<len>` … raw bytes … `SCREENSHOT_END`) plus a pointer/CRC line |
 | `CMD:KEY back\|ok\|left\|right\|up\|down` | Injects one synthetic press, released on the next `update()` |
-| `CMD:GO_VOICE`, `CMD:GO_WORKBENCH` | Jump straight to the voice assistant / workbench screens |
-| `CMD:VOICE_TX <text>` | Stands in for the STT step: sends `<text>` as a chat round trip to the gateway |
+| `CMD:GO_VOICE` | Jump straight to the voice assistant screen |
+| `CMD:VOICE_TX <text>` | Stands in for the STT step: sends `<text>` as a chat round trip to the relay |
+| `CMD:POMODORO [workMin] [breakMin]`, `CMD:POMODORO_STATE` | Drive and inspect the focus timer without the menu |
 
 Notes:
 

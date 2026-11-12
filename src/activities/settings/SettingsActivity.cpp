@@ -2,7 +2,6 @@
 
 #include <GfxRenderer.h>
 #include <Logging.h>
-#include <WeatherCities.h>
 #include <WifiIdleManager.h>
 
 #include <algorithm>
@@ -14,7 +13,6 @@
 #include "BlePageTurnerActivity.h"
 #include "bluetooth/BleHidHost.h"
 #endif
-#include "CitySelectActivity.h"
 #include "ClearCacheActivity.h"
 #include "CrossPointSettings.h"
 #include "FontDownloadActivity.h"
@@ -31,7 +29,6 @@
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/IntervalSelectionActivity.h"
 #include "activities/util/KeyTestActivity.h"
-#include "activities/weread/WeReadActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -73,13 +70,11 @@ void SettingsActivity::rebuildSettingsLists() {
 #endif
   systemSettings.push_back(SettingInfo::Action(StrId::STR_WIFI_NETWORKS, SettingAction::Network));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_KOREADER_SYNC, SettingAction::KOReaderSync));
-  systemSettings.push_back(SettingInfo::Action(StrId::STR_WEREAD, SettingAction::WeRead));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_OPDS_SERVERS, SettingAction::OPDSBrowser));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CLEAR_READING_CACHE, SettingAction::ClearCache));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_KEY_TEST, SettingAction::KeyTest));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CHECK_UPDATES, SettingAction::CheckForUpdates));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_SD_FIRMWARE_UPDATE, SettingAction::SdFirmwareUpdate));
-  systemSettings.push_back(SettingInfo::Action(StrId::STR_WEATHER_CITY, SettingAction::WeatherLocation));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_LANGUAGE, SettingAction::Language));
   // Insert "Manage Fonts" right after the font family setting so users discover it naturally
   readerSettings.insert(readerSettings.begin() + 1,
@@ -293,9 +288,6 @@ void SettingsActivity::toggleCurrentSetting() {
       case SettingAction::KOReaderSync:
         startActivityForResult(std::make_unique<KOReaderSettingsActivity>(renderer, mappedInput), resultHandler);
         break;
-      case SettingAction::WeRead:
-        startActivityForResult(std::make_unique<WeReadActivity>(renderer, mappedInput), resultHandler);
-        break;
       case SettingAction::OPDSBrowser:
         startActivityForResult(std::make_unique<OpdsServerListActivity>(renderer, mappedInput), resultHandler);
         break;
@@ -328,9 +320,6 @@ void SettingsActivity::toggleCurrentSetting() {
         break;
       case SettingAction::Language:
         startActivityForResult(std::make_unique<LanguageSelectActivity>(renderer, mappedInput), resultHandler);
-        break;
-      case SettingAction::WeatherLocation:
-        startActivityForResult(std::make_unique<CitySelectActivity>(renderer, mappedInput), resultHandler);
         break;
       case SettingAction::None:
         // Do nothing
@@ -445,12 +434,6 @@ void SettingsActivity::render(RenderLock&&) {
           } else {
             valueText = std::to_string(SETTINGS.*(setting.valuePtr));
           }
-        } else if (setting.action == SettingAction::WeatherLocation) {
-          // ACTION rows carry no value otherwise; the whole point of this one
-          // is seeing which city the workbench weather is using right now.
-          const WeatherCities::City* pinned = WeatherCities::find(SETTINGS.weatherCityKey);
-          valueText = (pinned != nullptr) ? WeatherCities::label(*pinned, I18n::isChinese(I18N.getLanguage()))
-                                          : tr(STR_WEATHER_CITY_AUTO);
         }
         return valueText;
       },

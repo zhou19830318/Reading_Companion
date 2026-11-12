@@ -415,7 +415,7 @@ void WifiSelectionActivity::checkConnectionStatus() {
     autoConnecting = false;
     autoCandidateMode = false;
     // A landed connect restarts the idle clock: the parent (dictionary, ask-AI,
-    // workbench) is about to use the radio and must not have the countdown it
+    // markets) is about to use the radio and must not have the countdown it
     // armed before this detour expire underneath the request.
     WIFI_IDLE.noteActivity();
 

@@ -7,11 +7,11 @@
 
 // clang-format off
 // HalStorage.h must be seen before lwip-sensitive headers; keep Arduino first
-// (same ordering constraint as VoiceActivity.cpp / SttClient.cpp).
+// (same ordering constraint as VoiceActivity.cpp).
 #include <Arduino.h>
 // clang-format on
 
-namespace OpenClaw {
+namespace ChatLog {
 
 bool ChatHistory::append(const uint64_t tsMs, const int utcOffsetQuarterHoursBiased, const bool isUser,
                          const char* text, char* lineBuf, const size_t lineCap) {
@@ -274,4 +274,4 @@ bool ChatHistory::buildDayPath(char* out, const size_t cap, const char* dayName)
   return n > 0 && static_cast<size_t>(n) < cap;
 }
 
-}  // namespace OpenClaw
+}  // namespace ChatLog

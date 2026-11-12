@@ -44,10 +44,10 @@ class HttpDownloader {
 
   /**
    * POST a JSON document and collect the response body. Auth goes out as a
-   * Bearer header (the OpenClaw gateway's tools/invoke needs this). The
-   * response is drained into outContent whatever the status code — callers
-   * parse the body to tell success from a gateway error, which also carry
-   * JSON. timeoutMs caps each socket op (0 = the 60 s default).
+   * Bearer header (the relay's JSON endpoints use this). The response is
+   * drained into outContent whatever the status code — callers parse the
+   * body to tell success from an upstream error, which also carries JSON. timeoutMs caps each socket op (0 = the 60 s
+   * default).
    */
   static bool postJson(const std::string& url, const std::string& jsonBody, const std::string& bearerToken,
                        std::string& outContent, uint32_t timeoutMs = 0);

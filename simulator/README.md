@@ -80,14 +80,15 @@ The same firmware also builds to WASM for the crosspoint-web homepage demo, shar
 small `#ifdef __EMSCRIPTEN__` backend (a framebuffer dirty-flag + browser canvas instead of an
 SDL texture; JavaScript events instead of SDL keys), and `shims/esp_http_client.h` compiles a
 curl-free offline stub under the same guard. The WASM build sets **ENABLE_CHINESE_VERSION**
-(CJK fonts + WeRead/中国象棋/农历/CJK typography — same as native) and preloads a small
+(CJK fonts + 中国象棋/农历/CJK typography — same as native) and preloads a small
 public-domain book from `sd_root_demo/` into MEMFS at `/sd`. The startup UI language follows the
 browser: `index.html` maps `navigator.language` to a `--lang ZH_CN|EN` arg that
 `simulator_main_wasm.cpp` applies before first render. FreeRTOS tasks run on Web Worker threads
 (pthreads), so the page must be cross-origin isolated (COOP/COEP).
 
-Because the browser build has no libcurl, all networked features are offline: WeRead and any
-other HTTPS path return errors through the esp_http_client stub, so those screens render but fetch
+Because the browser build has no libcurl, all networked features are offline: the
+relay-backed screens (voice, AI, dictionary, markets, Pigeon) and any other HTTPS path return
+errors through the esp_http_client stub, so those screens render but fetch
 nothing. (Network config / OPDS / KOReader / OTA are out of scope on both builds — see below.)
 
 ```sh
@@ -176,12 +177,6 @@ Save as `simulator/sd_root/.crosspoint/state.json` before launching.
 - All on-disk caches (book.bin, sections/*.bin, css_rules.cache, progress.bin)
 - Multi-language UI via the `tr()` macro (generated I18nStrings)
 - 1-bpp framebuffer rendering and font system (text-only EPUBs)
-- **WeRead (微信读书) app: real HTTPS to i.weread.qq.com via libcurl.** WiFi
-  shim reports `WL_CONNECTED`; `HttpDownloader::postJson` runs through the
-  esp_http_client shim, which is libcurl-backed on native. Drop your `wrk-…` API
-  key as plain text into `simulator/sd_root/.crosspoint/weread_apikey_plain.txt`
-  — first boot migrates it to base64-stored `weread_apikey.txt` and deletes the
-  plain seed.
 - **AirPage standby face: real QR + real cloud image fetch.** The QR (rendered
   by the real `ricmoo/QRCode` lib) encodes the device's upload URL. Pressing ▼
   runs the real `HttpDownloader` over libcurl, saving the latest image to
@@ -224,7 +219,7 @@ user navigates into them.
   or `<JPEGDEC.h>` exist so consumer `.cpp` files compile and link, but their
   methods return an error / empty value. The exception is `<esp_http_client.h>`
   (and its `<esp_crt_bundle.h>` companion), which is **libcurl-backed and does
-  real host network I/O** — that's what lets WeRead and the AirPage fetch work.
+  real host network I/O** — that's what lets the AirPage fetch work.
   Adding a real codec (libpng wrapper, etc.) would similarly light up the
   stubbed features.
 

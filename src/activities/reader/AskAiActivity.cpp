@@ -7,13 +7,13 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 // clang-format on
+#include <ChatTime.h>
 #include <CloudConfig.h>
 #include <Epub/Page.h>
 #include <Epub/Section.h>
 #include <I18n.h>
 #include <Logging.h>
 #include <Memory.h>
-#include <OpenClawHandshake.h>
 #include <WiFi.h>
 #include <WifiIdleManager.h>
 #include <esp_heap_caps.h>
@@ -78,9 +78,6 @@ void AskAiActivity::onEnter() {
 }
 
 void AskAiActivity::onExit() {
-  // The session is process-wide: drop the notifier — it points at this object —
-  // and never close the socket. Same rule as VoiceActivity::onExit.
-  session_.setNotifier(nullptr, nullptr);
   exitSelectionView();
   if (linePool_ != nullptr) {
     heap_caps_free(linePool_);
@@ -91,17 +88,7 @@ void AskAiActivity::onExit() {
   Activity::onExit();
 }
 
-bool AskAiActivity::preventAutoSleep() { return state_ == State::Connecting || state_ == State::Asking; }
-
-void AskAiActivity::onSessionNotifyTrampoline(void* ctx) { static_cast<AskAiActivity*>(ctx)->onSessionNotify(); }
-
-void AskAiActivity::onSessionNotify() {
-  // Session callbacks fire from inside the WebSocket dispatch: repaint only,
-  // and only for the states that show session traffic.
-  if (state_ == State::Connecting || state_ == State::Asking) {
-    requestUpdate();
-  }
-}
+bool AskAiActivity::preventAutoSleep() { return state_ == State::Asking; }
 
 void AskAiActivity::beginAsk(const char* question, Scope scope) {
   if (question == nullptr || question[0] == '\0') return;
@@ -139,22 +126,11 @@ void AskAiActivity::beginAsk(const char* question, Scope scope) {
                                requestUpdate();
                                return;
                              }
-                             if (relayConfigured()) {
-                               beginRelayAsk();
-                             } else {
-                               ensureConnected();
-                             }
+                             beginRelayAsk();
                            });
     return;
   }
-  // Voice relay on: the question rides the relay's text endpoint instead of
-  // the OpenClaw gateway (AI-01 over relay). Checked per ask, like the voice
-  // screen, so flipping the setting applies to the next question.
-  if (relayConfigured()) {
-    beginRelayAsk();
-    return;
-  }
-  ensureConnected();
+  beginRelayAsk();
 }
 
 bool AskAiActivity::extractPageLines() {
@@ -264,26 +240,24 @@ bool AskAiActivity::relayConfigured() {
 }
 
 void AskAiActivity::beginRelayAsk() {
-  // Same prompt bytes as the OpenClaw path (question + scope context); the
-  // relay's LLM turn runs the same system prompt server-side.
+  if (!relayConfigured()) {
+    fail(tr(STR_VOICE_RELAY_NOT_CONFIGURED));
+    return;
+  }
   if (!buildPrompt()) {
     fail(tr(STR_ASK_NO_TEXT));
     return;
   }
-  relayRound_ = true;
   if (relayReply_ == nullptr) {
     relayReply_ = makeUniqueNoThrow<char[]>(VoiceRelay::CHAT_TEXT_CAP + 1);
     if (relayReply_ == nullptr) {
       LOG_ERR("ASK", "OOM: relay reply buffer %u bytes", static_cast<unsigned>(VoiceRelay::CHAT_TEXT_CAP + 1));
-      relayRound_ = false;
       fail(tr(STR_MIC_OOM));
       return;
     }
   }
   // Paint the waiting screen and wait for the frame: the POST below is
-  // blocking on this task, so no repaint can run mid-call (the SttClient
-  // pattern on the voice path). render()'s Asking branch falls back to the
-  // plain waiting label because the session has no round in flight.
+  // blocking on this task, so no repaint can run mid-call.
   state_ = State::Asking;
   requestUpdateAndWait();
   bool truncated = false;
@@ -292,12 +266,8 @@ void AskAiActivity::beginRelayAsk() {
       CLOUD_CFG.relayUrl, CLOUD_CFG.relayToken, CLOUD_CFG.relayDeviceId, prompt_.get(), relayReply_.get(),
       VoiceRelay::CHAT_TEXT_CAP + 1, truncated, /*strokesOut=*/nullptr, /*strokesCap=*/0, /*mode=*/nullptr, &stats);
   if (result != VoiceRelay::ChatClient::Result::Ok) {
-    LOG_ERR("ASK", "relay chat failed: %s (http %d), falling back to OpenClaw",
-            VoiceRelay::ChatClient::resultName(result), stats.httpStatus);
-    // Relay is the preferred service, not a gatekeeper: the same question
-    // goes to the legacy MiMo + OpenClaw gateway. ensureConnected() flips
-    // relayRound_ off, so the answer is read from the session buffer.
-    ensureConnected();
+    LOG_ERR("ASK", "relay chat failed: %s (http %d)", VoiceRelay::ChatClient::resultName(result), stats.httpStatus);
+    fail(tr(STR_VOICE_RELAY_FAILED));
     return;
   }
   if (truncated) {
@@ -310,53 +280,7 @@ void AskAiActivity::beginRelayAsk() {
   requestUpdate();
 }
 
-const char* AskAiActivity::answerText() const {
-  if (relayRound_ && relayReply_ != nullptr) return relayReply_.get();
-  const char* reply = session_.replyText();
-  return reply != nullptr ? reply : "";
-}
-
-void AskAiActivity::ensureConnected() {
-  relayRound_ = false;  // an OpenClaw round must never read a relay answer
-  state_ = State::Connecting;
-  lastWaitTickMs_ = millis();
-  requestUpdate();
-
-  const auto sessionState = session_.state();
-  if (sessionState == OpenClaw::Session::State::Connected || sessionState == OpenClaw::Session::State::Connecting ||
-      sessionState == OpenClaw::Session::State::Handshake || sessionState == OpenClaw::Session::State::Challenge) {
-    // A link is already up or coming up (voice or the workbench dialled it):
-    // join it instead of re-dialling — startConnect() has no connected guard
-    // and would replace the socket in flight (OpenClawSession.cpp:165).
-    session_.setNotifier(this, &AskAiActivity::onSessionNotifyTrampoline);
-    return;
-  }
-  if (!session_.loadConfig()) {
-    fail(session_.reason() != nullptr ? session_.reason() : tr(STR_OPENCLAW_NO_CONFIG));
-    return;
-  }
-  session_.setNotifier(this, &AskAiActivity::onSessionNotifyTrampoline);
-  if (!session_.startConnect()) {
-    fail(session_.reason() != nullptr ? session_.reason() : tr(STR_OPENCLAW_DISCONNECTED));
-    return;
-  }
-}
-
-void AskAiActivity::composeAndSend() {
-  // Context extraction runs only with the link up: a page decode's transient
-  // peak must not overlap the TLS handshake's internal-heap dip (plan §3.5).
-  if (!buildPrompt()) {
-    fail(tr(STR_ASK_NO_TEXT));
-    return;
-  }
-  if (session_.sendMessage(prompt_.get()) == OpenClaw::Session::SendOutcome::Failed) {
-    fail(tr(STR_OPENCLAW_SEND_FAILED));
-    return;
-  }
-  state_ = State::Asking;
-  lastWaitShownSec_ = session_.awaitingMs() / 1000;
-  requestUpdate();
-}
+const char* AskAiActivity::answerText() const { return relayReply_ != nullptr ? relayReply_.get() : ""; }
 
 bool AskAiActivity::buildPrompt() {
   if (!book_) {
@@ -366,7 +290,7 @@ bool AskAiActivity::buildPrompt() {
   // Allocated here — with the link already up — so the 1.5 KB request buffer
   // never sits on the internal heap across the TLS dial (plan §3.5).
   if (!prompt_) {
-    prompt_ = makeUniqueNoThrow<char[]>(OpenClaw::CHAT_MESSAGE_CAP);
+    prompt_ = makeUniqueNoThrow<char[]>(VoiceRelay::CHAT_TEXT_CAP);
     if (!prompt_) {
       LOG_ERR("ASK", "OOM: prompt buffer");
       return false;
@@ -378,7 +302,7 @@ bool AskAiActivity::buildPrompt() {
   static constexpr char INSTRUCTION[] =
       "You are a reading assistant on an e-reader. Answer in the language of the question. "
       "Plain text only, no markdown, at most 120 words.\n";
-  const size_t cap = OpenClaw::CHAT_MESSAGE_CAP;
+  const size_t cap = VoiceRelay::CHAT_TEXT_CAP;
   // The title goes in whole. A fixed-size copy of it (the old char title[65])
   // cut CJK metadata titles mid-codepoint, and an ill-formed byte in the
   // message makes the gateway close the socket before it can answer. A title
@@ -491,7 +415,7 @@ void AskAiActivity::saveRecord() {
   const char* reply = answerText();
   snprintf(record_.get(), RECORD_CAP, "%s%s%s\n%s%s%s", tr(STR_ASK_Q), tr(STR_NOTE_SEP), question_, tr(STR_ASK_A),
            tr(STR_NOTE_SEP), reply);
-  const int64_t now = OpenClaw::nowEpochMs();
+  const int64_t now = ChatLog::nowEpochMs();
   // One append per settled round trip — the same SD write discipline as a
   // dictated voice note. Failure only loses the record, never the answer on
   // screen, so it is logged instead of failing the state machine.
@@ -506,36 +430,12 @@ void AskAiActivity::saveRecord() {
 
 void AskAiActivity::fail(const char* reason) {
   LOG_ERR("ASK", "failed: %s", reason != nullptr ? reason : "?");
-  failReason_ = reason != nullptr ? reason : tr(STR_OPENCLAW_DISCONNECTED);
+  failReason_ = reason != nullptr ? reason : tr(STR_VOICE_RELAY_FAILED);
   state_ = State::Failed;
   requestUpdate();
 }
 
-const char* AskAiActivity::phaseText() const {
-  using SessionState = OpenClaw::Session::State;
-  if (session_.reconnecting()) return tr(STR_OPENCLAW_DISCONNECTED);
-  switch (session_.state()) {
-    case SessionState::Connecting:
-      return tr(STR_OPENCLAW_CONNECTING);
-    case SessionState::Handshake:
-      return tr(STR_OPENCLAW_HANDSHAKE);
-    case SessionState::Challenge:
-      return tr(STR_OPENCLAW_CHALLENGE);
-    case SessionState::Connected:
-      return tr(STR_OPENCLAW_CONNECTED);
-    case SessionState::Failed:
-      return session_.reason() != nullptr ? session_.reason() : tr(STR_OPENCLAW_DISCONNECTED);
-    case SessionState::Idle:
-    default:
-      return tr(STR_OPENCLAW_CONNECTING);
-  }
-}
-
 void AskAiActivity::loop() {
-  // Pumps the shared socket in every state; on an unopened session poll() is
-  // a no-op (same as VoiceActivity::loop).
-  session_.poll();
-
   // Front Left/Right mirror the side Up/Down on every list/scroll state, so
   // the bottom row is never a dead end. The pair flips with the nav axis
   // (INVERTED / LANDSCAPE_CCW) to stay on the keys mapLabels() paints 上/下 over.
@@ -570,64 +470,6 @@ void AskAiActivity::loop() {
     result.isCancelled = true;
     setResult(std::move(result));
     finish();
-    return;
-  }
-
-  if (state_ == State::Connecting) {
-    // A dropped socket leaves state_ at Connected and only arms the reconnect,
-    // so a send fired here writes to a closed socket and comes back as
-    // "Send failed". Hold the question until the link is actually up; a
-    // reconnect budget that runs out lands in Failed below and reports why.
-    if (session_.state() == OpenClaw::Session::State::Connected && !session_.reconnecting()) {
-      composeAndSend();
-      return;
-    }
-    if (session_.state() == OpenClaw::Session::State::Failed) {
-      fail(session_.reason());
-      return;
-    }
-    if (millis() - lastWaitTickMs_ >= CONNECT_TICK_MS) {
-      lastWaitTickMs_ = millis();
-      requestUpdate();
-    }
-    return;
-  }
-
-  if (state_ == State::Asking) {
-    if (session_.awaitingReply()) {
-      // Repaint exactly when the number the screen would print changes: the
-      // countdown steps 0 → 1 → 2 … and never redraws the same second.
-      const uint32_t shownSec = session_.awaitingMs() / 1000;
-      if (shownSec != lastWaitShownSec_) {
-        lastWaitShownSec_ = shownSec;
-        requestUpdate();
-      }
-      return;
-    }
-    if (session_.replySize() > 0 && session_.outcome() == OpenClaw::Session::SendOutcome::Sent) {
-      answerScroll_ = 0;  // a new reply starts at its first line
-      saveRecord();
-      state_ = State::Answer;
-      requestUpdate();
-      return;
-    }
-    if (session_.state() == OpenClaw::Session::State::Connected) {
-      // A dropped socket leaves state_ at Connected and only arms the
-      // reconnect, so "the link is gone" has to be read from reconnecting()
-      // and not from the state — otherwise a closed socket is reported as a
-      // gateway that never answered.
-      if (session_.reconnecting()) {
-        fail(tr(STR_OPENCLAW_DISCONNECTED));
-      } else {
-        fail(session_.lastError() != nullptr ? tr(STR_OPENCLAW_AGENT_FAILED) : tr(STR_OPENCLAW_NO_REPLY));
-      }
-      return;
-    }
-    // Link dropped mid-round trip: the session's own reconnect runs inside
-    // poll(); if it settles into Failed the next pass reports the reason.
-    if (session_.state() == OpenClaw::Session::State::Failed) {
-      fail(session_.reason());
-    }
     return;
   }
 
@@ -905,29 +747,10 @@ void AskAiActivity::render(RenderLock&&) {
       break;
     }
 
-    case State::Connecting: {
-      const char* phase = phaseText();
-      renderer.drawText(UI_10_FONT_ID, left, y, phase, true, EpdFontFamily::BOLD);
-      y += lineHeight + metrics.verticalSpacing;
-      for (const auto& line : renderer.wrappedText(UI_10_FONT_ID, question_, textWidth, 3)) {
-        renderer.drawText(UI_10_FONT_ID, left, y, line.c_str());
-        y += lineHeight;
-      }
-      break;
-    }
-
     case State::Asking: {
-      // Elapsed / deadline read-out — the one thing that changes between the
-      // per-second repaints, so a slow agent turn reads as progress.
-      char waiting[72];
-      if (session_.awaitingReply()) {
-        snprintf(waiting, sizeof(waiting), "%s %u/%us", tr(STR_OPENCLAW_WAITING),
-                 static_cast<unsigned>(session_.awaitingMs() / 1000),
-                 static_cast<unsigned>(OpenClaw::Session::CHAT_TIMEOUT_MS / 1000));
-      } else {
-        snprintf(waiting, sizeof(waiting), "%s", tr(STR_OPENCLAW_WAITING));
-      }
-      renderer.drawText(UI_10_FONT_ID, left, y, waiting, true, EpdFontFamily::BOLD);
+      // Painted once, just before the blocking relay call; the e-ink panel
+      // holds it until the reply settles.
+      renderer.drawText(UI_10_FONT_ID, left, y, tr(STR_VOICE_RELAY_WAITING), true, EpdFontFamily::BOLD);
       y += lineHeight + metrics.verticalSpacing;
       for (const auto& line : renderer.wrappedText(UI_10_FONT_ID, question_, textWidth, 3)) {
         renderer.drawText(UI_10_FONT_ID, left, y, line.c_str());

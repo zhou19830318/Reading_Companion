@@ -49,13 +49,9 @@ class HomeActivity final : public Activity {
     if (hasOpdsUrl) ++i;
     if (item == HomeMenuItem::REVIEW) return i;
     ++i;
-    if (item == HomeMenuItem::WEREAD) return i;
-    ++i;
     if (item == HomeMenuItem::MARKETS) return i;
     ++i;
     if (item == HomeMenuItem::VOICE) return i;
-    ++i;
-    if (item == HomeMenuItem::WORKBENCH) return i;
     ++i;
     if (item == HomeMenuItem::FILE_TRANSFER) return i;
     ++i;
@@ -72,10 +68,8 @@ class HomeActivity final : public Activity {
     if (idx == i++) return HomeMenuItem::RECENTS;
     if (hasOpdsUrl && idx == i++) return HomeMenuItem::OPDS_BROWSER;
     if (idx == i++) return HomeMenuItem::REVIEW;
-    if (idx == i++) return HomeMenuItem::WEREAD;
     if (idx == i++) return HomeMenuItem::MARKETS;
     if (idx == i++) return HomeMenuItem::VOICE;
-    if (idx == i++) return HomeMenuItem::WORKBENCH;
     if (idx == i++) return HomeMenuItem::FILE_TRANSFER;
     if (idx == i++) return HomeMenuItem::PIGEON;
     if (idx == i) return HomeMenuItem::SETTINGS_MENU;
@@ -88,9 +82,7 @@ class HomeActivity final : public Activity {
   void onFileTransferOpen();
   void onOpdsBrowserOpen();
   void onReviewOpen();
-  void onWeReadOpen();
   void onVoiceOpen();
-  void onWorkbenchOpen();
   void onPigeonOpen();
 
   void buildMenu();

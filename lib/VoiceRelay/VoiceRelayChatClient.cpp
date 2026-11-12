@@ -124,7 +124,7 @@ ChatClient::Result ChatClient::ask(const char* url, const char* token, const cha
   }
 
   NetBootstrap::ensureTlsAllocator();
-  // Only a TLS endpoint cares about the clock (same rule as SttClient).
+  // Only a TLS endpoint cares about the clock.
   if (parsed.tls && !NetBootstrap::ensureSystemTime()) return Result::Time;
 
   esp_http_client_config_t config = {};

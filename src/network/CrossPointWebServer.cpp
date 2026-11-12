@@ -7,7 +7,6 @@
 #include <HalStorage.h>
 #include <Logging.h>
 #include <Memory.h>
-#include <SttClient.h>
 #include <WiFi.h>
 #include <esp_task_wdt.h>
 
@@ -17,7 +16,6 @@
 #include "CrossPointSettings.h"
 #include "FontInstaller.h"
 #include "OpdsServerStore.h"
-#include "OpenClawProbe.h"
 #include "SdCardFontSystem.h"
 #include "SettingsList.h"
 #include "WebDAVHandler.h"
@@ -184,12 +182,9 @@ void CrossPointWebServer::begin() {
   server->on("/api/wifi", HTTP_POST, [this] { handlePostWifiNetwork(); });
   server->on("/api/wifi/delete", HTTP_POST, [this] { handleDeleteWifiNetwork(); });
 
-  // Cloud service credentials (NVS): OpenClaw endpoint + MiMo STT key
+  // Relay credentials (NVS): URL, device ID and token
   server->on("/api/cloud", HTTP_GET, [this] { handleGetCloudConfig(); });
   server->on("/api/cloud", HTTP_POST, [this] { handlePostCloudConfig(); });
-  // One-shot reachability probe for the OpenClaw endpoint (does not persist)
-  server->on("/api/openclaw/test", HTTP_POST, [this] { handlePostOpenClawTest(); });
-  server->on("/api/stt/test", HTTP_POST, [this] { handlePostSttTest(); });
 
   server->onNotFound([this] { handleNotFound(); });
   LOG_DBG("WEB", "[MEM] Free heap after route setup: %d bytes", ESP.getFreeHeap());
@@ -1565,22 +1560,13 @@ void CrossPointWebServer::handleDeleteWifiNetwork() {
   server->send(200, "text/plain", "OK");
 }
 
-// GET /api/cloud — the OpenClaw endpoint and the MiMo STT key. Secrets are
-// reported as presence flags only, exactly like hasPassword on /api/wifi.
+// GET /api/cloud — the voice relay endpoint. The token is reported as a
+// presence flag only, exactly like hasPassword on /api/wifi.
 void CrossPointWebServer::handleGetCloudConfig() const {
   CloudConfig& cloud = CLOUD_CFG;
   cloud.load();
 
   JsonDocument doc;
-  doc["host"] = cloud.host;
-  doc["port"] = cloud.port;
-  doc["path"] = cloud.path;
-  doc["tls"] = cloud.tls;
-  doc["protocol"] = cloud.protocol;
-  doc["caPath"] = cloud.caPath;
-  doc["hasToken"] = cloud.token[0] != '\0';
-  doc["sttUrl"] = cloud.sttUrl;
-  doc["hasSttKey"] = cloud.sttKey[0] != '\0';
   doc["relayUrl"] = cloud.relayUrl;
   doc["relayDeviceId"] = cloud.relayDeviceId;
   doc["hasRelayToken"] = cloud.relayToken[0] != '\0';
@@ -1610,44 +1596,6 @@ void CrossPointWebServer::handlePostCloudConfig() {
   CloudConfig& cloud = CLOUD_CFG;
   cloud.load();
 
-  if (doc["host"].is<const char*>()) {
-    snprintf(cloud.host, sizeof(cloud.host), "%s", doc["host"].as<const char*>());
-  }
-  if (doc["port"].is<int>()) {
-    const int port = doc["port"].as<int>();
-    if (port < 1 || port > 65535) {
-      server->send(400, "text/plain", "Port must be 1-65535");
-      return;
-    }
-    cloud.port = static_cast<uint16_t>(port);
-  }
-  if (doc["path"].is<const char*>()) {
-    snprintf(cloud.path, sizeof(cloud.path), "%s", doc["path"].as<const char*>());
-    if (cloud.path[0] != '\0' && cloud.path[0] != '/') {
-      server->send(400, "text/plain", "Path must start with /");
-      return;
-    }
-  }
-  if (doc["tls"].is<bool>()) cloud.tls = doc["tls"].as<bool>();
-  if (doc["protocol"].is<const char*>()) {
-    snprintf(cloud.protocol, sizeof(cloud.protocol), "%s", doc["protocol"].as<const char*>());
-  }
-  if (doc["caPath"].is<const char*>()) {
-    snprintf(cloud.caPath, sizeof(cloud.caPath), "%s", doc["caPath"].as<const char*>());
-    if (cloud.caPath[0] != '\0' && cloud.caPath[0] != '/') {
-      server->send(400, "text/plain", "CA path must start with /");
-      return;
-    }
-  }
-  if (doc["sttUrl"].is<const char*>()) {
-    snprintf(cloud.sttUrl, sizeof(cloud.sttUrl), "%s", doc["sttUrl"].as<const char*>());
-  }
-  if (doc["token"].is<const char*>()) {
-    snprintf(cloud.token, sizeof(cloud.token), "%s", doc["token"].as<const char*>());
-  }
-  if (doc["sttKey"].is<const char*>()) {
-    snprintf(cloud.sttKey, sizeof(cloud.sttKey), "%s", doc["sttKey"].as<const char*>());
-  }
   if (doc["relayUrl"].is<const char*>()) {
     const char* url = doc["relayUrl"].as<const char*>();
     if (url[0] != '\0' && strncmp(url, "ws://", 5) != 0 && strncmp(url, "wss://", 6) != 0) {
@@ -1669,180 +1617,10 @@ void CrossPointWebServer::handlePostCloudConfig() {
   }
 
   // Log presence only — never the values.
-  LOG_INF("WEB", "Cloud config saved (openclaw=%s:%u tls=%d sttKey=%s token=%s relay=%s relayToken=%s)", cloud.host,
-          cloud.port, cloud.tls ? 1 : 0, cloud.sttKey[0] != '\0' ? "set" : "unset",
-          cloud.token[0] != '\0' ? "set" : "unset", cloud.relayUrl[0] != '\0' ? "set" : "unset",
+  LOG_INF("WEB", "Cloud config saved (relay=%s relayDeviceId=%s relayToken=%s)",
+          cloud.relayUrl[0] != '\0' ? "set" : "unset", cloud.relayDeviceId[0] != '\0' ? "set" : "unset",
           cloud.relayToken[0] != '\0' ? "set" : "unset");
   server->send(200, "text/plain", "OK");
-}
-
-// POST /api/openclaw/test — dial the OpenClaw endpoint once and report where
-// it stopped. The body is optional and takes the same fields as /api/cloud;
-// anything omitted falls back to the saved config, so the browser can test the
-// form before it has been saved. Nothing is written to NVS.
-//
-// This blocks the main loop for up to ~17 s (TCP probe + upgrade deadline +
-// first-frame wait + authentication wait). The e-ink render runs on its own
-// task so the panel keeps drawing; only the inactivity timer is delayed.
-void CrossPointWebServer::handlePostOpenClawTest() {
-  CloudConfig& cloud = CLOUD_CFG;
-  cloud.load();
-
-  auto cfg = makeUniqueNoThrow<OpenClawProbe::Config>();
-  auto res = makeUniqueNoThrow<OpenClawProbe::Result>();
-  if (!cfg || !res) {
-    LOG_ERR("WEB", "OOM: OpenClaw probe buffers");
-    server->send(500, "text/plain", "Out of memory");
-    return;
-  }
-
-  snprintf(cfg->host, sizeof(cfg->host), "%s", cloud.host);
-  snprintf(cfg->path, sizeof(cfg->path), "%s", cloud.path);
-  snprintf(cfg->protocol, sizeof(cfg->protocol), "%s", cloud.protocol);
-  snprintf(cfg->caPath, sizeof(cfg->caPath), "%s", cloud.caPath);
-  cfg->port = cloud.port;
-  cfg->tls = cloud.tls;
-  // Credentials are copied before the body is applied so an omitted field
-  // falls back to the saved one; the shared token is the only secret the body
-  // may override, for parity with POST /api/cloud.
-  snprintf(cfg->token, sizeof(cfg->token), "%s", cloud.token);
-  snprintf(cfg->deviceToken, sizeof(cfg->deviceToken), "%s", cloud.deviceToken);
-  snprintf(cfg->deviceKeyHex, sizeof(cfg->deviceKeyHex), "%s", cloud.deviceKeyHex);
-  // Length only: a token that silently hit the buffer cap presents as
-  // "gateway token mismatch" with no hint that it was ever cut short.
-  LOG_INF("WEB", "OpenClaw token %u chars, device token %u chars", (unsigned)strlen(cfg->token),
-          (unsigned)strlen(cfg->deviceToken));
-
-  if (server->hasArg("plain")) {
-    JsonDocument doc;
-    const DeserializationError err = deserializeJson(doc, server->arg("plain"));
-    if (err) {
-      server->send(400, "text/plain", String("Invalid JSON: ") + err.c_str());
-      return;
-    }
-    if (doc["host"].is<const char*>()) snprintf(cfg->host, sizeof(cfg->host), "%s", doc["host"].as<const char*>());
-    if (doc["path"].is<const char*>()) snprintf(cfg->path, sizeof(cfg->path), "%s", doc["path"].as<const char*>());
-    if (doc["protocol"].is<const char*>()) {
-      snprintf(cfg->protocol, sizeof(cfg->protocol), "%s", doc["protocol"].as<const char*>());
-    }
-    if (doc["caPath"].is<const char*>())
-      snprintf(cfg->caPath, sizeof(cfg->caPath), "%s", doc["caPath"].as<const char*>());
-    if (doc["port"].is<int>()) {
-      const int port = doc["port"].as<int>();
-      if (port >= 1 && port <= 65535) cfg->port = static_cast<uint16_t>(port);
-    }
-    if (doc["tls"].is<bool>()) cfg->tls = doc["tls"].as<bool>();
-    if (doc["token"].is<const char*>()) snprintf(cfg->token, sizeof(cfg->token), "%s", doc["token"].as<const char*>());
-  }
-
-  OpenClawProbe::run(*cfg, *res);
-
-  // Log the verdict only — never the token or the CA contents. The stack
-  // watermark is the number that decides whether the ed25519 signing path
-  // (about 1.3 KB of frames under run()) still has room on the loop task.
-  LOG_INF("WEB", "OpenClaw probe %s stage=%s url=%s ms=%u detail=%s", res->ok ? "OK" : "FAILED", res->stage, res->url,
-          (unsigned)res->elapsedMs, res->detail);
-  LOG_INF("WEB", "OpenClaw probe stack watermark %u bytes", (unsigned)uxTaskGetStackHighWaterMark(nullptr));
-  if (res->requestId[0] != '\0') {
-    LOG_INF("WEB", "OpenClaw pairing pending: openclaw devices approve %s", res->requestId);
-  }
-
-  JsonDocument doc;
-  doc["ok"] = res->ok;
-  doc["stage"] = res->stage;
-  doc["detail"] = res->detail;
-  doc["firstFrame"] = res->firstFrame;
-  doc["requestId"] = res->requestId;
-  doc["url"] = res->url;
-  doc["ms"] = res->elapsedMs;
-
-  String json;
-  serializeJson(doc, json);
-  server->send(200, "application/json", json);
-}
-
-// POST /api/stt/test — one minimal request to the MiMo endpoint to check
-// whether the API key is accepted. The body is optional and takes the same
-// fields as /api/cloud; anything omitted falls back to the saved config, so a
-// key typed into the form can be tested before it is saved. Nothing is
-// written to NVS.
-//
-// Blocks the loop task for up to ~15 s (TLS handshake + one round trip), the
-// same trade-off as handlePostOpenClawTest() — the e-ink render task keeps
-// drawing; only the inactivity timer is delayed.
-void CrossPointWebServer::handlePostSttTest() {
-  // 288 bytes of config buffers: over the 256-byte stack budget, so heap with
-  // automatic lifetime rather than raw stack (they outlive probeKey below).
-  auto urlBuf = makeUniqueNoThrow<char[]>(CloudConfig::STT_URL_SIZE);
-  auto keyBuf = makeUniqueNoThrow<char[]>(CloudConfig::STT_KEY_SIZE);
-  if (!urlBuf || !keyBuf) {
-    LOG_ERR("WEB", "OOM: STT probe buffers");
-    server->send(500, "text/plain", "Out of memory");
-    return;
-  }
-
-  SttClient::Config cfg;
-  bool haveKey =
-      SttClient::loadConfig(urlBuf.get(), CloudConfig::STT_URL_SIZE, keyBuf.get(), CloudConfig::STT_KEY_SIZE, cfg);
-
-  // Optional overrides so the form can be tested before saving, for parity
-  // with POST /api/cloud.
-  if (server->hasArg("plain")) {
-    JsonDocument doc;
-    const DeserializationError err = deserializeJson(doc, server->arg("plain"));
-    if (err) {
-      server->send(400, "text/plain", String("Invalid JSON: ") + err.c_str());
-      return;
-    }
-    if (doc["sttUrl"].is<const char*>() && doc["sttUrl"].as<const char*>()[0] != '\0') {
-      snprintf(urlBuf.get(), CloudConfig::STT_URL_SIZE, "%s", doc["sttUrl"].as<const char*>());
-      cfg.url = urlBuf.get();
-    }
-    if (doc["sttKey"].is<const char*>() && doc["sttKey"].as<const char*>()[0] != '\0') {
-      snprintf(keyBuf.get(), CloudConfig::STT_KEY_SIZE, "%s", doc["sttKey"].as<const char*>());
-      cfg.apiKey = keyBuf.get();
-      haveKey = true;
-    }
-  }
-
-  if (!haveKey || cfg.apiKey == nullptr || cfg.apiKey[0] == '\0') {
-    JsonDocument doc;
-    doc["ok"] = false;
-    doc["accepted"] = false;
-    doc["stage"] = "NO_KEY";
-    doc["httpStatus"] = 0;
-    doc["detail"] = "No API key configured";
-    doc["ms"] = 0;
-    String json;
-    serializeJson(doc, json);
-    server->send(200, "application/json", json);
-    return;
-  }
-
-  const int64_t t0 = esp_timer_get_time();
-  SttClient::KeyProbe probe;
-  const SttClient::Result r = SttClient::probeKey(cfg, probe);
-  const uint32_t elapsedMs = static_cast<uint32_t>((esp_timer_get_time() - t0) / 1000);
-
-  // Credentials are checked before the body, so only an explicit refusal
-  // means the key is wrong: any other status proves it got that far. Log the
-  // verdict and the status — never the key itself.
-  const bool refused = r == SttClient::ERR_HTTP && (probe.httpStatus == 401 || probe.httpStatus == 403);
-  const bool accepted = (r == SttClient::OK) || (r == SttClient::ERR_HTTP);
-  LOG_INF("WEB", "STT probe %s stage=%s http=%d ms=%u", accepted ? "ACCEPTED" : "REFUSED", SttClient::resultName(r),
-          probe.httpStatus, static_cast<unsigned>(elapsedMs));
-
-  JsonDocument doc;
-  doc["ok"] = (r == SttClient::OK);
-  doc["accepted"] = accepted && !refused;
-  doc["stage"] = SttClient::resultName(r);
-  doc["httpStatus"] = probe.httpStatus;
-  doc["detail"] = probe.detail;
-  doc["ms"] = elapsedMs;
-
-  String json;
-  serializeJson(doc, json);
-  server->send(200, "application/json", json);
 }
 
 // WebSocket callback trampoline

@@ -1,5 +1,10 @@
 # OnePage「生活助手」页面追加需求与实现说明
 
+> **历史文档。** 本稿描述的 OpenClaw 网关、「我的工作台」与微信读书已从固件移除；
+> 当前实现（语音 / AI / 字典 / 语音书签 / 行情 / 飞鸽传书全部经自建 Voice Relay）
+> 见 [README](../README.md) 与 [relay/README.md](../relay/README.md)。
+
+
 ## 1. 需求背景
 
 OnePage 当前已经具备：

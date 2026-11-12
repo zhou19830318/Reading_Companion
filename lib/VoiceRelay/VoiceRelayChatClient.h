@@ -11,7 +11,7 @@
 //
 // Blocking by design: the Ask-AI screen runs one question at a time from its
 // loop and paints a static waiting frame before the call — the same pattern
-// as SttClient::transcribe on the voice path. The host-testable halves (request
+// as the relay voice stream on the voice path. The host-testable halves (request
 // bytes, response parsing) live in VoiceRelayCodec.
 namespace VoiceRelay {
 

@@ -324,10 +324,9 @@ void setupDisplayAndFonts(bool seamless = false) {
   // font file degrades gracefully (CJK shows as replacement boxes).
   if (cjkUiFontSystem.loadIfAvailable()) {
     cjkUiFontSystem.attachToUiFonts(ui10RegularFont, ui10BoldFont, ui12RegularFont, ui12BoldFont, smallFont);
-    // The Workbench date line draws 年月日/星期 with Noto Serif 14 and the
-    // weather line with Serif 16 — pure-Latin builtin faces, so without the
-    // fallback they render replacement boxes. notoserif16* lives inside
-    // OMIT_FONTS; serif14 (the date line, the actual bug) always exists.
+    // The reader stock fonts render CJK text through the same builtin faces,
+    // so they need the fallback too. notoserif16* lives inside OMIT_FONTS;
+    // serif14 always exists.
     cjkUiFontSystem.attachTo(notoserif14RegularFont);
 #ifndef OMIT_FONTS
     cjkUiFontSystem.attachTo(notoserif16RegularFont);
@@ -608,7 +607,7 @@ void loop() {
   if (Serial && millis() - lastMemPrint >= 10000) {
     // Raw heap_caps_* for the PSRAM columns, not ESP.getPsramSize()/FreePsram():
     // those gate on psramFound(), which reports 0 on this build even though the
-    // SPIRAM heap is live (measured: OpenClawActivity's chat buffer is served
+    // SPIRAM heap is live (measured: the voice client's buffers are served
     // from MALLOC_CAP_SPIRAM while the same line prints PsramT: 0). A column
     // that always says "no PSRAM" would send every reader down the wrong path.
     LOG_INF("MEM", "Free: %d bytes, Total: %d bytes, Min Free: %d bytes, MaxAlloc: %d bytes PsramT: %u PsramF: %u",
@@ -793,9 +792,6 @@ void loop() {
       } else if (cmd == "GO_VOICE") {
         // Debug: jump straight to the voice screen (no menu navigation).
         activityManager.goToVoice();
-      } else if (cmd == "GO_WORKBENCH") {
-        // Debug: jump straight to the workbench screen (no menu navigation).
-        activityManager.goToWorkbench();
       } else if (cmd == "POMODORO_STATE") {
         // Debug: report the focus-timer state for device tests. state is the
         // PomodoroSession::State ordinal (0 Idle, 1 Work, 2 WorkDone, 3 Break,

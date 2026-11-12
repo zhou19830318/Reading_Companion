@@ -1,7 +1,5 @@
 #pragma once
 
-#include <OpenClawSession.h>
-
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -11,18 +9,16 @@
 #include "activities/Activity.h"
 
 // Character lookup card: opened from the reader's dictionary picker with the
-// single chosen codepoint. Preferred backend is the relay's /api/v1/chat with
+// single chosen codepoint. The only backend is the relay's /api/v1/chat with
 // mode="dict" (the relay applies its dictionary system prompt server-side:
 // pinyin, radical and stroke count, meanings, word formations, an example —
-// 【】-delimited lines). When the relay is not configured or its round fails,
-// the same request falls back to the legacy MiMo + OpenClaw gateway, which
-// gets the format instruction inline (the relay's dict prompt, mirrored in
-// buildDictPrompt()). Either way the reply is laid out as a Xinhua-style card
-// with the character set as a hero glyph at the top. When the relay supplied
-// a stroke-order payload for the character, Confirm on the card opens a 田字格
-// view that draws every stroke in order; Back/Confirm there return to the
-// card. Back returns to the picker with the cursor intact; Confirm retries
-// after a failure.
+// 【】-delimited lines). An unconfigured relay or a failed round is a hard
+// failure with Confirm-to-retry; there is no second backend. The reply is laid
+// out as a Xinhua-style card with the character set as a hero glyph at the
+// top. When the relay supplied a stroke-order payload for the character,
+// Confirm on the card opens a 田字格 view that draws every stroke in order;
+// Back/Confirm there return to the card. Back returns to the picker with the
+// cursor intact; Confirm retries after a failure.
 class DictionaryActivity final : public Activity {
  public:
   DictionaryActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, uint32_t codepoint)
@@ -32,18 +28,14 @@ class DictionaryActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&& lock) override;
-  bool preventAutoSleep() override {
-    return state_ == State::Loading || state_ == State::Connecting || state_ == State::Asking;
-  }
+  bool preventAutoSleep() override { return state_ == State::Loading; }
 
  private:
   enum class State : uint8_t {
-    Loading,     // relay round in flight (painted before the blocking call)
-    Connecting,  // OpenClaw fallback: gateway link coming up, sends once Connected
-    Asking,      // chat.send outstanding, reply streaming
-    Card,        // settled entry, scrollable
-    Strokes,     // 田字格 stroke-order view (relay strokes payload)
-    Failed,      // both backends died; Confirm retries from the relay
+    Loading,  // relay round in flight (painted before the blocking call)
+    Card,     // settled entry, scrollable
+    Strokes,  // 田字格 stroke-order view (relay strokes payload)
+    Failed,   // round died; Confirm retries from the relay
   };
 
   // One laid-out card row: a label (【拼音】 …) and its content. Short
@@ -64,8 +56,8 @@ class DictionaryActivity final : public Activity {
   static constexpr size_t REPLY_CAP = 2048;
   // Encoded stroke-order payload for the hero character (relay "strokes"
   // field): strokes separated by '|', "x,y" points by ';', quantized 0..255
-  // (relay tools/build_stroke_data.py). Empty when the fallback gateway or a
-  // character without data is in play — the card then offers no stroke view.
+  // (relay tools/build_stroke_data.py). Empty for a character without data —
+  // the card then offers no stroke view.
   std::unique_ptr<char[]> strokes_;
   static constexpr size_t STROKES_CAP = 1152;  // data max is 1106 (籲); see STROKES_META.json
   std::string heroChar_;                       // 【字】's content when present, else charBuf_
@@ -74,31 +66,8 @@ class DictionaryActivity final : public Activity {
   int scrollLine_ = 0;
   int maxScroll_ = 0;  // recomputed each render from the wrapped rows
 
-  // OpenClaw fallback (Connecting/Asking). The prompt is allocated on first
-  // use — with the link already up, so it never sits on the internal heap
-  // across the TLS dial — and the session is the shared, process-wide gateway
-  // link: borrowed, never closed here (the workbench status cards read it).
-  std::unique_ptr<char[]> prompt_;
-  static constexpr size_t PROMPT_CAP = 1024;
-  OpenClaw::Session& session_ = OpenClaw::Session::instance();
-  // Safety repaint while State::Connecting. phaseText() is static between the
-  // session notifier's own repaints, so this only guards a notification that
-  // never arrives; there is no counter on that screen to keep honest, hence
-  // the coarse step.
-  static constexpr uint32_t CONNECT_TICK_MS = 15000;
-  uint32_t lastWaitTickMs_ = 0;
-  // Elapsed-seconds value the Asking read-out last showed; compared against
-  // awaitingMs()/1000 so the wait line repaints exactly once per real second.
-  uint32_t lastWaitShownSec_ = 0;
-
   void beginLookup();
-  void beginOpenClawLookup();
-  bool buildDictPrompt();
-  void sendDictPrompt();
-  const char* phaseText() const;
   void promptForWifi();
   void buildCard(int fontId, int textWidth);
   void renderStrokesView(int left, int right, int contentTop, int contentBottom);
-  static void onSessionNotifyTrampoline(void* ctx);
-  void onSessionNotify();
 };

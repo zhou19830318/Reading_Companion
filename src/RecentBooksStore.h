@@ -7,8 +7,8 @@ struct RecentBook {
   std::string title;
   std::string author;
   std::string coverBmpPath;
-  // Reading progress mirrored from the reader so the workbench "now reading"
-  // card can show it without loading the EPUB. 0 = never opened / unknown.
+  // Reading progress mirrored from the reader so the home screen's recent-book
+  // tiles can show it without loading the EPUB. 0 = never opened / unknown.
   // Appended last with defaults so the existing `RecentBook{a,b,c,d}`
   // aggregate initialisers keep compiling.
   uint8_t progressPercent = 0;

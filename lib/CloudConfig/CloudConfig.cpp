@@ -10,17 +10,6 @@ namespace {
 // NVS namespace (max 15 chars). Keys below are also max 15 chars.
 constexpr const char* kNamespace = "xpcloud";
 
-constexpr const char* kOcHost = "oc_host";
-constexpr const char* kOcPort = "oc_port";
-constexpr const char* kOcPath = "oc_path";
-constexpr const char* kOcTls = "oc_tls";
-constexpr const char* kOcProto = "oc_proto";
-constexpr const char* kOcToken = "oc_token";
-constexpr const char* kOcCa = "oc_ca";
-constexpr const char* kOcDevToken = "oc_dvtok";
-constexpr const char* kOcDevKey = "oc_devkey";
-constexpr const char* kSttKey = "stt_key";
-constexpr const char* kSttUrl = "stt_url";
 constexpr const char* kRelayUrl = "relay_url";
 constexpr const char* kRelayToken = "relay_tok";
 constexpr const char* kRelayDeviceId = "relay_devid";
@@ -71,78 +60,29 @@ bool CloudConfig::ensureOpen() {
 bool CloudConfig::load() {
   if (!ensureOpen()) return false;
 
-  getStr(kOcHost, host, sizeof(host));
-  getStr(kOcPath, path, sizeof(path));
-  getStr(kOcProto, protocol, sizeof(protocol));
-  getStr(kOcToken, token, sizeof(token));
-  getStr(kOcCa, caPath, sizeof(caPath));
-  getStr(kOcDevToken, deviceToken, sizeof(deviceToken));
-  getStr(kOcDevKey, deviceKeyHex, sizeof(deviceKeyHex));
-  getStr(kSttKey, sttKey, sizeof(sttKey));
-  getStr(kSttUrl, sttUrl, sizeof(sttUrl));
   getStr(kRelayUrl, relayUrl, sizeof(relayUrl));
   getStr(kRelayToken, relayToken, sizeof(relayToken));
   getStr(kRelayDeviceId, relayDeviceId, sizeof(relayDeviceId));
-  port = prefs.getUShort(kOcPort, 443);
-  tls = prefs.getBool(kOcTls, true);
 
-  if (path[0] == '\0') snprintf(path, sizeof(path), "/");
-  if (protocol[0] == '\0') snprintf(protocol, sizeof(protocol), "v2.openclaw.io");
-
-  const bool haveOpenClaw = host[0] != '\0';
-  const bool haveStt = sttKey[0] != '\0';
   const bool haveRelay = relayUrl[0] != '\0';
-  LOG_INF("CLD", "loaded: openclaw=%s stt=%s sttUrl=%s relay=%s relayToken=%s", haveOpenClaw ? host : "<unset>",
-          haveStt ? "set" : "<unset>", sttUrl[0] != '\0' ? sttUrl : "<default>", haveRelay ? relayUrl : "<unset>",
+  LOG_INF("CLD", "loaded: relay=%s relayToken=%s", haveRelay ? relayUrl : "<unset>",
           relayToken[0] != '\0' ? "set" : "<unset>");
-  return haveOpenClaw || haveStt || haveRelay;
+  return haveRelay;
 }
 
 bool CloudConfig::save() {
   if (!ensureOpen()) return false;
 
   bool ok = true;
-  ok = putStr(kOcHost, host) && ok;
-  ok = putStr(kOcPath, path) && ok;
-  ok = putStr(kOcProto, protocol) && ok;
-  ok = putStr(kOcToken, token) && ok;
-  ok = putStr(kOcCa, caPath) && ok;
-  ok = putStr(kOcDevToken, deviceToken) && ok;
-  ok = putStr(kOcDevKey, deviceKeyHex) && ok;
-  ok = putStr(kSttKey, sttKey) && ok;
-  ok = putStr(kSttUrl, sttUrl) && ok;
   ok = putStr(kRelayUrl, relayUrl) && ok;
   ok = putStr(kRelayToken, relayToken) && ok;
   ok = putStr(kRelayDeviceId, relayDeviceId) && ok;
-  ok = (prefs.putUShort(kOcPort, port) > 0) && ok;
-  ok = prefs.putBool(kOcTls, tls) && ok;
 
   if (!ok) {
     LOG_ERR("CLD", "NVS write failed");
     return false;
   }
 
-  LOG_INF("CLD", "saved: openclaw=%s:%u tls=%d relay=%s", host[0] != '\0' ? host : "<unset>", port, tls ? 1 : 0,
-          relayUrl[0] != '\0' ? relayUrl : "<unset>");
+  LOG_INF("CLD", "saved: relay=%s", relayUrl[0] != '\0' ? relayUrl : "<unset>");
   return true;
-}
-
-bool CloudConfig::setDeviceKey(const char* seedHex) {
-  if (!ensureOpen() || seedHex == nullptr || seedHex[0] == '\0') return false;
-  char current[DEVICE_KEY_SIZE];
-  if (getStr(kOcDevKey, current, sizeof(current)) && strcmp(current, seedHex) == 0) return true;
-  snprintf(deviceKeyHex, sizeof(deviceKeyHex), "%s", seedHex);
-  const bool ok = putStr(kOcDevKey, deviceKeyHex);
-  if (!ok) LOG_ERR("CLD", "device key write failed");
-  return ok;
-}
-
-bool CloudConfig::setDeviceToken(const char* token) {
-  if (!ensureOpen() || token == nullptr || token[0] == '\0') return false;
-  char current[TOKEN_SIZE];
-  if (getStr(kOcDevToken, current, sizeof(current)) && strcmp(current, token) == 0) return true;
-  snprintf(deviceToken, sizeof(deviceToken), "%s", token);
-  const bool ok = putStr(kOcDevToken, deviceToken);
-  if (!ok) LOG_ERR("CLD", "device token write failed");
-  return ok;
 }

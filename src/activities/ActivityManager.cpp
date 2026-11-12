@@ -25,8 +25,6 @@
 #include "settings/SettingsActivity.h"
 #include "util/FullScreenMessageActivity.h"
 #include "voice/VoiceActivity.h"
-#include "weread/WeReadActivity.h"
-#include "workbench/WorkbenchActivity.h"
 
 void ActivityManager::begin() {
   xTaskCreate(&renderTaskTrampoline, "ActivityManagerRender",
@@ -233,8 +231,6 @@ void ActivityManager::goToReader(std::string path) {
 
 void ActivityManager::goToReview() { replaceActivity(std::make_unique<ReviewActivity>(renderer, mappedInput)); }
 
-void ActivityManager::goToWeRead() { replaceActivity(std::make_unique<WeReadActivity>(renderer, mappedInput)); }
-
 void ActivityManager::goToMarkets() {
   auto activity = makeUniqueNoThrow<MarketActivity>(renderer, mappedInput);
   if (!activity) {
@@ -247,8 +243,6 @@ void ActivityManager::goToMarkets() {
 void ActivityManager::goToVoice() { replaceActivity(std::make_unique<VoiceActivity>(renderer, mappedInput)); }
 
 void ActivityManager::goToAiAssistant() { replaceActivity(std::make_unique<AiHubActivity>(renderer, mappedInput)); }
-
-void ActivityManager::goToWorkbench() { replaceActivity(std::make_unique<WorkbenchActivity>(renderer, mappedInput)); }
 
 void ActivityManager::goToPigeon() {
   replaceActivity(std::make_unique<PigeonDeviceListActivity>(renderer, mappedInput));
@@ -280,8 +274,6 @@ void ActivityManager::goHome(HomeMenuItem initialMenuItem) {
       initialMenuItem = HomeMenuItem::FILE_TRANSFER;
     } else if (activityName == "Review") {
       initialMenuItem = HomeMenuItem::REVIEW;
-    } else if (activityName == "WeRead") {
-      initialMenuItem = HomeMenuItem::WEREAD;
     } else if (activityName == "Markets") {
       initialMenuItem = HomeMenuItem::MARKETS;
     } else if (activityName == "Voice") {

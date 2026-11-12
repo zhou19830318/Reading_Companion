@@ -18,7 +18,6 @@ def _headers(token: str, device_id: str) -> dict[str, str]:
 
 def test_admin_manages_device_and_config_pull(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("RELAY_DEVICE_DIR", str(tmp_path / "devices"))
-    monkeypatch.setenv("RELAY_WEREAD_DIR", str(tmp_path / "weread"))
     monkeypatch.setenv("RELAY_DEVICE_TOKEN", "")
     monkeypatch.setenv("RELAY_DEVICE_TOKENS", "")
     monkeypatch.setenv("ALLOWED_DEVICE_IDS", "")
@@ -39,7 +38,6 @@ def test_admin_manages_device_and_config_pull(tmp_path: Path, monkeypatch):
             device = created.json()["device"]
             token = device["token"]
             assert token
-            assert device["hasWereadKey"] is False
 
             config = client.get("/api/v1/device/config", headers=_headers(token, "onepage-001"))
             assert config.status_code == 200
@@ -50,46 +48,8 @@ def test_admin_manages_device_and_config_pull(tmp_path: Path, monkeypatch):
                 "token": token,
             }
 
-            before = client.get("/api/v1/weread/status", headers=_headers(token, "onepage-001"))
-            assert before.status_code == 200
-            assert before.json()["configured"] is False
-
-            saved = client.post(
-                "/admin/devices",
-                headers={**ADMIN, "Content-Type": "application/json"},
-                json={"deviceId": "onepage-001", "apiKey": "wrk-device-one-1234567890"},
-            )
-            assert saved.status_code == 200
-            assert saved.json()["device"]["hasWereadKey"] is True
-
-            # A typo must not silently create a second device record.
-            unknown = client.post(
-                "/admin/weread",
-                headers={**ADMIN, "Content-Type": "application/json"},
-                json={"deviceId": "no-such-device", "apiKey": "wrk-device-two-1234567890"},
-            )
-            assert unknown.status_code == 400
-
-            status = client.get("/api/v1/weread/status", headers=_headers(token, "onepage-001")).json()
-            assert status["configured"] is True
-            assert status["source"] == "device"
-            assert "wrk-device-one" not in str(status)
-
-            cleared = client.delete("/admin/weread?deviceId=onepage-001", headers=ADMIN)
-            assert cleared.status_code == 200
-            assert cleared.json()["configured"] is False
-
-            saved_key = client.post(
-                "/admin/weread",
-                headers={**ADMIN, "Content-Type": "application/json"},
-                json={"deviceId": "onepage-001", "apiKey": "wrk-device-one-1234567890"},
-            )
-            assert saved_key.status_code == 200
-            assert saved_key.json()["source"] == "device"
-
             listed = client.get("/admin/devices", headers=ADMIN).json()["devices"]
             assert [row["deviceId"] for row in listed] == ["onepage-001"]
-            assert "wrk-device-one" not in str(listed)
 
             assert client.get("/api/v1/device/config", headers=_headers("wrong-token-123456", "onepage-001")).status_code == 401
             assert client.get("/api/v1/device/config", headers=_headers(token, "unknown-device")).status_code == 401

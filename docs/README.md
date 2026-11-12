@@ -1,14 +1,14 @@
 # 文档索引 / Docs Index
 
 ## 产品与需求
-- [OnePage 软件功能需求文档 v4.0](<OnePage 软件功能需求文档v4.0 版.md>) — 当前版本 PRD
-- [OnePage 补充 PRD](<OnePage_additional _PRD.md>) — 增补需求（语音 / OpenClaw 等）
+- [OnePage 软件功能需求文档 v4.0](<OnePage 软件功能需求文档v4.0 版.md>) — 历史 PRD
+- [OnePage 补充 PRD](<OnePage_additional _PRD.md>) — 历史增补需求（其中的 OpenClaw 集成已废弃）
 - [comparison.md](comparison.md) — 与参考实现的界面对比
 - 项目愿景与范围见根目录 [SCOPE.md](../SCOPE.md)
 
 ## 开发计划
-- [v4.0-development-plan.md](v4.0-development-plan.md) — v4.0 实施计划（含构建/烧录流程）
-- [voice-openclaw-port-plan.md](voice-openclaw-port-plan.md) — 语音 + OpenClaw 移植方案（§10 为环境踩坑记录）
+- [v4.0-development-plan.md](v4.0-development-plan.md) — v4.0 实施计划（历史，含构建/烧录流程）
+- [voice-openclaw-port-plan.md](voice-openclaw-port-plan.md) — 语音移植方案（历史；OpenClaw 路径已移除，现全部走 voice relay）
 
 ## 架构与模块
 - [activity-manager.md](activity-manager.md) — 活动（页面）栈与生命周期

@@ -128,7 +128,6 @@ enum UIIcon {
   Hotspot,
   Bookmark,
   Mic,
-  Workbench,
   Review,
   Market,
   PigeonChat

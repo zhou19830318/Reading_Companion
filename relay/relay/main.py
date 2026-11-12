@@ -7,12 +7,15 @@ Routes (docs section 17.5):
   GET  /admin/status            JSON backing the setup page
   GET  /api/v1/device/config    device capabilities, device token
   WSS  /api/v1/voice/stream     the device's realtime channel
-  POST /api/v1/chat             admin-only text debug (SSE or JSON)
+  POST /api/v1/chat             admin or device token: text answer (SSE or JSON)
+  POST /api/v1/image            admin or device token: 1-bit panel image card
   GET  /api/v1/learning/words   device token: word book listing
   POST /api/v1/learning/words   device token: word book batch add
   POST /api/v1/learning/review  device token: review event (idempotent)
   POST /api/v1/pomodoro/sessions device token: completed focus sessions (idempotent)
   GET  /api/v1/pomodoro/stats   device token: daily focus aggregates
+  GET  /api/v1/markets/         device token: market snapshot
+  POST /api/v1/pigeon/*         device token: Pigeon messaging data plane
   GET  /metrics                 prometheus, internal exposure only
 """
 
@@ -42,7 +45,6 @@ from . import (
     pomodoro_store,
     protocol,
     t2i,
-    weread,
 )
 from .auth import check_admin, check_device
 from .config import Settings, get_settings
@@ -106,22 +108,11 @@ async def lifespan(app: FastAPI):
     log.info("pigeon store ready", extra={"db": str(pigeon.db_path)})
     # Server-managed device registry. Environment tokens remain the fallback
     # for an unmanaged deployment; once devices.json has entries it is
-    # authoritative for device URL/token and per-device WeRead keys.
+    # authoritative for device URL/token.
     app.state.devices = device_store.make_store(settings)
     log.info(
         "device registry ready",
         extra={"path": str(app.state.devices.path), "devices": len(app.state.devices.ids())},
-    )
-    # WeRead: server-side key + short-lived shelf/progress caches. No database
-    # and no writes to the reading account; the official Skill API is read-only.
-    app.state.weread = weread.WeReadStore(settings, app.state.devices)
-    log.info(
-        "weread bridge ready",
-        extra={
-            "configured": app.state.weread.configured,
-            "source": app.state.weread.source(),
-            "skill_version": settings.weread_skill_version,
-        },
     )
     app.state.markets = markets.MarketStore(settings)
     yield
@@ -260,57 +251,6 @@ async def market_lookup(request: Request, code: str = "", period: str = "1d"):
         return JSONResponse(content={"ok": True, "card": card}, headers={"Cache-Control": "no-store"})
     except markets.MarketError as exc:
         return JSONResponse(status_code=exc.status, content={"ok": False, "error": exc.code})
-
-
-def _weread_or_error(exc: weread.WeReadError) -> JSONResponse:
-    if exc.detail:
-        log.warning("weread upstream error", extra={"code": exc.code, "detail": exc.detail})
-    return JSONResponse(status_code=exc.status_code, content={"ok": False, "error": exc.code})
-
-
-@app.get("/api/v1/weread/status")
-async def weread_status(request: Request):
-    device_id, error = _device_or_error(request)
-    if error is not None:
-        return error
-    return JSONResponse(content=request.app.state.weread.status(device_id))
-
-
-@app.get("/api/v1/weread/shelf")
-async def weread_shelf(request: Request, limit: int = 20, offset: int = 0, refresh: bool = False):
-    device_id, error = _device_or_error(request)
-    if error is not None:
-        return error
-    try:
-        return JSONResponse(
-            content=await request.app.state.weread.shelf(
-                limit=limit, offset=offset, force=refresh, device_id=device_id
-            )
-        )
-    except weread.WeReadError as exc:
-        return _weread_or_error(exc)
-
-
-@app.get("/api/v1/weread/book")
-async def weread_book(request: Request, bookId: str = ""):  # noqa: N803 - gateway spelling
-    device_id, error = _device_or_error(request)
-    if error is not None:
-        return error
-    try:
-        return JSONResponse(content=await request.app.state.weread.book(bookId, device_id=device_id))
-    except weread.WeReadError as exc:
-        return _weread_or_error(exc)
-
-
-@app.get("/api/v1/weread/stats")
-async def weread_stats(request: Request, mode: str = "overall"):
-    device_id, error = _device_or_error(request)
-    if error is not None:
-        return error
-    try:
-        return JSONResponse(content=await request.app.state.weread.stats(mode, device_id=device_id))
-    except weread.WeReadError as exc:
-        return _weread_or_error(exc)
 
 
 @app.get("/metrics")

@@ -5,8 +5,8 @@
 #include <FontCacheManager.h>
 #include <I18n.h>
 #include <NoteStore.h>
-#include <OpenClawSession.h>
 #include <VoiceRelayChatClient.h>
+#include <VoiceRelayCodec.h>
 
 #include <memory>
 #include <optional>
@@ -15,10 +15,11 @@
 
 // AI-01 (阅读中快捷键 → 上下文提问): pick a reading question from a preset
 // list, speak or type one (VoiceActivity's question-input mode), or select a
-// line range on the current page, send it over the shared OpenClaw session
-// with the current page / following pages as context, and keep the round trip
-// as a bookmark entry (NoteStore) so it can be re-read from the reader's note
-// list.
+// line range on the current page, send it to the relay's text endpoint with
+// the current page / following pages as context, and keep the round trip as a
+// bookmark entry (NoteStore) so it can be re-read from the reader's note list.
+// The relay is the only backend: an unconfigured relay or a failed round is a
+// hard failure with its reason on screen, never a fallback to another model.
 //
 // Why this is its own lean activity instead of VoiceActivity:
 //  - no mic, no STT, no 32 KB history pool: the big buffers (prompt, record,
@@ -29,11 +30,9 @@
 //    question is picked, so the picker and the selection screen stay usable
 //    offline and the Wi-Fi detour happens at send time (the same rule as the
 //    note-mode fix in VoiceActivity::startRecording);
-//  - an already-up link is reused without startConnect(), which would re-dial
-//    over a live socket (OpenClawSession.cpp:165 has no connected guard);
-//  - context text is extracted only after the link is up (Page/Chapter), or
-//    is copied up front into a PSRAM-forced line pool (Range), so the page
-//    decode never overlaps the TLS dip with internal-heap allocations.
+//  - context text is extracted just before the blocking relay call (Page /
+//    Chapter), or is copied up front into a PSRAM-forced line pool (Range), so
+//    the page decode never overlaps the TLS dip with internal-heap allocations.
 class AskAiActivity final : public Activity {
  public:
   AskAiActivity(GfxRenderer& renderer, MappedInputManager& mappedInput) : Activity("AskAi", renderer, mappedInput) {}
@@ -52,12 +51,11 @@ class AskAiActivity final : public Activity {
 
  private:
   enum class State : uint8_t {
-    Picking,     // preset / voice question list
-    Selecting,   // line-range picker for the Range presets
-    Connecting,  // Wi-Fi or gateway link coming up; sends once Connected
-    Asking,      // chat.send outstanding, reply streaming
-    Answer,      // settled reply, scrollable window
-    Failed,      // round trip died; Confirm retries the same question
+    Picking,    // preset / voice question list
+    Selecting,  // line-range picker for the Range presets
+    Asking,     // blocking relay round in flight (painted before the call)
+    Answer,     // settled reply, scrollable window
+    Failed,     // round trip died; Confirm retries the same question
   };
 
   // Context scope of a question: the current page only, a forward window from
@@ -68,21 +66,14 @@ class AskAiActivity final : public Activity {
   static constexpr int ROW_COUNT = PRESET_COUNT + 1;  // + voice/keyboard row
   static constexpr int ROW_CUSTOM = PRESET_COUNT;
   // Chapter context reads forward from the current page, at most this many
-  // pages: CHAT_MESSAGE_CAP (1536) holds well under one page of CJK text
-  // anyway, and a bounded loop keeps the SD/page decode off the watchdog.
+  // pages: the relay prompt cap (1536 bytes) holds well under one page of CJK
+  // text anyway, and a bounded loop keeps the SD/page decode off the watchdog.
   static constexpr int MAX_CONTEXT_PAGES = 3;
   static constexpr size_t QUESTION_CAP = 256;
   // Question + labels + reply always fit, so the record is never cut mid
   // character before NoteStore::buildLine sees it.
-  static constexpr size_t RECORD_CAP = OpenClaw::CHAT_MESSAGE_CAP + QUESTION_CAP + 64;
+  static constexpr size_t RECORD_CAP = VoiceRelay::CHAT_TEXT_CAP + QUESTION_CAP + 64;
   static constexpr int WRAP_MAX_LINES = 512;
-  // Safety repaint while State::Connecting. phaseText() is static between the
-  // session notifier's own repaints, so this only guards a notification that
-  // never arrives; there is no counter on that screen to keep honest, hence
-  // the coarse step. The Asking countdown does NOT use this — it repaints per
-  // whole displayed second, see lastWaitShownSec_.
-  static constexpr uint32_t CONNECT_TICK_MS = 15000;
-
   // Range selection: the page's lines are copied once into a PSRAM-forced
   // pool (held from pick time through the TLS dial — never internal DRAM),
   // addressed by uint16 offset/length pairs so the member array stays small.
@@ -108,24 +99,17 @@ class AskAiActivity final : public Activity {
   void enterSelecting();
   void exitSelectionView();
   void renderSelectionView(int viewTop, int viewHeight);
-  // Voice-relay chat path: blocking POST /api/v1/chat on the configured relay
-  // origin, one question per call, prompt bytes identical to the OpenClaw path.
-  // Entered instead of ensureConnected() when the relay setting is on.
+  // The relay setting is complete (URL + token + device id). Checked per ask,
+  // so flipping the setting applies to the next question.
   bool relayConfigured();
+  // Blocking POST /api/v1/chat on the configured relay origin, one question
+  // per call. Paints the waiting frame first: no repaint can run mid-call.
   void beginRelayAsk();
-  // Where the settled answer lives: the relay's per-activity reply buffer or
-  // the shared OpenClaw session's, per the round that produced it.
   const char* answerText() const;
-  void ensureConnected();
-  void composeAndSend();
   bool buildPrompt();
   void saveRecord();
   void fail(const char* reason);
-  const char* phaseText() const;
   size_t drawWindow(int fontId, const char* text, int x, int y, int width, int capacity, size_t& firstLine);
-  static void onSessionNotifyTrampoline(void* ctx);
-  void onSessionNotify();
-
   // Armed by the reader (see setBookContext).
   std::shared_ptr<Epub> book_;
   char bookBase_[Notes::NoteFormat::NAME_PATH_SIZE] = {};
@@ -140,12 +124,6 @@ class AskAiActivity final : public Activity {
   size_t answerScroll_ = 0;
   bool saved_ = false;
   const char* failReason_ = nullptr;
-  uint32_t lastWaitTickMs_ = 0;
-  // Elapsed-seconds value the "… n/120s" read-out last showed. Compared
-  // against awaitingMs()/1000 so the countdown repaints exactly once per
-  // real second: a millis() threshold drifts, reprinting one second and
-  // skipping the next. Re-seeded in composeAndSend().
-  uint32_t lastWaitShownSec_ = 0;
   // Back press seen while current: the finish waits for its release edge so
   // the reader never consumes an orphaned Back release (see loop()).
   bool backArmed_ = false;
@@ -156,15 +134,9 @@ class AskAiActivity final : public Activity {
   std::unique_ptr<char[]> prompt_;
   std::unique_ptr<char[]> record_;
   std::unique_ptr<char[]> lineBuf_;
-  // Relay answer scratch (CHAT_TEXT_CAP + 1), allocated on the first relay
-  // round only — an OpenClaw-only session never pays for it. Freed with the
-  // activity like the buffers above.
+  // Relay answer scratch (CHAT_TEXT_CAP + 1), allocated on the first round
+  // only. Freed with the activity like the buffers above.
   std::unique_ptr<char[]> relayReply_;
-  // Which backend produced the answer on screen: relay rounds read
-  // relayReply_, OpenClaw rounds read the shared session's buffer. Set true in
-  // beginRelayAsk(), cleared in ensureConnected() so a fallback/re-dial never
-  // shows a stale relay answer.
-  bool relayRound_ = false;
   // Range selection state (State::Selecting).
   char* linePool_ = nullptr;
   size_t linePoolCap_ = 0;
@@ -189,7 +161,4 @@ class AskAiActivity final : public Activity {
   // repaint is a page-buffer hit and nothing touches the SD font path.
   std::optional<FontCacheManager::PrewarmScope> prewarmScope_;
   bool prewarmed_ = false;
-  // Process-wide gateway link: borrowed, never closed here (VoiceActivity's
-  // rule — the workbench status cards read it).
-  OpenClaw::Session& session_ = OpenClaw::Session::instance();
 };

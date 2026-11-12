@@ -1,5 +1,9 @@
 # Reading_Companion 实时语音改造完整需求文档
 
+> **历史文档。** 本稿描述的“Legacy MiMo + OpenClaw 回退模式”已被取消：固件现在只保留
+> 自建 Voice Relay 一条通道。当前实现见 [README](../README.md)、[relay/README.md](../relay/README.md)
+> 与 [voice-openclaw-port-plan.md](voice-openclaw-port-plan.md)。
+
 > 面向 `zhou19830318/Reading_Companion` 的 ESP32-C61 电子墨水阅读设备。本文档用于直接交给 AI 编程助手执行，覆盖设备端、Voice Relay、实时 ASR、流式 LLM、兼容回退和服务器部署。
 >
 > 目标：**极致交流响应速度、个人使用性价比、稳定可回退、避免把云厂商协议耦合进设备固件**。

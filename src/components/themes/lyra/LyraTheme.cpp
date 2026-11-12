@@ -32,7 +32,6 @@
 #include "components/icons/transfer.h"
 #include "components/icons/voice.h"
 #include "components/icons/wifi.h"
-#include "components/icons/workbench.h"
 #include "fontIds.h"
 
 // Internal constants
@@ -91,8 +90,6 @@ const uint8_t* iconForName(UIIcon icon, int size) {
         return BookmarkIcon;
       case UIIcon::Mic:
         return VoiceIcon;
-      case UIIcon::Workbench:
-        return WorkbenchIcon;
       case UIIcon::Review:
         return ReviewIcon;
       case UIIcon::Market:

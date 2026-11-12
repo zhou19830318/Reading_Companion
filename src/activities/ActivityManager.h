@@ -22,10 +22,8 @@ enum class HomeMenuItem {
   RECENTS,
   OPDS_BROWSER,
   REVIEW,
-  WEREAD,
   MARKETS,
   VOICE,
-  WORKBENCH,
   FILE_TRANSFER,
   PIGEON,
   SETTINGS_MENU
@@ -101,11 +99,9 @@ class ActivityManager {
   void goToBrowser();
   void goToReader(std::string path);
   void goToReview();
-  void goToWeRead();
   void goToMarkets();
   void goToVoice();
   void goToAiAssistant();
-  void goToWorkbench();
   void goToPigeon();
   void goToSleep(bool fromTimeout = false);
   void goToBoot();

@@ -21,9 +21,8 @@
 // Session lifecycle: a finished (Done) session keeps its socket — the next
 // start() arms a fresh session on it (the server replaces the finished one),
 // which is what keeps the dial out of the capture window. A failed (Failed)
-// transport is terminal: recovery is the activity's decision (retry budget or
-// the legacy STT + OpenClaw path), so the library's own auto-redial is
-// disabled.
+// transport is terminal: recovery is the activity's decision, so the
+// library's own auto-redial is disabled.
 namespace VoiceRelay {
 
 class Client {
@@ -35,8 +34,8 @@ class Client {
   // Comfortably past the server's 20 s SESSION_TIMEOUT: a healthy server
   // always answers (session.done or error) before this fires.
   static constexpr uint32_t DONE_TIMEOUT_MS = 30000;
-  // Same RFC 6455 heartbeat as OpenClawSession: keeps NAT mappings fed and
-  // tears down a pong-silent link instead of letting it swallow the turn.
+  // RFC 6455 heartbeat: keeps NAT mappings fed and tears down a pong-silent
+  // link instead of letting it swallow the turn.
   static constexpr uint32_t PING_INTERVAL_MS = 25000;
   static constexpr uint32_t PONG_TIMEOUT_MS = 5000;
   static constexpr uint8_t PONG_TIMEOUT_COUNT = 3;

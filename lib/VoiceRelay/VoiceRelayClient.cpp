@@ -1,8 +1,8 @@
 #include "VoiceRelayClient.h"
 
 // clang-format off
-// Arduino.h first (WebSockets pulls lwip; the same ordering constraint as
-// OpenClawSession.cpp documents for its SDK headers).
+// Arduino.h first (WebSockets pulls lwip, which needs the Arduino headers
+// visible before it).
 #include <Arduino.h>
 // clang-format on
 #include <Logging.h>
@@ -22,7 +22,7 @@ extern const uint8_t _binary_x509_crt_bundle_end[];
 }
 namespace {
 // Not constexpr: the bundle is a link-time symbol, so the span only exists
-// after linking (same helper as OpenClawSession.cpp).
+// after linking.
 size_t defaultBundleSize() { return static_cast<size_t>(_binary_x509_crt_bundle_end - _binary_x509_crt_bundle_start); }
 }  // namespace
 

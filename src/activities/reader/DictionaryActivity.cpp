@@ -120,8 +120,8 @@ void drawHanziBox(GfxRenderer& renderer, const StrokeBox& box) {
 
 void DictionaryActivity::onEnter() {
   Activity::onEnter();
-  // The lookup leaves the radio up on purpose (relay + shared gateway socket);
-  // the idle manager powers it down once this screen stops working. Every
+  // The lookup leaves the radio up on purpose; the idle manager powers it
+  // down once this screen stops working. Every
   // lookup approach re-prompts for Wi-Fi when the radio has since gone, so the
   // teardown never strands the picker.
   WIFI_IDLE.arm();
@@ -138,7 +138,7 @@ void DictionaryActivity::onEnter() {
     return;
   }
   // Stroke view is optional: without the buffer the card simply offers no
-  // stroke entry (the fallback gateway never fills it anyway).
+  // stroke entry.
   strokes_ = makeUniqueNoThrow<char[]>(STROKES_CAP);
   if (strokes_) {
     strokes_[0] = '\0';
@@ -155,18 +155,9 @@ void DictionaryActivity::onEnter() {
   requestUpdate();
 }
 
-void DictionaryActivity::onExit() {
-  // The session is process-wide: drop the notifier — it points at this object —
-  // and never close the socket (the Ask-AI / VoiceActivity rule).
-  session_.setNotifier(nullptr, nullptr);
-  Activity::onExit();
-}
+void DictionaryActivity::onExit() { Activity::onExit(); }
 
 void DictionaryActivity::loop() {
-  // Pumps the shared socket in every state; on an unopened session poll() is
-  // a no-op.
-  session_.poll();
-
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     // From the stroke view Back steps back to the card; only the card hands
     // the release edge to the picker below (a Back release there means "leave
@@ -191,67 +182,6 @@ void DictionaryActivity::loop() {
     return;
   }
 
-  if (state_ == State::Connecting) {
-    if (session_.state() == OpenClaw::Session::State::Connected && !session_.reconnecting()) {
-      sendDictPrompt();
-      return;
-    }
-    if (session_.state() == OpenClaw::Session::State::Failed) {
-      failText_ = session_.reason() != nullptr ? session_.reason() : tr(STR_OPENCLAW_DISCONNECTED);
-      state_ = State::Failed;
-      requestUpdate();
-      return;
-    }
-    if (millis() - lastWaitTickMs_ >= CONNECT_TICK_MS) {
-      lastWaitTickMs_ = millis();
-      requestUpdate();
-    }
-    return;
-  }
-
-  if (state_ == State::Asking) {
-    if (session_.awaitingReply()) {
-      // Repaint exactly when the number the screen would print changes.
-      const uint32_t shownSec = session_.awaitingMs() / 1000;
-      if (shownSec != lastWaitShownSec_) {
-        lastWaitShownSec_ = shownSec;
-        requestUpdate();
-      }
-      return;
-    }
-    if (session_.replySize() > 0 && session_.outcome() == OpenClaw::Session::SendOutcome::Sent) {
-      // Settle the card off the session's borrowed buffer: copy so the next
-      // send or close cannot change what this card renders.
-      const char* text = session_.replyText();
-      snprintf(reply_.get(), REPLY_CAP + 1, "%s", text != nullptr ? text : "");
-      if (session_.replyTruncated() || (text != nullptr && strlen(text) > REPLY_CAP)) {
-        LOG_ERR("DICT", "reply truncated at %u bytes", static_cast<unsigned>(REPLY_CAP));
-      }
-      rowsBuilt_ = false;
-      scrollLine_ = 0;
-      state_ = State::Card;
-      requestUpdate();
-      return;
-    }
-    if (session_.state() == OpenClaw::Session::State::Connected) {
-      // A dropped socket leaves state_ at Connected and only arms the
-      // reconnect, so "the link is gone" has to be read from reconnecting()
-      // and not from the state (the Ask-AI rule).
-      failText_ = session_.reconnecting()
-                      ? tr(STR_OPENCLAW_DISCONNECTED)
-                      : (session_.lastError() != nullptr ? tr(STR_OPENCLAW_AGENT_FAILED) : tr(STR_OPENCLAW_NO_REPLY));
-      state_ = State::Failed;
-      requestUpdate();
-      return;
-    }
-    if (session_.state() == OpenClaw::Session::State::Failed) {
-      failText_ = session_.reason() != nullptr ? session_.reason() : tr(STR_OPENCLAW_DISCONNECTED);
-      state_ = State::Failed;
-      requestUpdate();
-    }
-    return;
-  }
-
   if (state_ == State::Failed) {
     if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
       state_ = State::Loading;
@@ -271,7 +201,7 @@ void DictionaryActivity::loop() {
   }
 
   // Card: Confirm opens the stroke view when the relay supplied a payload
-  // (the fallback gateway never does; a character without data has none).
+  // (a character without data has none).
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) && strokes_ && strokes_[0] != '\0') {
     state_ = State::Strokes;
     requestUpdate();
@@ -322,8 +252,8 @@ void DictionaryActivity::promptForWifi() {
 
 void DictionaryActivity::beginLookup() {
   if (!reply_) {
-    // onEnter's OOM path left us without the reply buffer; retrying cannot
-    // fix it and both backends write into it.
+    // onEnter's OOM path left us without the reply buffer; retrying cannot fix
+    // it and the relay writes into it.
     failText_ = tr(STR_MIC_OOM);
     state_ = State::Failed;
     requestUpdate();
@@ -331,147 +261,43 @@ void DictionaryActivity::beginLookup() {
   }
   if (WiFi.status() != WL_CONNECTED) {
     // Safety net: the radio dropped between the entry check and the send.
-    // Covers both backends.
     promptForWifi();
     return;
   }
-  // A retry must not reuse the previous round's strokes: the relay round below
-  // refills it, and the OpenClaw fallback leaves it empty.
+  // A retry must not reuse the previous round's strokes.
   if (strokes_) strokes_[0] = '\0';
 
   CLOUD_CFG.load();  // NVS, idempotent; the same source the voice screen reads
   const bool relayConfigured = SETTINGS.voiceRelayEnabled != 0 && CLOUD_CFG.relayUrl[0] != '\0' &&
                                CLOUD_CFG.relayToken[0] != '\0' && CLOUD_CFG.relayDeviceId[0] != '\0';
-  if (relayConfigured) {
-    bool truncated = false;
-    VoiceRelay::ChatClient::Stats stats;
-    const VoiceRelay::ChatClient::Result result = VoiceRelay::ChatClient::ask(
-        CLOUD_CFG.relayUrl, CLOUD_CFG.relayToken, CLOUD_CFG.relayDeviceId, charBuf_, reply_.get(), REPLY_CAP + 1,
-        truncated, strokes_.get(), strokes_ ? STROKES_CAP : 0, "dict", &stats);
-    if (result == VoiceRelay::ChatClient::Result::Ok) {
-      if (truncated) {
-        LOG_ERR("DICT", "reply truncated at %u bytes", static_cast<unsigned>(REPLY_CAP));
-      }
-      LOG_INF("DICT", "reply %u bytes (http %d)", static_cast<unsigned>(stats.responseBytes), stats.httpStatus);
-      rowsBuilt_ = false;
-      scrollLine_ = 0;
-      state_ = State::Card;
-      requestUpdate();
-      return;
-    }
-    // Relay is the preferred service, not a gatekeeper: any failed round
-    // (config class included) falls back to the OpenClaw gateway below.
-    LOG_ERR("DICT", "relay lookup failed: %s (http %d), falling back to OpenClaw",
-            VoiceRelay::ChatClient::resultName(result), stats.httpStatus);
-  } else {
-    LOG_INF("DICT", "relay not configured, using the OpenClaw gateway");
+  if (!relayConfigured) {
+    LOG_ERR("DICT", "relay not configured");
+    failText_ = tr(STR_VOICE_RELAY_NOT_CONFIGURED);
+    state_ = State::Failed;
+    requestUpdate();
+    return;
   }
-  beginOpenClawLookup();
-}
 
-void DictionaryActivity::beginOpenClawLookup() {
-  // Join a live link rather than re-dialling over it (startConnect() has no
-  // connected guard), the Ask-AI rule.
-  const auto sessionState = session_.state();
-  if (sessionState == OpenClaw::Session::State::Connected || sessionState == OpenClaw::Session::State::Connecting ||
-      sessionState == OpenClaw::Session::State::Handshake || sessionState == OpenClaw::Session::State::Challenge) {
-    session_.setNotifier(this, &DictionaryActivity::onSessionNotifyTrampoline);
-    state_ = State::Connecting;
-    lastWaitTickMs_ = millis();
-    requestUpdate();
-    return;
-  }
-  if (!session_.loadConfig()) {
-    failText_ = session_.reason() != nullptr ? session_.reason() : tr(STR_OPENCLAW_NO_CONFIG);
+  bool truncated = false;
+  VoiceRelay::ChatClient::Stats stats;
+  const VoiceRelay::ChatClient::Result result = VoiceRelay::ChatClient::ask(
+      CLOUD_CFG.relayUrl, CLOUD_CFG.relayToken, CLOUD_CFG.relayDeviceId, charBuf_, reply_.get(), REPLY_CAP + 1,
+      truncated, strokes_.get(), strokes_ ? STROKES_CAP : 0, "dict", &stats);
+  if (result != VoiceRelay::ChatClient::Result::Ok) {
+    LOG_ERR("DICT", "relay lookup failed: %s (http %d)", VoiceRelay::ChatClient::resultName(result), stats.httpStatus);
+    failText_ = tr(STR_VOICE_RELAY_FAILED);
     state_ = State::Failed;
     requestUpdate();
     return;
   }
-  session_.setNotifier(this, &DictionaryActivity::onSessionNotifyTrampoline);
-  if (!session_.startConnect()) {
-    failText_ = session_.reason() != nullptr ? session_.reason() : tr(STR_OPENCLAW_DISCONNECTED);
-    state_ = State::Failed;
-    requestUpdate();
-    return;
+  if (truncated) {
+    LOG_ERR("DICT", "reply truncated at %u bytes", static_cast<unsigned>(REPLY_CAP));
   }
-  state_ = State::Connecting;
-  lastWaitTickMs_ = millis();
+  LOG_INF("DICT", "reply %u bytes (http %d)", static_cast<unsigned>(stats.responseBytes), stats.httpStatus);
+  rowsBuilt_ = false;
+  scrollLine_ = 0;
+  state_ = State::Card;
   requestUpdate();
-}
-
-bool DictionaryActivity::buildDictPrompt() {
-  if (!prompt_) {
-    prompt_ = makeUniqueNoThrow<char[]>(PROMPT_CAP);
-    if (!prompt_) {
-      LOG_ERR("DICT", "OOM: prompt buffer %u bytes", static_cast<unsigned>(PROMPT_CAP));
-      return false;
-    }
-  }
-  // Model-facing instruction, not UI text: the relay's dict system prompt
-  // (relay/relay/config.py, llm_dict_system_prompt), restated inline because
-  // the OpenClaw agent has its own system prompt. The 【】 line shape must
-  // stay in lockstep with buildCard()'s parser and the relay's server-side
-  // template.
-  static constexpr char INSTRUCTION[] =
-      "你是一本简明新华字典。用户发来一个汉字，你只输出这个字的条目，严格用下面格式"
-      "（每项一行，不要 Markdown、不要解释、不要反问）：\n"
-      "【字】<字>\n"
-      "【拼音】<带声调的拼音；多音字按常用度列出，每个读音后跟一个词>\n"
-      "【部首笔画】<部首>·<笔画数>画\n"
-      "【释义】1. <释义> 2. <释义>\n"
-      "【组词】<词1>、<词2>、<词3>\n"
-      "【例句】<一句用到该字的话>\n"
-      "内容务必准确精炼：释义最多 3 条，组词 3~5 个，全文不超过 300 字；"
-      "若输入不是单个汉字，输出【字】无法识别。\n";
-  snprintf(prompt_.get(), PROMPT_CAP, "%s%s", INSTRUCTION, charBuf_);
-  return true;
-}
-
-void DictionaryActivity::sendDictPrompt() {
-  if (!buildDictPrompt()) {
-    failText_ = tr(STR_MIC_OOM);
-    state_ = State::Failed;
-    requestUpdate();
-    return;
-  }
-  if (session_.sendMessage(prompt_.get()) == OpenClaw::Session::SendOutcome::Failed) {
-    failText_ = tr(STR_OPENCLAW_SEND_FAILED);
-    state_ = State::Failed;
-    requestUpdate();
-    return;
-  }
-  lastWaitShownSec_ = session_.awaitingMs() / 1000;
-  state_ = State::Asking;
-  requestUpdate();
-}
-
-const char* DictionaryActivity::phaseText() const {
-  using SessionState = OpenClaw::Session::State;
-  if (session_.reconnecting()) return tr(STR_OPENCLAW_DISCONNECTED);
-  switch (session_.state()) {
-    case SessionState::Connecting:
-      return tr(STR_OPENCLAW_CONNECTING);
-    case SessionState::Handshake:
-      return tr(STR_OPENCLAW_HANDSHAKE);
-    case SessionState::Challenge:
-      return tr(STR_OPENCLAW_CHALLENGE);
-    case SessionState::Connected:
-      return tr(STR_OPENCLAW_CONNECTED);
-    case SessionState::Failed:
-      return session_.reason() != nullptr ? session_.reason() : tr(STR_OPENCLAW_DISCONNECTED);
-    case SessionState::Idle:
-    default:
-      return tr(STR_OPENCLAW_CONNECTING);
-  }
-}
-
-void DictionaryActivity::onSessionNotifyTrampoline(void* ctx) {
-  static_cast<DictionaryActivity*>(ctx)->onSessionNotify();
-}
-
-void DictionaryActivity::onSessionNotify() {
-  // Session callbacks fire from inside the WebSocket dispatch: repaint only.
-  if (state_ == State::Connecting || state_ == State::Asking) requestUpdate();
 }
 
 void DictionaryActivity::buildCard(const int fontId, const int textWidth) {
@@ -575,20 +401,10 @@ void DictionaryActivity::render(RenderLock&&) {
 
   if (state_ == State::Strokes) {
     renderStrokesView(left, right, contentTop, contentBottom);
-  } else if (state_ == State::Loading || state_ == State::Connecting || state_ == State::Asking) {
+  } else if (state_ == State::Loading) {
     drawHero();
-    // Loading keeps the old bare line ("查询中…"), the OpenClaw phases name
-    // themselves; Asking counts the 120 s chat timeout down like Ask-AI.
-    char wait[48];
+    // Painted once before the blocking relay round; the panel holds it.
     const char* line = tr(STR_DICT_LOOKING);
-    if (state_ == State::Connecting) {
-      line = phaseText();
-    } else if (state_ == State::Asking) {
-      snprintf(wait, sizeof(wait), "%s %u/%us", tr(STR_OPENCLAW_WAITING),
-               static_cast<unsigned>(session_.awaitingMs() / 1000),
-               static_cast<unsigned>(OpenClaw::Session::CHAT_TIMEOUT_MS / 1000));
-      line = wait;
-    }
     const int msgW = renderer.getTextWidth(bodyFont, line);
     renderer.drawText(bodyFont, left + (textWidth - msgW) / 2, contentTop + heroLineH + RULE_GAP * 2, line, true);
   } else {

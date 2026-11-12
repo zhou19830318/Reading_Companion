@@ -148,11 +148,6 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   if (s.sdFontFamilyName[0] != '\0') {
     doc["sdFontFamilyName"] = s.sdFontFamilyName;
   }
-  // Weather city key — managed by CitySelectActivity, not in SettingsList.
-  // Written unconditionally, empty included: skipping the empty value would
-  // leave the previously pinned city in the file and make "auto" unsaveable.
-  doc["weatherCityKey"] = s.weatherCityKey;
-
   // Language -- managed by LanguageSelectActivity, not in SettingsList.
   // Stored as ISO code string ("EN", "DE", ...) for stability across enum reorders.
   doc["language"] = (s.language < getLanguageCount()) ? LANGUAGE_CODES[s.language] : "EN";
@@ -292,10 +287,6 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
   const char* sfn = doc["sdFontFamilyName"] | "";
   strncpy(s.sdFontFamilyName, sfn, sizeof(s.sdFontFamilyName) - 1);
   s.sdFontFamilyName[sizeof(s.sdFontFamilyName) - 1] = '\0';
-  // Weather city key — managed by CitySelectActivity, load manually.
-  const char* weatherCityKey = doc["weatherCityKey"] | "";
-  strncpy(s.weatherCityKey, weatherCityKey, sizeof(s.weatherCityKey) - 1);
-  s.weatherCityKey[sizeof(s.weatherCityKey) - 1] = '\0';
   if (storedFontFamily == CrossPointSettings::LEGACY_OPENDYSLEXIC && s.sdFontFamilyName[0] == '\0') {
     s.fontFamily = CrossPointSettings::NOTOSERIF;
     strncpy(s.sdFontFamilyName, "OpenDyslexic", sizeof(s.sdFontFamilyName) - 1);

@@ -207,9 +207,10 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
                             "removeReadBooksFromRecents", StrId::STR_CAT_SYSTEM),
         SettingInfo::Toggle(StrId::STR_MOVE_FINISHED_TO_READ, &CrossPointSettings::moveFinishedToReadFolder,
                             "moveFinishedToReadFolder", StrId::STR_CAT_SYSTEM),
-        // Voice Relay preference: 1 = prefer the relay configured on the web
-        // page (URL/token live in CloudConfig, not settings.json), 0 = force
-        // the legacy MiMo + OpenClaw path. Only consulted by VoiceActivity.
+        // Voice Relay master switch: 1 = cloud features are on and use the
+        // relay configured on the web page (URL/token live in CloudConfig,
+        // not settings.json); 0 = every cloud feature is off. The relay is the
+        // only backend, so there is no fallback path behind it.
         SettingInfo::Toggle(StrId::STR_VOICE_RELAY, &CrossPointSettings::voiceRelayEnabled, "voiceRelayEnabled",
                             StrId::STR_CAT_SYSTEM),
 

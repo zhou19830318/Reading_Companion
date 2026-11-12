@@ -203,7 +203,8 @@ When editing related source assets, regenerate via normal build steps/scripts.
 - `lib/Epub/`: EPUB parser, layout, CSS handling, and hyphenation
 - `lib/`: supporting libraries (fonts, text, filesystem helpers, etc.)
 - `open-onepage-sdk/`: vendored board SDK (display, input, storage, battery), consumed through the `symlink://` lib_deps in `platformio.ini`
-- `src/activities/voice/`, `src/activities/workbench/`: OnePage-only activities (OpenClaw voice assistant, gateway-synced dashboard)
+- `src/activities/voice/`, `src/activities/markets/`, `src/activities/pigeon/`: OnePage-only activities (relay voice assistant, market board, Pigeon messaging)
+- `lib/VoiceRelay/`, `lib/Markets/`, `lib/Pigeon/`, `lib/ChatLog/`, `lib/Notes/`: the server-backed clients, chat history and voice-bookmark store
 - `src/network/html/`: the four web UI page sources; `scripts/sync_web_core.py` + `scripts/build_html.py` turn them into the inlined `*.generated.h` assets
 - `docs/`: user and technical documentation
 

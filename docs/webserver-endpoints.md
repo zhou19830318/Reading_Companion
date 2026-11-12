@@ -427,12 +427,11 @@ curl -X POST \
   http://crosspoint.local/api/wifi/delete
 ```
 
-## 云服务 API (NVS)
+## 语音中继 API (NVS)
 
 ### `GET /api/cloud`
 
-返回 OpenClaw 网关配置和 MiMo 语音转文字配置。密钥永不返回 ——
-仅返回存在标志 `hasToken` / `hasSttKey`。
+返回语音中继配置。令牌永不返回 —— 仅返回存在标志 `hasRelayToken`。
 
 ```bash
 curl http://crosspoint.local/api/cloud
@@ -442,45 +441,24 @@ curl http://crosspoint.local/api/cloud
 
 ```json
 {
-  "host": "192.168.1.10",
-  "port": 18789,
-  "path": "/",
-  "tls": false,
-  "protocol": "v2.openclaw.io",
-  "caPath": "",
-  "hasToken": true,
-  "sttUrl": "",
-  "hasSttKey": false
+  "relayUrl": "ws://192.168.1.10:8080/api/v1/voice/stream",
+  "relayDeviceId": "reading-companion-001",
+  "hasRelayToken": true
 }
 ```
 
 ### `POST /api/cloud`
 
-部分更新：请求体中省略的字段保持其存储的 NVS 值；密钥
-（`token` / `sttKey`）发送 `""` 即清除，省略则表示不变。
+部分更新：请求体中省略的字段保持其存储的 NVS 值；`relayToken`
+发送 `""` 即清除，省略则表示不变。`relayUrl` 必须以 `ws://` 或
+`wss://` 开头，否则返回 400。
 
 ```bash
 curl -X POST \
   -H "Content-Type: application/json" \
-  -d '{"host":"192.168.1.10","port":18789,"token":"..."}' \
+  -d '{"relayUrl":"ws://192.168.1.10:8080/api/v1/voice/stream","relayDeviceId":"reading-companion-001","relayToken":"..."}' \
   http://crosspoint.local/api/cloud
 ```
-
-### `POST /api/openclaw/test`
-
-对网关进行一次性的 WebSocket 可达性 + 握手探测（使用请求体中的
-值，而非已保存的值；省略的 `token` 会回退到存储的值）。不会持久化
-任何内容。响应 JSON：`ok`、`stage`、`detail`、`ms`、`url`、
-`firstFrame`（当握手收到一帧时）以及网关回复 *pairing pending* 时的
-`requestId` —— 设置页面会显示对应的
-`openclaw devices approve <id>` 命令。
-
-### `POST /api/stt/test`
-
-使用给定的 `sttKey` / `sttUrl` 向 MiMo STT 端点发送一个最小请求
-（省略的字段回退到存储值/默认值）。响应 JSON：`ok`、
-`accepted`（任何非 401/403 状态都表示密钥被接受）、`httpStatus`、
-`stage`、`detail`、`ms`。
 
 ## WebSocket 上传
 

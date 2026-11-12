@@ -5,7 +5,6 @@
 #include <HalStorage.h>
 #include <Logging.h>
 #include <NetBootstrap.h>
-#include <SttCodec.h>
 #include <WiFi.h>
 #include <esp_crt_bundle.h>
 #include <esp_heap_caps.h>
@@ -18,6 +17,7 @@
 #include <cstring>
 #include <memory>
 
+#include "VoiceRelayBase64.h"
 #include "VoiceRelayCodec.h"
 
 namespace VoiceRelay {
@@ -298,7 +298,7 @@ ImageClient::Result ImageClient::edit(const char* url, const char* token, const 
     return Result::BadConfig;
   }
 
-  const size_t b64Cap = SttCodec::base64EncodedSize(fileBytes) + 1;
+  const size_t b64Cap = base64::encodedSize(fileBytes) + 1;
   const size_t reqCap = EDIT_ENVELOPE + b64Cap;
   Scratch b64 = allocScratch(b64Cap);
   Scratch req = allocScratch(reqCap);
@@ -309,7 +309,7 @@ ImageClient::Result ImageClient::edit(const char* url, const char* token, const 
     return Result::Oom;
   }
   size_t b64Len = 0;
-  if (!SttCodec::base64Encode(reinterpret_cast<const uint8_t*>(raw.get()), fileBytes, b64.get(), b64Cap, b64Len)) {
+  if (!base64::encode(reinterpret_cast<const uint8_t*>(raw.get()), fileBytes, b64.get(), b64Cap, b64Len)) {
     LOG_ERR("VIMG", "base64 encode failed (%u bytes)", static_cast<unsigned>(fileBytes));
     return Result::BadConfig;
   }

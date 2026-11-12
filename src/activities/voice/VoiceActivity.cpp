@@ -2,7 +2,7 @@
 
 // clang-format off
 // HalStorage.h pulls SdFat macros that collide with lwip's ip4_addr.h unless
-// seen first (same ordering constraint as lib/voice/SttClient.cpp).
+// seen first.
 #include <Arduino.h>
 #include <CloudConfig.h>
 #include <GfxRenderer.h>
@@ -13,14 +13,14 @@
 #include <Logging.h>
 #include <Memory.h>
 #include <NoteStore.h>
-#include <SttClient.h>
+#include <VoiceRelayChatClient.h>
 #include <VoiceRelayClient.h>
 #include <WiFi.h>
 #include <WifiIdleManager.h>
 
+using ChatLog::ChatHistory;
 using Notes::NoteStore;
-using OpenClaw::ChatHistory;
-namespace ChatHistoryFormat = OpenClaw::ChatHistoryFormat;
+namespace ChatHistoryFormat = ChatLog::ChatHistoryFormat;
 
 #include <algorithm>
 #include <cstdio>
@@ -61,14 +61,14 @@ bool VoiceActivity::injectTranscript(const char* text) {
     self.deliverDictationTranscript();
     return true;
   }
-  self.sendToOpenClaw();
+  self.sendTextToRelay();
   return true;
 }
 
 void VoiceActivity::onEnter() {
   Activity::onEnter();
   // This screen can hit the network on any Confirm press (STT + chat) and its
-  // keyboard's send path waits on the gateway, so the radio is held for as
+  // keyboard's send path waits on the relay, so the radio is held for as
   // long as the screen is frontmost; the idle countdown starts on exit. The
   // session's own poll() notes dials and replies, so the hold only has to
   // outlast the quiet stretches (thinking, typing, picking a tag).
@@ -81,7 +81,6 @@ void VoiceActivity::onEnter() {
   haveTranscript_ = false;
   haveAnswer_ = false;
   answerScroll_ = 0;
-  sttParser_.reset();
   // noteContext_ is NOT reset here: the launcher arms it via setNoteContext()
   // BEFORE onEnter() runs, and every VoiceActivity instance is freshly
   // constructed (replaceActivity / startActivityForResult make_unique), so
@@ -144,7 +143,7 @@ void VoiceActivity::onEnter() {
   // way, so the Idle panel needs no status line.
   if (noteContext_.valid || questionInput_) {
     // Note mode and question mode both stay offline on entry: no radio, no
-    // gateway dial. STT is the only network user and it detours on its own
+    // relay dial. STT is the only network user and it detours on its own
     // (startRecording() / dictation), so both screens paint immediately.
     LOG_INF("VOICE", "%s: no Wi-Fi bring-up (status=%d)", noteContext_.valid ? "note mode" : "question mode",
             static_cast<int>(WiFi.status()));
@@ -171,12 +170,12 @@ void VoiceActivity::onEnter() {
                                finish();
                                return;
                              }
-                             startSession();
+                             warmRelay();
                            });
     requestUpdate();
     return;
   }
-  startSession();
+  warmRelay();
   requestUpdate();
 }
 
@@ -184,9 +183,8 @@ void VoiceActivity::onExit() {
   WIFI_IDLE.release();  // ends the onEnter() hold; the idle countdown resumes
   if (activeInstance_ == this) activeInstance_ = nullptr;
   recorder_.close();
-  sttParser_.reset();
-  // The relay session belongs to this activity (unlike the process-wide
-  // OpenClaw session): cancel best-effort and release the socket, then the
+  // The relay session belongs to this activity: cancel best-effort and release
+  // the socket, then the
   // reply buffer. The notifier points at `this` and dies with the client.
   if (relay_ != nullptr) {
     relay_->close();
@@ -198,10 +196,6 @@ void VoiceActivity::onExit() {
     heap_caps_free(relayReply_);
     relayReply_ = nullptr;
   }
-  // L3 probe: the session is process-wide now, so leaving voice must not tear
-  // the gateway link down — the workbench cards read it. The notifier points
-  // at this activity's `this` and has to go before the object does.
-  session_.setNotifier(nullptr, nullptr);
   if (historyPool_ != nullptr) {
     heap_caps_free(historyPool_);
     historyPool_ = nullptr;
@@ -221,10 +215,7 @@ void VoiceActivity::onExit() {
   Activity::onExit();
 }
 
-bool VoiceActivity::preventAutoSleep() {
-  return state_ == State::Listening || state_ == State::Transcribing || state_ == State::Sending ||
-         session_.state() == OpenClaw::Session::State::Connecting;
-}
+bool VoiceActivity::preventAutoSleep() { return state_ == State::Listening || state_ == State::Sending; }
 
 bool VoiceActivity::preventAutoUpdate() const {
   // Any repaint while the capture is live blocks the loop that drains the 8 ms
@@ -232,32 +223,6 @@ bool VoiceActivity::preventAutoUpdate() const {
   // post-result repaint after the Wi-Fi detour's handler already started a
   // recording (the keyboard has its own override for its dictation).
   return state_ == State::Listening || dictationState_ == DictationState::Recording;
-}
-
-void VoiceActivity::startSession() {
-  // Warm the relay socket first: it is independent of the OpenClaw session,
-  // and the dial must complete before the first capture starts.
-  warmRelay();
-  if (!session_.loadConfig()) {
-    // reason() carries the translated line; keep the screen usable.
-    return;
-  }
-  session_.setNotifier(this, &VoiceActivity::onSessionNotifyTrampoline);
-  if (!session_.startConnect()) {
-    return;  // no network / no clock: reason() is set
-  }
-  // Connecting runs on the next loop pass; the Idle screen says so via the
-  // session's status line.
-}
-
-void VoiceActivity::onSessionNotifyTrampoline(void* ctx) { static_cast<VoiceActivity*>(ctx)->onSessionNotify(); }
-
-void VoiceActivity::onSessionNotify() {
-  // Session callbacks fire from inside the WebSocket dispatch — repaint only,
-  // and only for states that show session traffic.
-  if (state_ == State::Idle || state_ == State::Sending || state_ == State::Answer || state_ == State::Review) {
-    requestUpdate();
-  }
 }
 
 void VoiceActivity::fail(const char* reason) {
@@ -272,7 +237,6 @@ void VoiceActivity::resetRoundTrip() {
   transcript_[0] = '\0';
   haveTranscript_ = false;
   haveAnswer_ = false;
-  oweSend_ = false;
   failReason_ = nullptr;
   // A new capture inherits nothing from a summarize round: pendingText_ points
   // at historyLine_, which the next recordHistoryTurn() needs as append
@@ -285,7 +249,7 @@ void VoiceActivity::resetRoundTrip() {
   // Relay per-round state. The instance and the reply buffer are activity-
   // lifetime; the round flags and the PCM cursor are not.
   relayRound_ = false;
-  relayFallbackTried_ = false;
+  relayDictationRound_ = false;
   relayEndSent_ = false;
   relayDone_ = false;
   relayError_ = false;
@@ -300,10 +264,10 @@ void VoiceActivity::resetRoundTrip() {
 namespace {
 // Days-since-epoch of the user's local "today" for the flat history row
 // labels; -1 while the clock is unsynced (labels then fall back to full
-// dates). Same clock source and offset handling as the Workbench date line.
+// dates).
 int64_t todayHistoryDays() {
-  const int64_t nowMs = OpenClaw::nowEpochMs();
-  if (nowMs < OpenClaw::MIN_SANE_EPOCH_MS) return -1;
+  const int64_t nowMs = ChatLog::nowEpochMs();
+  if (nowMs < ChatLog::MIN_SANE_EPOCH_MS) return -1;
   const int64_t localSec = ChatHistoryFormat::localEpochSeconds(nowMs, SETTINGS.clockUtcOffsetQ);
   return localSec >= 0 ? localSec / 86400 : (localSec - 86399) / 86400;
 }
@@ -326,7 +290,7 @@ void VoiceActivity::openHistory() {
   }
   // Relist on every open: turns appended during this session have to show up,
   // and the old "list once per activity" cache silently hid them.
-  historyDayCount_ = ChatHistory::listDays(historyDays_, OpenClaw::ChatHistory::MAX_DAYS);
+  historyDayCount_ = ChatHistory::listDays(historyDays_, ChatHistory::MAX_DAYS);
   historyDayIndex_ = 0;  // flat list: the top row is both cursor and open day
   historyDeleteArmed_ = false;
   historyScroll_ = 0;
@@ -338,7 +302,7 @@ bool VoiceActivity::loadHistoryDay(const size_t dayIndex) {
   if (historyPool_ == nullptr || historyLine_ == nullptr || dayIndex >= historyDayCount_) return false;
   historyDayIndex_ = dayIndex;
   historyEntryCount_ = ChatHistory::loadDays(historyDays_, dayIndex, 1, historyPool_, historyPoolCap_, historyEntries_,
-                                             OpenClaw::ChatHistory::MAX_ENTRIES, historyLine_, HISTORY_LINE_SIZE);
+                                             ChatHistory::MAX_ENTRIES, historyLine_, HISTORY_LINE_SIZE);
   // Pair the entries into turns: every user entry starts one, plus a lone
   // leading assistant when the pool's tail window split a pair.
   size_t users = 0;
@@ -379,15 +343,11 @@ void VoiceActivity::drawPipeline(const int x, const int y) {
     case State::Listening:
       active = 0;
       break;
-    case State::Transcribing:
-      active = 1;
-      break;
     case State::Sending:
-      // The send itself is stage 2 until the gateway has it and we are only
-      // waiting on the reply, which is stage 3. A relay round has no separate
-      // send stage on this device: the audio already streamed live, so once
-      // the capture is over the only thing left is the reply.
-      active = relayRound_ ? 3 : (session_.awaitingReply() ? 3 : 2);
+      // A live relay round already streamed its audio, so once the capture is
+      // over only the reply is left (stage 3). The blocking text round used by
+      // Review/manual mode still has its send on the wire (stage 2).
+      active = relayRound_ ? 3 : 2;
       break;
     case State::Answer:
       active = 3;
@@ -413,40 +373,10 @@ void VoiceActivity::drawPipeline(const int x, const int y) {
   }
 }
 
-const char* VoiceActivity::gatewayStatus() const {
-  using SessionState = OpenClaw::Session::State;
-  if (session_.reconnecting()) return tr(STR_OPENCLAW_DISCONNECTED);
-  switch (session_.state()) {
-    case SessionState::Connecting:
-      return tr(STR_OPENCLAW_CONNECTING);
-    case SessionState::Handshake:
-      return tr(STR_OPENCLAW_HANDSHAKE);
-    case SessionState::Challenge:
-      return tr(STR_OPENCLAW_CHALLENGE);
-    case SessionState::Connected:
-      return tr(STR_OPENCLAW_CONNECTED);
-    case SessionState::Failed:
-      return session_.reason() != nullptr ? session_.reason() : tr(STR_OPENCLAW_DISCONNECTED);
-    case SessionState::Idle:
-    default:
-      return nullptr;
-  }
-}
-
 // ── Voice Relay ─────────────────────────────────────────────────────────────
 
 bool VoiceActivity::relayConfigured() {
-  // Workbench to-do round: the OpenClaw agent has to see the transcript — it
-  // is the only backend with the scheduling tool the card then lists. The
-  // relay may be perfectly healthy here; it just cannot create the job.
-  if (gatewayChat_) return false;
   if (SETTINGS.voiceRelayEnabled == 0) return false;
-  // Manual send mode exists to review the local transcript before anything is
-  // transmitted; the relay streams the audio live, so the chat round only
-  // participates in auto mode. Dictation (notes / custom questions) never
-  // sends to the chat — the transcript goes to the keyboard — so the gate
-  // does not apply to it.
-  if (!dictationMode() && SETTINGS.voiceAutoSend == 0) return false;
   CLOUD_CFG.load();  // NVS, idempotent; repopulates relayUrl/Token/DeviceId
   return CLOUD_CFG.relayUrl[0] != '\0' && CLOUD_CFG.relayToken[0] != '\0' && CLOUD_CFG.relayDeviceId[0] != '\0';
 }
@@ -462,13 +392,12 @@ bool VoiceActivity::ensureRelay() {
     relay_->setEventNotifier(this, &VoiceActivity::onRelayEventTrampoline);
   }
   if (relayReply_ == nullptr) {
-    relayReply_ = static_cast<char*>(heap_caps_malloc(OpenClaw::CHAT_BUF_CAP + 1, MALLOC_CAP_SPIRAM));
+    relayReply_ = static_cast<char*>(heap_caps_malloc(REPLY_CAP + 1, MALLOC_CAP_SPIRAM));
     if (relayReply_ == nullptr) {
-      relayReply_ =
-          static_cast<char*>(heap_caps_malloc(OpenClaw::CHAT_BUF_CAP + 1, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+      relayReply_ = static_cast<char*>(heap_caps_malloc(REPLY_CAP + 1, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
     }
     if (relayReply_ == nullptr) {
-      LOG_ERR("VOICE", "OOM: relay reply buffer %u bytes", static_cast<unsigned>(OpenClaw::CHAT_BUF_CAP + 1));
+      LOG_ERR("VOICE", "OOM: relay reply buffer %u bytes", static_cast<unsigned>(REPLY_CAP + 1));
       fail(tr(STR_MIC_OOM));
       return false;
     }
@@ -518,16 +447,16 @@ void VoiceActivity::startRelayRound() {
   // chat reply buffer); the chat paths always allocate it in ensureRelay().
   if (relayReply_ != nullptr) relayReply_[0] = '\0';
   relaySentSamples_ = 0;
-  relayFallbackTried_ = false;
   relayEndSent_ = false;
   relayDone_ = false;
   relayError_ = false;
   relayRetryable_ = false;
   relayErrorCode_ = VoiceRelay::ErrorCode::None;
   relayEndMs_ = 0;
-  const char* mode = dictationMode() ? "dictation" : nullptr;
+  relayDictationRound_ = dictationMode() || (!dictationMode() && SETTINGS.voiceAutoSend == 0);
+  const char* mode = relayDictationRound_ ? "dictation" : nullptr;
   if (!relay_->start(CLOUD_CFG.relayUrl, CLOUD_CFG.relayToken, CLOUD_CFG.relayDeviceId, mode)) {
-    LOG_ERR("VOICE", "relay start rejected (%u), staying on legacy", static_cast<unsigned>(relay_->transportError()));
+    LOG_ERR("VOICE", "relay start rejected (%u)", static_cast<unsigned>(relay_->transportError()));
     relayRound_ = false;
     return;
   }
@@ -580,13 +509,13 @@ void VoiceActivity::onRelayEvent(const VoiceRelay::Event& event) {
     case ET::LlmDelta: {
       if (relayReply_ == nullptr) break;
       const size_t n = strnlen(event.text, VoiceRelay::TEXT_CAP);
-      const size_t room = OpenClaw::CHAT_BUF_CAP - relayReplyLen_;
+      const size_t room = REPLY_CAP - relayReplyLen_;
       const size_t copyLen = n < room ? n : room;
       memcpy(relayReply_ + relayReplyLen_, event.text, copyLen);
       relayReplyLen_ += copyLen;
       relayReply_[relayReplyLen_] = '\0';
       if (copyLen < n) {
-        LOG_ERR("VOICE", "relay reply truncated at %u bytes", static_cast<unsigned>(OpenClaw::CHAT_BUF_CAP));
+        LOG_ERR("VOICE", "relay reply truncated at %u bytes", static_cast<unsigned>(REPLY_CAP));
       }
       break;
     }
@@ -638,77 +567,34 @@ const char* VoiceActivity::relayErrorReason() const {
 void VoiceActivity::handleRelayErrorEvent() {
   const char* reason = relayErrorReason();
   LOG_ERR("VOICE", "relay error %s retryable=%d", VoiceRelay::errorCodeName(relayErrorCode_), relayRetryable_ ? 1 : 0);
-  // Every relay failure falls back to the legacy MiMo + OpenClaw pipeline —
-  // including the auth/protocol classes: the relay is the preferred service,
-  // not a gatekeeper.
-  relayFallbackOrFail(reason);
+  relayFailed(reason);
 }
 
 void VoiceActivity::relayTransportFailed() {
   const VoiceRelay::Client::TransportError te = relay_->transportError();
   LOG_ERR("VOICE", "relay transport failure %u", static_cast<unsigned>(te));
   if (te == VoiceRelay::Client::TransportError::Oom) {
-    relayClose();
-    relayRound_ = false;
-    fail(tr(STR_MIC_OOM));
+    relayFailed(tr(STR_MIC_OOM));
     return;
   }
   if (te == VoiceRelay::Client::TransportError::NoWifi) {
-    relayClose();
-    relayRound_ = false;
-    fail(tr(STR_STT_NO_NETWORK));
+    relayFailed(tr(STR_STT_NO_NETWORK));
     return;
   }
-  relayFallbackOrFail(tr(STR_VOICE_RELAY_FAILED));
+  relayFailed(tr(STR_VOICE_RELAY_FAILED));
 }
 
-void VoiceActivity::relayFallbackOrFail(const char* reason) {
-  if (relayFallbackTried_) {
-    relayClose();
-    relayRound_ = false;
-    recorder_.close();
-    fail(reason);
-    return;
-  }
-  relayFallbackTried_ = true;
+void VoiceActivity::relayFailed(const char* reason) {
+  // The relay is the only backend: any failure ends this round with a reason
+  // on screen. Nothing is retried against another service.
   relayClose();
   relayRound_ = false;
+  relayDictationRound_ = false;
   relayEndSent_ = false;
   relayDone_ = false;
   relayError_ = false;
-  if (state_ == State::Listening) {
-    // The failure landed while the user is still speaking (dial/upgrade
-    // failures arrive ~0.8 s in). Keep capturing and let the ordinary VAD
-    // stop close the sentence — Listening's Complete case then routes it to
-    // the legacy transcribe because relayRound_ is false. Ending the capture
-    // here truncated the sentence into a partial transcript.
-    LOG_INF("VOICE", "relay failed (%s) mid-capture; continuing to listen on the legacy path", reason);
-    return;
-  }
-  LOG_INF("VOICE", "relay failed (%s), falling back to the legacy path on the captured audio", reason);
-  // The capture already ended (failure during Sending) — just finalise it.
-  recorder_.end();
-  if (haveTranscript_) {
-    if (dictationMode()) {
-      // ASR already landed and there is no LLM half to fall back to: the
-      // transcript is the deliverable, so it goes to the keyboard exactly as
-      // the legacy path's finishTranscription() hands it over.
-      LOG_INF("VOICE", "relay dictation fallback: transcript in hand");
-      recorder_.close();
-      deliverDictationTranscript();
-      return;
-    }
-    // ASR already landed; only the relay's LLM half failed, so the fallback
-    // owes just the chat round trip on the shared OpenClaw session.
-    LOG_INF("VOICE", "relay fallback: transcript in hand, sending via OpenClaw");
-    sendToOpenClaw();
-    return;
-  }
-  if (recorder_.samples() == 0) {
-    fail(tr(STR_STT_NO_SPEECH));
-    return;
-  }
-  startTranscribing();  // blocking STT → chat.send, exactly the legacy pipeline
+  recorder_.close();
+  fail(reason);
 }
 
 void VoiceActivity::relayClose() {
@@ -716,35 +602,38 @@ void VoiceActivity::relayClose() {
 }
 
 void VoiceActivity::settleRelaySuccess() {
-  if (dictationMode()) {
-    // A dictation session has no LLM half: session.done means the accumulated
-    // transcript is final. Without one, the legacy path on the same capture is
-    // the retry — the same contract as the chat branch below.
+  if (relayDictationRound_) {
+    // A dictation round has no LLM half: session.done means the accumulated
+    // transcript is final. Note/question mode hands it to the keyboard;
+    // manual mode parks it in Review, and Confirm sends it as a blocking text
+    // round (sendTextToRelay).
     if (!haveTranscript_) {
-      relayFallbackOrFail(tr(STR_STT_NO_SPEECH));
+      relayFailed(tr(STR_STT_NO_SPEECH));
       return;
     }
     LOG_INF("VOICE", "relay dictation done (%u bytes)", static_cast<unsigned>(strlen(transcript_)));
+    relayDictationRound_ = false;
     relayRound_ = false;
-    // The socket stays up for the keyboard's next round (its 60 s idle close
-    // is caught by the upkeep poll). Same release order as
-    // finishTranscription(): free the PCM, then hand the transcript to the
-    // keyboard (语音书签 / custom question) or straight back to Pigeon.
+    // The socket stays up for the next round (its 60 s idle close is caught
+    // by the upkeep poll). Free the PCM, then route the text.
     recorder_.close();
-    deliverDictationTranscript();
+    if (dictationMode()) {
+      deliverDictationTranscript();
+    } else {
+      state_ = State::Review;
+      requestUpdate();
+    }
     return;
   }
   if (relayReplyLen_ == 0) {
-    // session.done without a usable reply is not an answer; the legacy path on
-    // the same capture is the retry.
-    relayFallbackOrFail(tr(STR_OPENCLAW_NO_REPLY));
+    relayFailed(tr(STR_VOICE_RELAY_FAILED));
     return;
   }
   haveAnswer_ = true;
   answerScroll_ = 0;
   state_ = State::Answer;
   // [LAT]: server stage marks ride session.done; the local ones are this
-  // device's view of the same stages. Same line shape as the legacy [LAT] logs.
+  // device's view of the same stages.
   const VoiceRelay::Latency& sl = relay_->lastEvent().latency;
   const VoiceRelay::Latency& ll = relay_->localLatency();
   LOG_INF(
@@ -758,13 +647,10 @@ void VoiceActivity::settleRelaySuccess() {
       static_cast<long>(ll.connect), static_cast<long>(ll.asrFirstPartial), static_cast<long>(ll.asrFinal),
       static_cast<long>(ll.llmFirstToken), static_cast<long>(ll.llmFinal), static_cast<long>(ll.visibleTotal));
   // The session is over but the socket stays up: the next round arms a fresh
-  // session on it (no dial in the capture window). relayRound_ keeps routing
-  // the panel and the history append to relayReply_.
+  // session on it (no dial in the capture window).
   // Backstop: a stale settle during a summarize round must not append the
-  // summary label as a fake user turn (the session path guards the same way).
+  // summary label as a fake user turn.
   if (!summaryRound_) recordHistoryTurn();
-  // The answer is shown and fallback is off the table: release the PCM the way
-  // finishTranscription() does for the legacy pipeline.
   recorder_.close();
   requestUpdate();
 }
@@ -845,10 +731,9 @@ void VoiceActivity::startRecording() {
   }
   resetRoundTrip();
   // Paint first, power the mic second. The capture must not be interrupted by
-  // a panel refresh, so the recording screen (stage row + mic icon + gateway
-  // state) is pushed and waited for while the rail is still idle; the panel is
-  // then left alone until the capture ends and startTranscribing() paints the
-  // next stage.
+  // a panel refresh, so the recording screen (stage row + mic icon + relay
+  // label) is pushed and waited for while the rail is still idle; the panel is
+  // then left alone until the capture ends and the Sending frame is painted.
   state_ = State::Listening;
   requestUpdateAndWait();
   // The dial must be done before the mic powers up — a pass of it inside a
@@ -858,18 +743,22 @@ void VoiceActivity::startRecording() {
   // network until the Wi-Fi detour above, or a socket since closed).
   warmRelay();
   pumpWarmRelay();
-  // A rejected start simply leaves relayRound_ false and the capture proceeds
-  // on the legacy path.
-  if (relayConfigured()) {
-    if (!ensureRelay()) return;  // fail() already set the screen
-    startRelayRound();
+  if (!relayConfigured()) {
+    fail(tr(STR_VOICE_RELAY_NOT_CONFIGURED));
+    return;
+  }
+  if (!ensureRelay()) return;  // fail() already set the screen
+  startRelayRound();
+  if (!relayRound_) {
+    // The relay is the only backend: a rejected session is a hard failure,
+    // not a cue to capture audio nothing will transcribe.
+    fail(tr(STR_VOICE_RELAY_FAILED));
+    return;
   }
   recorder_.setVadThreshold(VAD_RMS_THRESHOLD);
   if (!recorder_.begin(HalMicrophone::SAMPLE_RATE, MAX_RECORD_SECONDS, SILENCE_STOP_MS)) {
-    if (relayRound_) {
-      relayClose();
-      relayRound_ = false;
-    }
+    relayClose();
+    relayRound_ = false;
     fail(recorder_.error() == Voice::Recorder::Error::Alloc ? tr(STR_MIC_OOM) : tr(STR_MIC_UNAVAILABLE));
     return;
   }
@@ -877,58 +766,56 @@ void VoiceActivity::startRecording() {
           static_cast<unsigned>(SILENCE_STOP_MS));
 }
 
-void VoiceActivity::startTranscribing() {
-  if (!sttParser_) {
-    sttParser_ = makeUniqueNoThrow<SttCodec::SseTranscriptParser>();
-    if (!sttParser_) {
-      LOG_ERR("VOICE", "OOM: SSE parser");
-      fail(tr(STR_MIC_OOM));
-      return;
-    }
-  } else {
-    sttParser_->reset();
-  }
-  state_ = State::Transcribing;
-  requestUpdateAndWait();  // "Transcribing…" is on the panel before the blocking call
-}
-
-void VoiceActivity::runTranscription() {
-  SttClient::Config cfg;
-  if (!SttClient::loadConfig(sttUrlBuf_, sizeof(sttUrlBuf_), sttKeyBuf_, sizeof(sttKeyBuf_), cfg)) {
-    finishTranscription(SttClient::ERR_NO_KEY);
+void VoiceActivity::sendTextToRelay() {
+  if (!relayConfigured()) {
+    fail(tr(STR_VOICE_RELAY_NOT_CONFIGURED));
     return;
   }
-  SttClient::Stats stats;
-  const SttClient::Result result =
-      SttClient::transcribe(cfg, recorder_.pcm(), recorder_.samples(), HalMicrophone::SAMPLE_RATE, *sttParser_, &stats);
-  finishTranscription(result);
-}
-
-void VoiceActivity::finishTranscription(SttClient::Result result) {
-  if (result != SttClient::OK || sttParser_->textSize() == 0) {
-    LOG_ERR("VOICE", "transcription failed: %s", SttClient::resultName(result));
-    fail(result == SttClient::OK ? tr(STR_STT_NO_SPEECH) : tr(STR_STT_FAILED));
+  const char* message = pendingText_ != nullptr ? pendingText_ : transcript_;
+  if (message[0] == '\0') {
+    fail(tr(STR_STT_NO_SPEECH));
     return;
   }
-  snprintf(transcript_, sizeof(transcript_), "%.*s", static_cast<int>(sttParser_->textSize()), sttParser_->text());
-  haveTranscript_ = true;
-  LOG_INF("VOICE", "transcript (%u bytes): %s", static_cast<unsigned>(sttParser_->textSize()), transcript_);
-  // Free the capture before the socket work: the reply buffer and the TLS
-  // session want the PSRAM the PCM holds.
+  if (!ensureRelay()) return;  // fail() already set the screen
+  // Free the capture before the TLS round trip: the reply buffer wants the
+  // PSRAM the PCM holds.
   recorder_.close();
-  // Manual mode parks the transcript in Review; the user sends with Confirm
-  // (§8.6). Auto sends immediately, as before. Note mode parks the transcript
-  // in the keyboard instead of saving it outright (语音书签 shortcut).
-  if (dictationMode()) {
-    deliverDictationTranscript();
+  // The waiting frame goes up before the blocking call (one question per
+  // round, same shape as AskAiActivity::beginRelayAsk).
+  state_ = State::Sending;
+  relayEndMs_ = millis();
+  lastWaitShownSec_ = 0;
+  requestUpdateAndWait();
+  LOG_INF("VOICE", "relay chat: %u bytes", static_cast<unsigned>(strlen(message)));
+  bool truncated = false;
+  VoiceRelay::ChatClient::Stats stats;
+  const VoiceRelay::ChatClient::Result result =
+      VoiceRelay::ChatClient::ask(CLOUD_CFG.relayUrl, CLOUD_CFG.relayToken, CLOUD_CFG.relayDeviceId, message,
+                                  relayReply_, REPLY_CAP + 1, truncated, nullptr, 0, nullptr, &stats);
+  if (result != VoiceRelay::ChatClient::Result::Ok) {
+    LOG_ERR("VOICE", "relay chat failed: %s (http %d)", VoiceRelay::ChatClient::resultName(result), stats.httpStatus);
+    fail(tr(STR_VOICE_RELAY_FAILED));
     return;
   }
-  if (SETTINGS.voiceAutoSend == 0) {
-    state_ = State::Review;
-    requestUpdate();
+  relayReplyLen_ = strnlen(relayReply_, REPLY_CAP);
+  if (truncated) LOG_ERR("VOICE", "relay chat reply truncated at %u bytes", static_cast<unsigned>(REPLY_CAP));
+  if (relayReplyLen_ == 0) {
+    fail(tr(STR_VOICE_RELAY_FAILED));
     return;
   }
-  sendToOpenClaw();
+  relayRound_ = true;  // Answer and the history append read relayReply_
+  haveAnswer_ = true;
+  answerScroll_ = 0;
+  state_ = State::Answer;
+  if (summaryRound_) {
+    // The summary is about the history, not part of it.
+    summaryRound_ = false;
+    pendingText_ = nullptr;
+  } else {
+    recordHistoryTurn();
+  }
+  LOG_INF("VOICE", "relay chat reply (%u bytes)", static_cast<unsigned>(relayReplyLen_));
+  requestUpdate();
 }
 
 void VoiceActivity::recordHistoryTurn() {
@@ -939,16 +826,11 @@ void VoiceActivity::recordHistoryTurn() {
     LOG_ERR("VOICE", "history skipped: no line buffer");
     return;
   }
-  const int64_t now = OpenClaw::nowEpochMs();
+  const int64_t now = ChatLog::nowEpochMs();
   const bool okUser = ChatHistory::append(static_cast<uint64_t>(now), SETTINGS.clockUtcOffsetQ, true, transcript_,
                                           historyLine_, HISTORY_LINE_SIZE);
-  // The reply source follows the round: relay rounds accumulate in relayReply_
-  // (session_'s buffers hold the previous legacy round's text), legacy rounds
-  // read the session as before.
-  const char* replyText = relayRound_ ? relayReply_ : session_.replyText();
-  const size_t replySize = relayRound_ ? relayReplyLen_ : session_.replySize();
-  const bool okReply = haveAnswer_ && replySize > 0 &&
-                       ChatHistory::append(static_cast<uint64_t>(now), SETTINGS.clockUtcOffsetQ, false, replyText,
+  const bool okReply = haveAnswer_ && relayReplyLen_ > 0 &&
+                       ChatHistory::append(static_cast<uint64_t>(now), SETTINGS.clockUtcOffsetQ, false, relayReply_,
                                            historyLine_, HISTORY_LINE_SIZE);
   if (okUser || okReply) {
     LOG_INF("VOICE", "history: %s", okUser && okReply ? "user+reply" : okUser ? "user only" : "reply only");
@@ -960,7 +842,7 @@ void VoiceActivity::deleteHistoryDay() {
   if (historyDayCount_ == 0 || historyDayIndex_ >= historyDayCount_) return;
   const bool ok = ChatHistory::removeDay(historyDays_[historyDayIndex_]);
   LOG_INF("VOICE", "history day deleted: %s (%s)", historyDays_[historyDayIndex_], ok ? "ok" : "failed");
-  historyDayCount_ = ChatHistory::listDays(historyDays_, OpenClaw::ChatHistory::MAX_DAYS);
+  historyDayCount_ = ChatHistory::listDays(historyDays_, ChatHistory::MAX_DAYS);
   // Clamp the cursor onto whatever the relist left (or the empty list).
   if (historyDayCount_ == 0) {
     historyDayIndex_ = 0;
@@ -981,7 +863,7 @@ void VoiceActivity::sendHistorySummary() {
   // at CHAT_MESSAGE_CAP, so a long day keeps its newest turns.
   historyEntryCount_ =
       ChatHistory::loadDays(historyDays_, historyDayIndex_, 1, historyPool_, historyPoolCap_, historyEntries_,
-                            OpenClaw::ChatHistory::MAX_ENTRIES, historyLine_, HISTORY_LINE_SIZE);
+                            ChatHistory::MAX_ENTRIES, historyLine_, HISTORY_LINE_SIZE);
   char label[24];
   ChatHistoryFormat::historyDayRowLabel(label, sizeof(label), historyDays_[historyDayIndex_], todayHistoryDays(),
                                         tr(STR_TODAY), tr(STR_YESTERDAY), tr(STR_DAY_BEFORE));
@@ -993,7 +875,7 @@ void VoiceActivity::sendHistorySummary() {
   }
   char instruction[96];
   snprintf(instruction, sizeof(instruction), "%s %s", tr(STR_VOICE_SUMMARY_REQUEST), label);
-  if (!ChatHistoryFormat::buildSummaryPrompt(historyLine_, OpenClaw::CHAT_MESSAGE_CAP, historyEntries_,
+  if (!ChatHistoryFormat::buildSummaryPrompt(historyLine_, VoiceRelay::CHAT_TEXT_CAP, historyEntries_,
                                              historyEntryCount_, historyPool_, instruction, tr(STR_VOICE_YOU),
                                              tr(STR_VOICE_ASSISTANT))) {
     LOG_ERR("VOICE", "summary skipped: prompt build failed for %s", label);
@@ -1013,7 +895,7 @@ void VoiceActivity::sendHistorySummary() {
   summaryRound_ = true;
   cameFromHistory_ = true;
   LOG_INF("VOICE", "summary prompt (%s): %u bytes", label, static_cast<unsigned>(strlen(historyLine_)));
-  sendToOpenClaw();
+  sendTextToRelay();
 }
 
 void VoiceActivity::openNoteList() {
@@ -1145,35 +1027,41 @@ bool VoiceActivity::dictationStart() {
     dictationState_ = DictationState::Failed;
     return false;
   }
+  if (!relayConfigured()) {
+    dictationError_ = tr(STR_VOICE_RELAY_NOT_CONFIGURED);
+    dictationState_ = DictationState::Failed;
+    return false;
+  }
   // Per-round scratch: the keyboard copied the text at construction, so a
-  // silent round can never insert the previous transcript (relay or legacy).
+  // silent round can never insert the previous transcript.
   transcript_[0] = '\0';
   haveTranscript_ = false;
   // Arm the relay before the mic powers up — on the socket warmed by the note
-  // screen (startSession) and openNoteEditor(): a cold dial here would block
-  // the loop and starve the 8 ms I2S ring for the first second of speech. The
-  // keyboard needs a bare client
-  // only — dictation events are ASR + session.done, no reply buffer — so the
-  // question-shortcut path (no panel capture before the editor) allocates one
-  // without ensureRelay(). On OOM the round stays on the legacy STT instead of
-  // failing the activity from under the keyboard.
+  // screen and openNoteEditor(): a cold dial here would block the loop and
+  // starve the 8 ms I2S ring for the first second of speech. The keyboard
+  // needs a bare client only (dictation events are ASR + session.done, no
+  // reply buffer), so it allocates one without ensureRelay(). A failed
+  // allocation or a rejected session fails the round under the keyboard.
   dictationRelay_ = false;
   dictationRelayEndSent_ = false;
-  if (relayConfigured()) {
+  if (relay_ == nullptr) {
+    relay_ = makeUniqueNoThrow<VoiceRelay::Client>();
     if (relay_ == nullptr) {
-      relay_ = makeUniqueNoThrow<VoiceRelay::Client>();
-      if (relay_ == nullptr) {
-        LOG_ERR("VOICE", "OOM: relay client (dictation); using legacy STT");
-      } else {
-        relay_->setEventNotifier(this, &VoiceActivity::onRelayEventTrampoline);
-      }
+      LOG_ERR("VOICE", "OOM: relay client (dictation)");
+      dictationError_ = tr(STR_MIC_OOM);
+      dictationState_ = DictationState::Failed;
+      return false;
     }
-    if (relay_ != nullptr) {
-      startRelayRound();
-      dictationRelay_ = relayRound_;
-      // The keyboard round must not steer the panel's answer/history routing.
-      relayRound_ = false;
-    }
+    relay_->setEventNotifier(this, &VoiceActivity::onRelayEventTrampoline);
+  }
+  startRelayRound();
+  dictationRelay_ = relayRound_;
+  // The keyboard round must not steer the panel's answer/history routing.
+  relayRound_ = false;
+  if (!dictationRelay_) {
+    dictationError_ = tr(STR_VOICE_RELAY_FAILED);
+    dictationState_ = DictationState::Failed;
+    return false;
   }
   // Same rail discipline as startRecording(), minus the voice-screen repaint:
   // the keyboard has already painted its "listening" hint (requestUpdateAndWait
@@ -1209,10 +1097,14 @@ VoiceActivity::DictationState VoiceActivity::dictationPoll() {
       pumpRelayCapture();
     }
     if (relay_ == nullptr || relayError_ || relay_->state() == VoiceRelay::Client::State::Failed) {
-      // Keep the capture: the Completed case below runs the legacy STT on it.
-      LOG_INF("VOICE", "dictation relay failed; legacy STT on the saved capture");
+      // The relay is the only STT backend: fail the round under the keyboard.
+      LOG_ERR("VOICE", "dictation relay failed: %u", static_cast<unsigned>(relayErrorCode_));
       relayClose();
       dictationRelay_ = false;
+      recorder_.close();
+      dictationError_ = relayError_ ? relayErrorReason() : tr(STR_VOICE_RELAY_FAILED);
+      dictationState_ = DictationState::Failed;
+      return dictationState_;
     }
   }
 
@@ -1256,48 +1148,20 @@ VoiceActivity::DictationState VoiceActivity::dictationPoll() {
       dictationState_ = DictationState::Ready;
       return dictationState_;
     }
-    // Empty final: nothing to insert; the legacy STT on the same capture is
-    // the retry, exactly like the panel's empty-reply fallback.
-    LOG_INF("VOICE", "dictation relay empty final; legacy STT on the saved capture");
+    // Empty final: nothing to insert.
     relayClose();
     dictationRelay_ = false;
+    recorder_.close();
+    dictationError_ = tr(STR_STT_NO_SPEECH);
+    dictationState_ = DictationState::Failed;
+    return dictationState_;
   }
 
-  // No relay (or it just fell back): the blocking STT call runs here, in the
-  // keyboard's loop, with input swallowed and the panel static — same shape as
-  // runTranscription().
-  if (!sttParser_) {
-    sttParser_ = makeUniqueNoThrow<SttCodec::SseTranscriptParser>();
-    if (!sttParser_) {
-      LOG_ERR("VOICE", "OOM: SSE parser (dictation)");
-      recorder_.close();
-      dictationError_ = tr(STR_MIC_OOM);
-      dictationState_ = DictationState::Failed;
-      return dictationState_;
-    }
-  } else {
-    sttParser_->reset();
-  }
-  SttClient::Config cfg;
-  if (!SttClient::loadConfig(sttUrlBuf_, sizeof(sttUrlBuf_), sttKeyBuf_, sizeof(sttKeyBuf_), cfg)) {
-    recorder_.close();
-    dictationError_ = tr(STR_STT_FAILED);
-    dictationState_ = DictationState::Failed;
-    return dictationState_;
-  }
-  SttClient::Stats stats;
-  const SttClient::Result result =
-      SttClient::transcribe(cfg, recorder_.pcm(), recorder_.samples(), HalMicrophone::SAMPLE_RATE, *sttParser_, &stats);
-  recorder_.close();  // free the PCM before the keyboard repaints
-  if (result != SttClient::OK || sttParser_->textSize() == 0) {
-    LOG_ERR("VOICE", "dictation transcribe failed: %s", SttClient::resultName(result));
-    dictationError_ = result == SttClient::OK ? tr(STR_STT_NO_SPEECH) : tr(STR_STT_FAILED);
-    dictationState_ = DictationState::Failed;
-    return dictationState_;
-  }
-  snprintf(transcript_, sizeof(transcript_), "%.*s", static_cast<int>(sttParser_->textSize()), sttParser_->text());
-  LOG_INF("VOICE", "dictation transcript (%u bytes): %s", static_cast<unsigned>(sttParser_->textSize()), transcript_);
-  dictationState_ = DictationState::Ready;
+  // Only reachable with the round already disarmed above; nothing can
+  // transcribe the capture.
+  recorder_.close();
+  dictationError_ = tr(STR_VOICE_RELAY_FAILED);
+  dictationState_ = DictationState::Failed;
   return dictationState_;
 }
 
@@ -1309,7 +1173,7 @@ void VoiceActivity::saveNoteFromTranscript() {
     fail(tr(STR_NOTE_SAVE_FAILED));
     return;
   }
-  const int64_t now = OpenClaw::nowEpochMs();
+  const int64_t now = ChatLog::nowEpochMs();
   if (!NoteStore::append(noteContext_.bookBase, static_cast<uint64_t>(now), noteContext_.spineIndex,
                          noteContext_.pageNumber, noteContext_.pageCount, transcript_, noteLine_, noteLineCap_)) {
     fail(tr(STR_NOTE_SAVE_FAILED));
@@ -1331,10 +1195,10 @@ void VoiceActivity::openNoteQuick() {
 
 void VoiceActivity::saveQuickNote() {
   // A quick mark goes through the same note append a dictated one does, but
-  // nothing before it: recorder_, runTranscription() and session_ are never
-  // touched, so it costs no STT upload and no agent turn. The composed line is
-  // what the NoteSaved screen then shows, so what the reader sees is exactly
-  // what the .ntf holds.
+  // nothing before it: the recorder and the relay are never touched, so it
+  // costs no audio upload and no model turn. The composed line is what the
+  // NoteSaved screen then shows, so what the reader sees is exactly what the
+  // .ntf holds.
   const char* tag = I18N.get(QUICK_TAGS[quickSelected_]);
   if (noteExcerpt_[0] != '\0') {
     snprintf(transcript_, sizeof(transcript_), "%s%s%s", tag, tr(STR_NOTE_SEP), noteExcerpt_);
@@ -1344,41 +1208,14 @@ void VoiceActivity::saveQuickNote() {
   saveNoteFromTranscript();
 }
 
-void VoiceActivity::sendToOpenClaw() {
-  // The session may still be handshaking if the user spoke before it settled.
-  // Wait in Sending rather than dropping a capture the user just made; loop()
-  // puts the frame on the wire the moment the link is up (oweSend_).
-  state_ = State::Sending;
-  oweSend_ = true;
-  lastWaitShownSec_ = session_.awaitingMs() / 1000;
-  requestUpdate();
-}
-
-void VoiceActivity::sendPending() {
-  oweSend_ = false;
-  // A summarize round sends the day prompt (pendingText_ → historyLine_), not
-  // the short "Summary of <date>" label that transcript_ holds for display.
-  const char* message = pendingText_ != nullptr ? pendingText_ : transcript_;
-  if (session_.sendMessage(message) == OpenClaw::Session::SendOutcome::Failed) {
-    fail(tr(STR_OPENCLAW_SEND_FAILED));
-    return;
-  }
-  lastWaitShownSec_ = session_.awaitingMs() / 1000;
-  requestUpdate();  // "Waiting for reply…" before the first streamed delta
-}
-
 void VoiceActivity::loop() {
-  // Note mode never opens the session; poll() on the unopened session is a
-  // no-op, so this is safe in both modes. The same is true of the relay client
-  // before its first start() — poll() guards on nullptr/Idle internally.
-  //
-  // While the capture is live this pass must only feed the microphone: a WS
-  // dial (the OpenClaw session or a cold relay socket) blocks it for ~0.9 s
-  // and starves the recorder's 8 ms I2S ring. Neither is needed mid-capture —
-  // the relay flushes the buffered PCM once it connects, and the OpenClaw
-  // session is not touched until the transcript is ready.
+  // The relay client is polled every pass; before its first start() poll()
+  // guards on nullptr/Idle internally. While the capture is live this pass
+  // must only feed the microphone: a WS dial blocks it for ~0.9 s and starves
+  // the recorder's 8 ms I2S ring, so a cold dial is deferred until the capture
+  // ends. Warm sockets never dial here, and the relay flushes the buffered PCM
+  // once it connects.
   const bool captureLive = state_ == State::Listening;
-  if (!captureLive) session_.poll();
   if (relay_ != nullptr && !(captureLive && relay_->dialing())) relay_->poll();
 
   // Hint placement and action binding follow one rule. mapLabels() puts the
@@ -1390,22 +1227,6 @@ void VoiceActivity::loop() {
   const bool navSwapped = mappedInput.isNavDirectionSwapped();
   const auto prevKey = navSwapped ? MappedInputManager::Button::Right : MappedInputManager::Button::Left;
   const auto nextKey = navSwapped ? MappedInputManager::Button::Left : MappedInputManager::Button::Right;
-
-  // A session that hit the reconnect budget lands in Failed — surface it
-  // unless the round trip already failed for its own reason. Note mode never
-  // opened a session: skip the state machine entirely (it would only report
-  // stale/idle states), while Back, capture and save handling below still run.
-  // A relay round does not depend on the OpenClaw link: its failures are the
-  // relay's own, and the shared session may be down for the whole round.
-  if (!noteContext_.valid && !questionInput_ && !relayRound_ && state_ != State::Failed) {
-    if (session_.state() == OpenClaw::Session::State::Failed) {
-      fail(session_.reason() != nullptr ? session_.reason() : tr(STR_OPENCLAW_DISCONNECTED));
-      // fall through: Back still works below
-    } else if (session_.reconnecting() && (state_ == State::Idle || state_ == State::Answer)) {
-      state_ = State::Idle;
-      haveAnswer_ = false;
-    }
-  }
 
   // Back: every state above unwinds one level on the press edge; only the
   // final "leave the activity" step is deferred to the release edge — the
@@ -1484,7 +1305,7 @@ void VoiceActivity::loop() {
     // One action per front key, day selection on the side keys: Back leaves
     // (an armed delete backs out instead), front-Left deletes the highlighted
     // day (two presses, armed like the note list), front-Right asks the
-    // gateway to summarize it, Confirm opens the day's turns. Hints in
+    // relay to summarize it, Confirm opens the day's turns. Hints in
     // render() are drawn on the same keys (mapLabels).
     const bool hasDay = historyDayCount_ > 0;
     if (mappedInput.wasPressed(MappedInputManager::Button::Up)) {
@@ -1615,17 +1436,18 @@ void VoiceActivity::loop() {
       case Voice::Recorder::Event::Recording:
         return;  // no repaint, no input: the capture owns the loop
       case Voice::Recorder::Event::Complete:
-        if (relayRound_) {
-          // Audio stays in the capture buffer: the relay Sending state flushes
-          // any tail, sends audio.end, and can still hand the same capture to
-          // the legacy fallback. recorder_.close() waits for the settle.
-          state_ = State::Sending;
-          relayEndMs_ = millis();
-          lastWaitShownSec_ = 0;
-          requestUpdate();
-        } else {
-          startTranscribing();
+        if (!relayRound_) {
+          // Only reachable if the session was disarmed mid-capture; there is
+          // no second backend to transcribe the audio.
+          fail(tr(STR_VOICE_RELAY_FAILED));
+          return;
         }
+        // Audio stays in the capture buffer: the relay Sending state flushes
+        // any tail and sends audio.end. recorder_.close() waits for the settle.
+        state_ = State::Sending;
+        relayEndMs_ = millis();
+        lastWaitShownSec_ = 0;
+        requestUpdate();
         return;
       case Voice::Recorder::Event::NoAudio:
         if (relayRound_) {
@@ -1646,75 +1468,20 @@ void VoiceActivity::loop() {
     return;
   }
 
-  if (state_ == State::Transcribing) {
-    runTranscription();
-    return;
-  }
-
   if (state_ == State::Review) {
-    // The transcript is parked; Confirm commits it to the wire.
+    // The transcript is parked; Confirm sends it as a blocking text round.
     if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
-      sendToOpenClaw();
+      sendTextToRelay();
     }
     return;
   }
 
   if (state_ == State::Sending) {
+    // sendTextToRelay() blocks through its round and settles into Answer, so
+    // only the live relay stream reaches the loop here.
     if (relayRound_) {
       loopRelaySending();
-      return;
     }
-    // Transcript ready, chat.send not yet on the wire (the user spoke while
-    // the session was still handshaking). oweSend_ says so — not
-    // session_.outcome(), which still reports the previous round and would
-    // leave this one waiting on a send that never goes out.
-    if (oweSend_) {
-      // Same guard as AskAiActivity's Connecting branch: Connected is stale
-      // while the reconnect runs, and writing to the closed socket fails the
-      // send instead of queueing it for when the link returns.
-      if (session_.state() == OpenClaw::Session::State::Connected && !session_.reconnecting()) sendPending();
-      return;
-    }
-    if (session_.awaitingReply()) {
-      // Keep the waiting line alive: refresh exactly when the number the
-      // screen would print changes, so the counter steps 0 → 1 → 2 … and
-      // never repaints the same second twice.
-      const uint32_t shownSec = session_.awaitingMs() / 1000;
-      if (shownSec != lastWaitShownSec_) {
-        lastWaitShownSec_ = shownSec;
-        requestUpdate();
-      }
-      return;
-    }
-    // Reply settled (Sent/AgentFailed/NoReply/Aborted/Failed) → show it.
-    if (session_.replySize() > 0 && session_.outcome() == OpenClaw::Session::SendOutcome::Sent) {
-      haveAnswer_ = true;
-      answerScroll_ = 0;  // a new reply starts at its first line
-      state_ = State::Answer;
-      if (summaryRound_) {
-        // The summary is about the history, not part of it: appending would
-        // write a fake "Summary of <date>" turn into the day file.
-        summaryRound_ = false;
-        pendingText_ = nullptr;
-      } else {
-        recordHistoryTurn();
-      }
-      requestUpdate();
-    } else if (session_.state() == OpenClaw::Session::State::Connected) {
-      // A dropped socket leaves state_ at Connected and only arms the
-      // reconnect, so "the link is gone" has to be read from reconnecting()
-      // and not from the state — otherwise a closed socket is reported as a
-      // gateway that never answered.
-      if (session_.reconnecting()) {
-        fail(tr(STR_OPENCLAW_DISCONNECTED));
-      } else {
-        // Settled without a usable reply; the reason is in the session.
-        fail(session_.lastError() != nullptr ? tr(STR_OPENCLAW_AGENT_FAILED) : tr(STR_OPENCLAW_NO_REPLY));
-      }
-    }
-    // Otherwise the link dropped mid-round trip: the reconnect / session-
-    // Failed handling at the top of loop() decides, and the gateway line on
-    // this screen says which of the two is running.
     return;
   }
 
@@ -1816,7 +1583,6 @@ void VoiceActivity::loop() {
       startRecording();
       break;
     case State::Listening:
-    case State::Transcribing:
     case State::Sending:
     case State::Review:
     case State::HistoryList:
@@ -1848,30 +1614,22 @@ void VoiceActivity::render(RenderLock&&) {
     case State::Idle: {
       renderer.drawText(UI_10_FONT_ID, left, y, tr(STR_VOICE_HINT), true, EpdFontFamily::BOLD);
       y += metrics.verticalSpacing * 2;
-      // Session progress on the same screen: the user sees the connect (or
-      // reconnect) happen.
+      // The relay is the only backend; name it here, or say plainly that cloud
+      // features are off when the URL is blank.
       if (noteContext_.valid) {
         snprintf(buf, sizeof(buf), "%s", tr(STR_VOICE_BOOKMARK));
       } else if (questionInput_) {
         // The action label, not the header again: the header already shows
         // questionScreenTitle_, and repeating it here read as a glitch.
         snprintf(buf, sizeof(buf), "%s", I18N.get(questionTitle_));
-      } else if (session_.state() == OpenClaw::Session::State::Connected && !session_.reconnecting()) {
-        snprintf(buf, sizeof(buf), "%s · %s", tr(STR_OPENCLAW_CONNECTED), session_.status());
+      } else if (relayConfigured()) {
+        snprintf(buf, sizeof(buf), "%s", tr(STR_VOICE_RELAY));
       } else {
-        snprintf(buf, sizeof(buf), "%s", session_.status());
+        snprintf(buf, sizeof(buf), "%s", tr(STR_VOICE_RELAY_NOT_CONFIGURED));
       }
       for (const auto& line : renderer.wrappedText(UI_10_FONT_ID, buf, textWidth, 2)) {
         renderer.drawText(UI_10_FONT_ID, left, y, line.c_str());
         y += lineHeight;
-      }
-      if (noteContext_.valid || questionInput_) {
-        break;  // no session line: nothing is dialling in note/question mode
-      }
-      if (session_.reconnecting()) {
-        renderer.drawText(UI_10_FONT_ID, left, y + metrics.verticalSpacing, tr(STR_OPENCLAW_DISCONNECTED));
-      } else if (session_.reason() != nullptr) {
-        renderer.drawText(UI_10_FONT_ID, left, y + metrics.verticalSpacing, session_.reason());
       }
       break;
     }
@@ -1879,7 +1637,7 @@ void VoiceActivity::render(RenderLock&&) {
     case State::Listening: {
       // Painted by startRecording() before MIC.begin(): the capture owns the
       // panel for the rest of this state, so the stage row, the mic icon and
-      // the gateway state all have to be on screen now.
+      // the relay label all have to be on screen now.
       drawPipeline(left, y);
       y += lineHeight + metrics.verticalSpacing;
       renderer.drawIcon(VoiceIcon, left, y, 32, 32);
@@ -1889,22 +1647,9 @@ void VoiceActivity::render(RenderLock&&) {
         renderer.drawText(UI_10_FONT_ID, left, y, line.c_str());
         y += lineHeight;
       }
-      if (const char* gw = (noteContext_.valid || questionInput_)
-                               ? nullptr
-                               : (relayRound_ ? tr(STR_VOICE_RELAY) : gatewayStatus())) {
+      if (const char* gw = (noteContext_.valid || questionInput_) ? nullptr : tr(STR_VOICE_RELAY)) {
         const int gwY = renderer.getScreenHeight() - metrics.buttonHintsHeight - lineHeight - metrics.verticalSpacing;
         renderer.drawText(UI_10_FONT_ID, left, gwY, gw, true, EpdFontFamily::BOLD);
-      }
-      break;
-    }
-
-    case State::Transcribing: {
-      drawPipeline(left, y);
-      y += lineHeight + metrics.verticalSpacing;
-      renderer.drawText(UI_10_FONT_ID, left, y, tr(STR_STT_TRANSCRIBING), true, EpdFontFamily::BOLD);
-      y += metrics.verticalSpacing;
-      if (const char* gw = (noteContext_.valid || questionInput_) ? nullptr : gatewayStatus()) {
-        renderer.drawText(UI_10_FONT_ID, left, y + lineHeight, gw);
       }
       break;
     }
@@ -1913,31 +1658,22 @@ void VoiceActivity::render(RenderLock&&) {
       drawPipeline(left, y);
       y += lineHeight + metrics.verticalSpacing;
       // Elapsed / deadline read-out — the one thing that changes between the
-      // per-second repaints, so a slow agent turn reads as progress instead
-      // of a frozen screen. Nothing to count while the frame is still waiting
-      // for the link, so that case shows the plain line.
+      // per-second repaints, so a slow relay turn reads as progress instead
+      // of a frozen screen.
+      const uint32_t waitedMs = relayEndMs_ != 0 ? millis() - relayEndMs_ : 0;
       char waiting[72];
-      if (relayRound_) {
-        const uint32_t waitedMs = relayEndMs_ != 0 ? millis() - relayEndMs_ : 0;
-        snprintf(waiting, sizeof(waiting), "%s %u/%us", tr(STR_OPENCLAW_WAITING),
-                 static_cast<unsigned>(waitedMs / 1000),
-                 static_cast<unsigned>(VoiceRelay::Client::DONE_TIMEOUT_MS / 1000));
-      } else if (session_.awaitingReply()) {
-        snprintf(waiting, sizeof(waiting), "%s %u/%us", tr(STR_OPENCLAW_WAITING),
-                 static_cast<unsigned>(session_.awaitingMs() / 1000),
-                 static_cast<unsigned>(OpenClaw::Session::CHAT_TIMEOUT_MS / 1000));
-      } else {
-        snprintf(waiting, sizeof(waiting), "%s", tr(STR_OPENCLAW_WAITING));
-      }
+      snprintf(waiting, sizeof(waiting), "%s %u/%us", tr(STR_VOICE_RELAY_WAITING),
+               static_cast<unsigned>(waitedMs / 1000),
+               static_cast<unsigned>(VoiceRelay::Client::DONE_TIMEOUT_MS / 1000));
       renderer.drawText(UI_10_FONT_ID, left, y, waiting, true, EpdFontFamily::BOLD);
       y += metrics.verticalSpacing * 2;
       for (const auto& line : renderer.wrappedText(UI_10_FONT_ID, transcript_, textWidth, 2)) {
         renderer.drawText(UI_10_FONT_ID, left, y, line.c_str());
         y += lineHeight;
       }
-      if (const char* gw = relayRound_ ? tr(STR_VOICE_RELAY) : gatewayStatus()) {
+      {
         const int gwY = renderer.getScreenHeight() - metrics.buttonHintsHeight - lineHeight - metrics.verticalSpacing;
-        renderer.drawText(UI_10_FONT_ID, left, gwY, gw);
+        renderer.drawText(UI_10_FONT_ID, left, gwY, tr(STR_VOICE_RELAY));
       }
       break;
     }
@@ -1958,11 +1694,9 @@ void VoiceActivity::render(RenderLock&&) {
       if (maxLines < 1) maxLines = 1;
       // Body text stays clear of the right margin, where the side Up/Down
       // scroll hints are drawn. What does not fit is scrolled, not dropped:
-      // the "first-last/total" read-out says where the window is. The reply
-      // source follows the round (relay accumulation vs. shared session).
+      // the "first-last/total" read-out says where the window is.
       const int bodyWidth = textWidth - metrics.sideButtonHintsWidth;
-      const size_t total = drawTextWindow(UI_10_FONT_ID, relayRound_ ? relayReply_ : session_.replyText(), left, y,
-                                          bodyWidth, maxLines, answerScroll_);
+      const size_t total = drawTextWindow(UI_10_FONT_ID, relayReply_, left, y, bodyWidth, maxLines, answerScroll_);
       if (total > static_cast<size_t>(maxLines)) {
         const size_t lastShown = std::min(total, answerScroll_ + static_cast<size_t>(maxLines));
         char pos[24];
@@ -2231,28 +1965,12 @@ void VoiceActivity::render(RenderLock&&) {
     }
 
     case State::Failed: {
-      // Gateway pairing bread ("auth failed" + `openclaw devices approve …`)
-      // belongs to the legacy MiMo + OpenClaw service only. With the relay on,
-      // this screen is reached before any conversation and the command is
-      // noise for a relay user, so the pair of lines is shown only when the
-      // relay preference is off (SettingsList: STR_VOICE_RELAY).
-      const bool pairingPending = session_.approveCommand() != nullptr;
-      const bool showPairing = pairingPending && SETTINGS.voiceRelayEnabled == 0;
-      if (!pairingPending || showPairing) {
-        renderer.drawText(UI_10_FONT_ID, left, y, failReason_ != nullptr ? failReason_ : tr(STR_STT_FAILED), true,
-                          EpdFontFamily::BOLD);
-        y += metrics.verticalSpacing * 2;
-      }
+      renderer.drawText(UI_10_FONT_ID, left, y, failReason_ != nullptr ? failReason_ : tr(STR_VOICE_RELAY_FAILED), true,
+                        EpdFontFamily::BOLD);
+      y += metrics.verticalSpacing * 2;
       if (haveTranscript_) {
         for (const auto& line : renderer.wrappedText(UI_10_FONT_ID, transcript_, textWidth, 3)) {
           renderer.drawText(UI_10_FONT_ID, left, y, line.c_str());
-          y += lineHeight;
-        }
-      } else if (showPairing) {
-        // Pairing pending: show the operator command where it will be typed.
-        for (const auto& line :
-             renderer.wrappedText(UI_10_FONT_ID, session_.approveCommand(), textWidth, 3, EpdFontFamily::BOLD)) {
-          renderer.drawText(UI_10_FONT_ID, left, y, line.c_str(), true, EpdFontFamily::BOLD);
           y += lineHeight;
         }
       }

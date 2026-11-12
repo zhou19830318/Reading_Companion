@@ -117,7 +117,7 @@ void CrossPointWebServerActivity::onExit() {
   MDNS.end();
 
   // Tear down + heap-defrag reboot only for a radio THIS activity switched on.
-  // WiFi can already be up on entry (Voice keeps it for the workbench cards, and
+  // WiFi can already be up on entry (Voice keeps it for relay rounds, and
   // a previous activity may have left it on): restarting then turned a plain Back
   // out of the mode picker into a ~10 s reboot that looked like a hang, because
   // e-ink keeps showing the old frame until Home's first paint. Leaving the

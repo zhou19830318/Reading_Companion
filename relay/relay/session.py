@@ -32,7 +32,6 @@ from .protocol import (
 )
 from .providers import make_asr_provider, make_llm_provider
 from .providers.base import AsrProvider, LlmProvider, ProviderError
-from .providers.openclaw import answer_via_openclaw, should_route_to_openclaw
 
 log = logging.getLogger("relay.session")
 
@@ -129,8 +128,7 @@ class LatencyMarks:
             # audio ends there is nothing left to wait for.
             asr_final = 0
         # Docs §17.14: LLM first-token latency runs from the LLM request (t6).
-        # Fall back to the ASR final for OpenClaw turns, which send their
-        # request without marking t6.
+        # The fallback covers a provider that never marked t6.
         llm_first = self.ms("t7", "t6")
         if llm_first is None:
             llm_first = self.ms("t7", "t5")
@@ -376,30 +374,7 @@ class VoiceSession:
     def _start_llm(self) -> None:
         if self.state in TERMINAL_STATES:
             return
-        # Docs section 7 routing: simple questions go straight to the fast
-        # LLM; tool/library tasks may route through OpenClaw when enabled.
-        if should_route_to_openclaw(self.settings, self._transcript or ""):
-            self._llm_task = asyncio.create_task(self._run_openclaw())
-        else:
-            self._llm_task = asyncio.create_task(self._run_llm())
-
-    async def _run_openclaw(self) -> None:
-        try:
-            text = await answer_via_openclaw(self.settings, self._transcript or "")
-            self._send(protocol.llm_start(self.request_id, self.session_id))
-            self.seq += 1
-            self._send(protocol.llm_delta(self.request_id, self.session_id, text, self.seq))
-            self.marks.mark("t7")
-            self.marks.mark("t8")
-            self.seq += 1
-            self._send(protocol.llm_final(self.request_id, self.session_id, text))
-            await self._finish("success")
-        except ProviderError as exc:
-            await self._fail(exc.code, exc.detail)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            await self._fail(ErrorCode.INTERNAL_ERROR, f"openclaw: {exc}")
+        self._llm_task = asyncio.create_task(self._run_llm())
 
     async def _run_llm(self) -> None:
         if not self._transition(SessionState.LLM_RUNNING):

@@ -22,7 +22,7 @@
 //
 // The generate/edit call blocks the loop for as long as the provider renders
 // (tens of seconds) with a static waiting frame on the panel — the same
-// contract as AskAiActivity's relay round and SttClient::transcribe.
+// contract as AskAiActivity's relay round and DictionaryActivity's lookup.
 class AiImageActivity final : public Activity {
  public:
   explicit AiImageActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)

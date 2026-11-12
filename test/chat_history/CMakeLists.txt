@@ -4,12 +4,12 @@ add_executable(ChatHistoryFormatTest
 )
 
 target_include_directories(ChatHistoryFormatTest PRIVATE
-  ${REPO_ROOT}/lib/OpenClaw
+  ${REPO_ROOT}/lib/ChatLog
   ${REPO_ROOT}/lib/Utf8
 )
 
 target_include_directories(ChatHistoryFormatTest PRIVATE
-  ${REPO_ROOT}/lib/OpenClaw
+  ${REPO_ROOT}/lib/ChatLog
 )
 
 target_link_libraries(ChatHistoryFormatTest PRIVATE

@@ -87,7 +87,6 @@ mkdir -p "$RELAY_ROOT/run/learning"
 mkdir -p "$RELAY_ROOT/run/pomodoro"
 mkdir -p "$RELAY_ROOT/run/pigeon"
 mkdir -p "$RELAY_ROOT/run/devices"
-mkdir -p "$RELAY_ROOT/run/weread"
 chown -R voice-relay:voice-relay "$RELAY_ROOT"
 
 section "release $TS"
@@ -140,8 +139,7 @@ if [[ -f "$ENV_FILE" ]]; then
               "RELAY_LEARNING_DIR=$RELAY_ROOT/run/learning" \
               "RELAY_POMODORO_DIR=$RELAY_ROOT/run/pomodoro" \
               "RELAY_PIGEON_DIR=$RELAY_ROOT/run/pigeon" \
-              "RELAY_DEVICE_DIR=$RELAY_ROOT/run/devices" \
-              "RELAY_WEREAD_DIR=$RELAY_ROOT/run/weread"; do
+              "RELAY_DEVICE_DIR=$RELAY_ROOT/run/devices"; do
         key=${kv%%=*}
         grep -q "^${key}=" "$ENV_FILE" || echo "$kv" >> "$ENV_FILE"
     done
@@ -204,10 +202,8 @@ RELAY_LEARNING_DIR=$RELAY_ROOT/run/learning
 RELAY_POMODORO_DIR=$RELAY_ROOT/run/pomodoro
 # Pigeon device-to-device messages: same run/ rule as learning.
 RELAY_PIGEON_DIR=$RELAY_ROOT/run/pigeon
-# Server-managed device registry (Relay URL / Token / per-device WeRead Key).
+# Server-managed device registry (Relay URL / Token).
 RELAY_DEVICE_DIR=$RELAY_ROOT/run/devices
-# Default WeRead key saved by /admin (per-device keys live in devices.json).
-RELAY_WEREAD_DIR=$RELAY_ROOT/run/weread
 # Sessions may run concurrently; keep within the DashScope account quota.
 MAX_CONCURRENT_SESSIONS=4
 # Multiple onepage devices: cap open sockets and sessions per device.
@@ -285,7 +281,7 @@ printf '       Relay URL:  %s\n' "$DEVICE_URL"
 printf '       Device ID:  %s\n' "$DEVICE_ID"
 printf '       Token:      %s\n' "$TOKEN_VALUE"
 printf '  3. Save. The device-side Voice Relay toggle is ON by default.\n'
-printf '  MiMo speech key and OpenClaw can stay blank: the relay replaces both.\n'
+printf '  No other credentials are needed on the device: the relay is the only backend.\n'
 if ! grep -q '^DASHSCOPE_API_KEY=sk-' "$ENV_FILE"; then
     printf '\n  NOTE: mock mode is active -- voice turns return canned text until a\n'
     printf '  DashScope key is set. Re-run this script with --dashscope-key sk-...\n'

@@ -30,10 +30,6 @@ class I18n {
   const char* getLanguageName(Language lang) const;
   static Language languageFromCode(const char* code);
 
-  // True when the UI language writes Chinese: callers use it to choose between
-  // a 中文 label and its Latin transliteration (weather city names).
-  static bool isChinese(Language lang) { return lang == Language::ZH_HANS || lang == Language::ZH_HANT; }
-
   // Get all unique characters used in a specific language
   // Returns a sorted string of unique characters
   static const char* getCharacterSet(Language lang);

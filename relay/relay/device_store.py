@@ -1,7 +1,7 @@
 """Server-side device registry.
 
-The relay is the source of truth for each reader's relay URL, device token and
-WeRead API key. A device keeps its existing CloudConfig values as the bootstrap
+The relay is the source of truth for each reader's relay URL and device token.
+A device keeps its existing CloudConfig values as the bootstrap
 credential; after that it can pull the current values from
 ``GET /api/v1/device/config`` (authenticated with its current token) and update
 NVS only when something changed.
@@ -112,10 +112,8 @@ class DeviceStore:
             "name": _clean(record.get("name"), NAME_MAX),
             "token": _clean(record.get("token"), TOKEN_MAX),
             "relayUrl": _clean(record.get("relayUrl"), URL_MAX),
-            "wereadKey": _clean(record.get("wereadKey"), 512),
             "createdAt": _record_int(record.get("createdAt")),
             "updatedAt": _record_int(record.get("updatedAt")),
-            "wereadUpdatedAt": _record_int(record.get("wereadUpdatedAt")),
             "previousToken": _clean(record.get("previousToken"), TOKEN_MAX),
             "previousTokenExpiresAt": _record_int(record.get("previousTokenExpiresAt")),
         }
@@ -131,7 +129,6 @@ class DeviceStore:
                     "name": record["name"],
                     "relayUrl": record["relayUrl"],
                     "deviceToken": record["token"],
-                    "hasWereadKey": bool(record["wereadKey"]),
                     "createdAt": record["createdAt"],
                     "updatedAt": record["updatedAt"],
                 }
@@ -162,18 +159,6 @@ class DeviceStore:
         with self._lock:
             return {device_id: record["token"] for device_id, record in self._load().items()}
 
-    def weread_key(self, device_id: str) -> str:
-        with self._lock:
-            record = self._load().get(device_id)
-            return record["wereadKey"] if record else ""
-
-    def weread_updated_at(self, device_id: str) -> int:
-        with self._lock:
-            record = self._load().get(device_id)
-            if not record or not record["wereadKey"]:
-                return 0
-            return record["wereadUpdatedAt"] or record["updatedAt"]
-
     def config_for(self, device_id: str) -> dict[str, Any] | None:
         """Device config consumed by the admin UI and config endpoint."""
         with self._lock:
@@ -185,7 +170,6 @@ class DeviceStore:
                 "name": record["name"],
                 "relayUrl": record["relayUrl"],
                 "token": record["token"],
-                "hasWereadKey": bool(record["wereadKey"]),
                 "updatedAt": record["updatedAt"],
             }
 
@@ -198,8 +182,6 @@ class DeviceStore:
         name: str | None = None,
         relay_url: str | None = None,
         token: str | None = None,
-        weread_key: str | None = None,
-        clear_weread: bool = False,
     ) -> dict[str, Any]:
         device_id = str(device_id or "").strip()
         if len(device_id) > 64 or not DEVICE_ID_RE.match(device_id):
@@ -214,10 +196,8 @@ class DeviceStore:
                 "name": "",
                 "token": "",
                 "relayUrl": "",
-                "wereadKey": "",
                 "createdAt": now,
                 "updatedAt": now,
-                "wereadUpdatedAt": 0,
                 "previousToken": "",
                 "previousTokenExpiresAt": 0,
             }
@@ -246,18 +226,6 @@ class DeviceStore:
                     record["token"] = token
             elif not record["token"]:
                 record["token"] = secrets.token_urlsafe(24)
-
-            if clear_weread:
-                if record["wereadKey"]:
-                    record["wereadKey"] = ""
-                    record["wereadUpdatedAt"] = now
-            elif weread_key is not None:
-                weread_key = str(weread_key).strip()
-                if weread_key and (not weread_key.startswith("wrk-") or not (20 <= len(weread_key) <= 512)):
-                    raise DeviceStoreError("WeRead key must start with wrk- and be 20..512 characters")
-                if weread_key and weread_key != record["wereadKey"]:
-                    record["wereadKey"] = weread_key
-                    record["wereadUpdatedAt"] = now
 
             record["updatedAt"] = now
             devices[device_id] = record

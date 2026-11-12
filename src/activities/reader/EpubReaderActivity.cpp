@@ -2091,8 +2091,8 @@ bool EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageC
     return false;
   }
 
-  // Mirror chapter + book % into the recent-books store so the workbench
-  // "now reading" card can show them without loading the EPUB. This runs on
+  // Mirror chapter + book % into the recent-books store so the recents list
+  // can show them without loading the EPUB. This runs on
   // every page turn, so updateProgress() itself drops redundant writes.
   uint8_t percent = 0;
   if (pageCount > 0 && spineIndex >= 0) {

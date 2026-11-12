@@ -7,7 +7,7 @@
 // policy to 160 MHz (HalPowerManager keys off WiFi.getMode()), so a dictionary
 // lookup or one AI answer otherwise taxes idle power until deep sleep. The
 // features that leave the radio up on purpose (dictionary, ask-AI, voice,
-// workbench, the file-transfer server) arm this manager when they enter; any
+// markets, the file-transfer server) arm this manager when they enter; any
 // session progress (noteActivity) or in-flight request (hold) postpones the
 // shutdown, and poll() — pumped from the main loop — powers the radio down
 // once they have all been quiet for IDLE_TIMEOUT_MS.
@@ -34,9 +34,9 @@ class WifiIdleManager {
   void hold();
   void release();
   // Called just before the radio is powered down, so a subsystem holding a
-  // socket (the shared OpenClaw session) can park it deliberately instead of
-  // watching the link die. Function pointer + context, the session-notifier
-  // pattern (no heap, no template bloat).
+  // socket (the voice relay client) can park it deliberately instead of
+  // watching the link die. Function pointer + context (no heap, no template
+  // bloat).
   void setShutdownHook(void* ctx, void (*fn)(void*)) {
     hookCtx_ = ctx;
     hookFn_ = fn;

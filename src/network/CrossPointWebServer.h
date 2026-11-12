@@ -149,6 +149,4 @@ class CrossPointWebServer {
 
   void handleGetCloudConfig() const;
   void handlePostCloudConfig();
-  void handlePostOpenClawTest();
-  void handlePostSttTest();
 };

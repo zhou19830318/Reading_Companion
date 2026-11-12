@@ -3,10 +3,7 @@
 #include <ChatHistory.h>
 #include <I18n.h>
 #include <NoteStore.h>
-#include <OpenClawSession.h>
 #include <Recorder.h>
-#include <SttClient.h>
-#include <SttCodec.h>
 #include <VoiceRelayCodec.h>
 
 #include <cstddef>
@@ -19,13 +16,15 @@ namespace VoiceRelay {
 class Client;
 }
 
-// Voice conversation screen — P3-S Phase 1 (docs/voice-openclaw-port-plan.md
-// §8): one user-initiated round trip per press.
+// Voice conversation screen: one user-initiated round trip per press.
 //
 //   Confirm → record (VAD: stops 1.5 s after speech, 8 s cap)
-//           → cloud STT (blocking, ~3 s)
-//           → chat.send over the shared OpenClaw::Session
+//           → streamed to the relay (live STT + reply)
 //           → reply drawn on the panel; Back / timeout returns to Idle.
+//
+// The relay is the only backend. Manual send mode runs the same round as a
+// transcript-only session, parks the text in Review, and sends it to the
+// relay's text endpoint on Confirm.
 //
 // Phase 1 closeout (§8.3/§8.6): the completed round trip is appended to the
 // SD card history (/.crosspoint/chat/ per-day JSONL, one write per turn), a
@@ -33,7 +32,7 @@ class Client;
 // front-Right opens the history browser (day list → day tail): side Up/Down
 // pick the day and the four front keys carry one action each — back, delete,
 // summarize, open. History rendering reads
-// from a fixed PSRAM pool filled by OpenClaw::ChatHistory — no String, no
+// from a fixed PSRAM pool filled by ChatLog::ChatHistory — no String, no
 // whole-day file in RAM.
 //
 // Deliberately minimal next to §8.3's full bubble layout: this screen's job is
@@ -43,7 +42,7 @@ class Client;
 // capture ends — the mic power rail shares GPIO27 with EPD_RST,
 // HalGPIO.cpp:282). Bubble list, history panel and
 // auto/manual modes are Phase 1 follow-ups once the round trip is proven on
-// hardware, mirroring how OpenClawActivity's probe screen preceded a real UI.
+// hardware.
 class VoiceActivity final : public Activity {
  public:
   // Defined out-of-line (VoiceActivity.cpp): the unique_ptr<VoiceRelay::Client>
@@ -53,7 +52,7 @@ class VoiceActivity final : public Activity {
   ~VoiceActivity() override;
 
   // Arms note mode before onEnter(): the transcript lands in the book's note
-  // file instead of an OpenClaw round trip (see NoteContext). spineIndex/
+  // file instead of a reply round trip (see NoteContext). spineIndex/
   // pageNumber/pageCount mirror the progress triple (progress saves use the
   // same 0-based page); pageNumber==0 keeps the note file parseable. excerpt is
   // the current page's text, what a quick mark ("快捷书签") saves without ever
@@ -79,7 +78,7 @@ class VoiceActivity final : public Activity {
 
   // Question-input mode (AI-01): this screen is only a capture/keyboard
   // front-end for AskAiActivity. onEnter behaves like note mode (no radio, no
-  // gateway), the history/note browsers and the note save are unreachable, and
+  // relay), the history/note browsers and the note save are unreachable, and
   // the transcript leaves through openNoteEditor() as KeyboardResult{...}
   // instead of being written to NoteStore.
   //
@@ -102,25 +101,16 @@ class VoiceActivity final : public Activity {
   // reviewing/editing before the round trip); only the caller opts in.
   void setAutoSendTranscript(bool on) { autoSendTranscript_ = on; }
 
-  // Gateway-chat override for the Workbench to-do card: its round must reach
-  // the OpenClaw agent — the only backend that can create the cron job the
-  // card lists on the way back. A configured relay is skipped for this
-  // instance (its LLM can only chat; a "remind me" answer is not a job), so
-  // the legacy record → STT → chat.send path runs even with the relay on.
-  void setGatewayChat() { gatewayChat_ = true; }
-
   // Serial-console debug hook (CMD:VOICE_TX, main.cpp): stands in for the STT
-  // step so one chat round trip — and whatever the gateway answers it — can be
-  // reproduced without speaking. False when this is not the current Voice
-  // activity or a capture / round trip is already in flight.
+  // step so one chat round trip can be reproduced without speaking. False when
+  // this is not the current Voice activity or a round trip is already in flight.
   static bool injectTranscript(const char* text);
 
   // Dictation bridge for the 语音书签 edit keyboard (KeyboardEntryActivity):
-  // the power key there is this screen's talk key — one capture through the
-  // same recorder/STT stack, transcript handed back for insertion at the
+  // the power key there is this screen's talk key — one capture streamed to the
+  // relay in dictation mode, transcript handed back for insertion at the
   // cursor. The voice screen must not repaint while a capture is live (the
-  // keyboard owns the panel); poll() blocks during the STT call exactly like
-  // runTranscription() does in the normal pipeline.
+  // keyboard owns the panel).
   enum class DictationState : uint8_t { Off, Recording, Ready, Failed };
   bool dictationStart();
   DictationState dictationPoll();
@@ -129,19 +119,18 @@ class VoiceActivity final : public Activity {
 
  private:
   enum class State : uint8_t {
-    Idle,          // waiting for Confirm; session may still be connecting
-    Listening,     // recording; zero repaints in this state
-    Transcribing,  // STT upload in flight; blocking pass
-    Sending,       // chat.send accepted; reply accumulating
-    Answer,        // reply settled and shown
-    Failed,        // fatal for this round trip; Confirm retries
-    Review,        // manual mode: transcript ready, Confirm sends it
-    HistoryList,   // history: flat day list, newest first (smart date labels)
-    HistoryDay,    // history: one day's latest turns (Up/Down scroll)
-    NoteSaved,     // note mode: transcript written to /.crosspoint/notes/
-    NoteList,      // note mode: this book's notes (prev key enters)
-    NoteView,      // note mode: one note, scroll window
-    NoteQuick,     // note mode: quick-mark picker (no mic, no STT, no gateway)
+    Idle,         // waiting for Confirm
+    Listening,    // recording; zero repaints in this state
+    Sending,      // audio ended; relay reply accumulating (or a text round blocking)
+    Answer,       // reply settled and shown
+    Failed,       // fatal for this round trip; Confirm retries
+    Review,       // manual mode: transcript ready, Confirm sends it to the relay
+    HistoryList,  // history: flat day list, newest first (smart date labels)
+    HistoryDay,   // history: one day's latest turns (Up/Down scroll)
+    NoteSaved,    // note mode: transcript written to /.crosspoint/notes/
+    NoteList,     // note mode: this book's notes (prev key enters)
+    NoteView,     // note mode: one note, scroll window
+    NoteQuick,    // note mode: quick-mark picker (no mic, no STT, no network)
   };
 
   // Recording ceiling. The VAD usually stops long before this (1.5 s of
@@ -149,7 +138,7 @@ class VoiceActivity final : public Activity {
   // for a capture that never goes quiet (ambient noise above the threshold).
   static constexpr uint32_t MAX_RECORD_SECONDS = 8;
   // VAD stop: 1.5 s below the speech threshold ends the capture (§8.4
-  // Listening → Transcribing). Paired with Recorder::VOICED_MIN_MS so a
+  // Listening → Sending). Paired with Recorder::VOICED_MIN_MS so a
   // cough alone does not trigger a send.
   static constexpr uint32_t SILENCE_STOP_MS = 1500;
   // Chunk-RMS speech threshold. Measured on this hardware: room floor 30-80
@@ -159,11 +148,11 @@ class VoiceActivity final : public Activity {
   // 250 keeps ~3x headroom over the floor, and VOICED_MIN_MS still rejects a
   // lone cough because it requires 400 ms of sustained level.
   static constexpr int32_t VAD_RMS_THRESHOLD = 250;
-  // STT endpoint override and API key, read from the same SD files
-  // MicrophoneTest uses. Members rather than locals: the loop task's stack is
-  // small and the config pointers must outlive the blocking upload.
-  static constexpr size_t STT_URL_SIZE = 192;
-  static constexpr size_t STT_KEY_SIZE = 96;
+  // Transcript cap: the relay accumulates asr.final events, each up to
+  // TEXT_CAP, so one spoken turn can exceed a single event.
+  static constexpr size_t TRANSCRIPT_CAP = VoiceRelay::CHAT_TEXT_CAP;
+  // Relay reply accumulation (LLM deltas) for one round.
+  static constexpr size_t REPLY_CAP = 4096;
   // History day tail kept in PSRAM: one 32 KB pool holds a day's last turns
   // including full assistant replies (up to CHAT_BUF_CAP each) instead of the
   // old 6 KB, which dropped every reply that did not fit. Allocated once per
@@ -176,9 +165,9 @@ class VoiceActivity final : public Activity {
   // Shared JSONL line scratch for ChatHistory::append/loadDay (LINE_CAP bytes).
   // Caller-owned PSRAM because neither the 4 KB task stack nor the internal
   // heap can hold one line of an escaped reply.
-  static constexpr size_t HISTORY_LINE_SIZE = OpenClaw::ChatHistory::LINE_CAP;
+  static constexpr size_t HISTORY_LINE_SIZE = ChatLog::ChatHistory::LINE_CAP;
   // Ceiling on the wrapped-line vector built for one scroll window. A reply
-  // tops out at CHAT_BUF_CAP (4 KB), which is ~150 lines of CJK at UI_10; the
+  // tops out at REPLY_CAP (4 KB), which is ~150 lines of CJK at UI_10; the
   // bound only exists so a pathological string cannot grow the vector without
   // limit.
   static constexpr int WRAP_MAX_LINES = 512;
@@ -186,17 +175,14 @@ class VoiceActivity final : public Activity {
   // The waiting read-out repaints once per whole displayed second, driven by
   // comparing awaitingMs()/1000 against the value last shown rather than by a
   // time constant: a millis() threshold drifts, so it can reprint one second
-  // and skip the next. A screen that never moves while the gateway thinks
+  // and skip the next. A screen that never moves while the relay thinks
   // reads as frozen (the alarm report) and e-ink cannot animate; the price of
   // a truthful counter is one FAST_REFRESH per second of the wait — 120 for a
   // full 120 s round, against 8 at the old 15 s step.
 
   void startRecording();
-  void startTranscribing();
-  void runTranscription();
-  void finishTranscription(SttClient::Result result);
   // Note mode tail of the pipeline: append the transcript to the book's .ntf
-  // (NoteStore) instead of dialling OpenClaw. Same one-write-per-note SD
+  // (NoteStore) instead of sending it anywhere. Same one-write-per-note SD
   // discipline as the history layer.
   void saveNoteFromTranscript();
   // Note mode (语音书签 shortcut): open the transcript in
@@ -207,25 +193,22 @@ class VoiceActivity final : public Activity {
   // Note/question tail: editor by default, or the direct result when
   // autoSendTranscript_ is set (Pigeon).
   void deliverDictationTranscript();
-  void startSession();
-  void sendToOpenClaw();
-  // Issues the owed chat.send (oweSend_) once the session reaches Connected.
-  void sendPending();
-  void onSessionNotify();
-  static void onSessionNotifyTrampoline(void* ctx);
+  // Blocking text round trip on the relay's chat endpoint (Review Confirm and
+  // the history summarize action). Paints "waiting" before the call.
+  void sendTextToRelay();
 
-  // ── Voice Relay (realtime path, chat mode + auto send only) ───────────
-  // The relay replaces the STT upload + chat.send halves of one round trip:
-  // the captured PCM is streamed live, the transcript and reply arrive as
-  // events, and any relay failure falls back to the legacy path once, on the
-  // same capture. See docs/Reading_Companion_realtime_agent .md §5/§8.
+  // ── Voice Relay (the only backend) ────────────────────────────────────
+  // The captured PCM is streamed live; the transcript and reply arrive as
+  // events. Manual mode uses the same stream in dictation mode, then sends the
+  // reviewed text as a blocking /api/v1/chat round. Any relay failure ends the
+  // round with a reason on screen — there is no fallback backend.
   bool relayConfigured();
   // Note mode / custom-question mode: the transcript is handed to the keyboard
   // instead of the chat. Dictation rounds use the relay's STT-only pipeline.
   bool dictationMode() const { return noteContext_.valid || questionInput_; }
   // Opens the relay socket ahead of any microphone: the blocking dial (~0.9 s)
   // runs its loop pass while the mic is off, so the 8 ms I2S DMA ring never
-  // has to absorb it. Armed in startSession() and openNoteEditor(); loop()'s
+  // has to absorb it. Armed in onEnter() and openNoteEditor(); loop()'s
   // relay_->poll() drives it; startRelayRound() adopts the socket.
   void warmRelay();
   // Completes a prepared dial in place (same reasoning as warmRelay()) — for
@@ -239,7 +222,7 @@ class VoiceActivity final : public Activity {
   void settleRelaySuccess();
   void handleRelayErrorEvent();
   void relayTransportFailed();
-  void relayFallbackOrFail(const char* reason);
+  void relayFailed(const char* reason);
   void relayClose();
   const char* relayErrorReason() const;
   void onRelayEvent(const VoiceRelay::Event& event);
@@ -251,9 +234,6 @@ class VoiceActivity final : public Activity {
   // is in is drawn bold, the rest regular. Answer for the active stage when
   // there is one, nullptr for the states where no stage is running.
   void drawPipeline(int x, int y);
-  // Translated gateway line for the current Session::State (null when the
-  // session has not dialled yet) — the "is the OpenClaw link up" answer.
-  const char* gatewayStatus() const;
   // History. The browser is ONE flat list of day files, newest first — the
   // old Year → Month → Week → Day drill-down was deeper than any mainstream
   // chat history (they all show a flat reverse-chronological list with date
@@ -268,9 +248,8 @@ class VoiceActivity final : public Activity {
   void recordHistoryTurn();
   // List actions (see render of State::HistoryList): deleteHistoryDay()
   // removes the highlighted day file and refreshes the listing;
-  // sendHistorySummary() loads that day and issues a chat.send asking the
-  // gateway to summarize it (the round trip then runs through the ordinary
-  // Sending/Answer states).
+  // sendHistorySummary() loads that day and sends its prompt to the relay's
+  // chat endpoint (the round trip then runs through Sending/Answer).
   void deleteHistoryDay();
   void sendHistorySummary();
   // Wraps `text` and draws the `capacity`-line window starting at firstLine
@@ -289,19 +268,12 @@ class VoiceActivity final : public Activity {
   const char* failReason_ = nullptr;  // translated static, never freed
   // The transcript as it stands: the STT result, then the message that was
   // sent. Kept so Answer can show the pair and a retry can re-send it.
-  char transcript_[OpenClaw::CHAT_MESSAGE_CAP + 1] = {};
+  char transcript_[TRANSCRIPT_CAP + 1] = {};
   bool haveTranscript_ = false;
   // True once the round trip produced an answer worth showing; False after a
   // failure so the panel does not mix an old answer with a new error.
   bool haveAnswer_ = false;
 
-  // True from "the transcript is ready" until "chat.send is on the wire".
-  // sendToOpenClaw() can land while the session is still handshaking, so the
-  // round trip waits in Sending; this flag, not session_.outcome(), is what
-  // says there is still a send to make. outcome() still describes the
-  // PREVIOUS round there — keying the send off it made a second round issued
-  // during a reconnect inherit "already sent" and never transmit.
-  bool oweSend_ = false;
   // Elapsed-seconds value the waiting read-out last showed (see above);
   // re-seeded on every send so the first repaint lands on a real change.
   uint32_t lastWaitShownSec_ = 0;
@@ -314,12 +286,6 @@ class VoiceActivity final : public Activity {
   bool backArmed_ = false;
 
   Voice::Recorder recorder_;
-  // STT state. The parser owns the transcript buffer (~6 KB PSRAM); the url
-  // and key buffers back SttClient's config pointers for as long as an
-  // upload can run.
-  std::unique_ptr<SttCodec::SseTranscriptParser> sttParser_;
-  char sttUrlBuf_[STT_URL_SIZE] = {};
-  char sttKeyBuf_[STT_KEY_SIZE] = {};
 
   // Dictation sub-state for the edit keyboard (see dictationStart()). Kept
   // separate from state_: the voice screen's own pipeline is parked while the
@@ -340,10 +306,9 @@ class VoiceActivity final : public Activity {
   // ── note mode (M2: AI-02 voice notes) ───────────────────────────────
   // Set by the reader before launching this activity (startActivityForResult,
   // so the reader stays alive on the stack and repaints on return). When
-  // valid, the whole OpenClaw half of the pipeline is skipped: no session, no
-  // handshake, no gateway frames — the transcript lands in the book's note
-  // file instead. STT itself still needs the network, so the Wi-Fi bring-up
-  // flow is reused.
+  // valid, the chat half of the pipeline is skipped: the transcript lands in
+  // the book's note file instead. STT itself still needs the network, so the
+  // Wi-Fi bring-up flow is reused.
   struct NoteContext {
     char bookBase[Notes::NoteFormat::NAME_PATH_SIZE] = {};  // "<book>.epub" -> "<book>"
     uint16_t spineIndex = 0;
@@ -360,10 +325,6 @@ class VoiceActivity final : public Activity {
   StrId questionScreenTitle_ = StrId::STR_ASK_AI;
   StrId questionTitle_ = StrId::STR_Q_CUSTOM;
   const char* questionSeed_ = nullptr;
-  // Set by the Workbench to-do card (setGatewayChat): relayConfigured() then
-  // reports false so the round cannot be answered by a relay LLM with no
-  // scheduling tool.
-  bool gatewayChat_ = false;
   // Pigeon opt-in: return the transcript via KeyboardResult without editing.
   bool autoSendTranscript_ = false;
   // NoteStore::append line scratch, same rationale as historyLine_ (an
@@ -387,7 +348,7 @@ class VoiceActivity final : public Activity {
   void deleteSelectedNote();
   // ── quick marks ("快捷书签") ──────────────────────────────────────────
   // A fixed tag plus the page text the reader handed over, written straight
-  // through NoteStore::append: no mic, no STT upload, no gateway frame, so one
+  // through NoteStore::append: no mic, no STT upload, no network frame, so one
   // mark costs nothing but an SD append. The picker is a note-mode state, not
   // a keyboard, so the whole voice/STT half of the pipeline stays closed. The
   // tag table lives next to the renderers that read it (VoiceActivity.cpp).
@@ -396,11 +357,6 @@ class VoiceActivity final : public Activity {
   void openNoteQuick();
   void saveQuickNote();
 
-  // Bound to the process-wide instance: the workbench status cards and this
-  // activity share one gateway connection, so entering voice does not pay for
-  // a second TLS session.
-  OpenClaw::Session& session_ = OpenClaw::Session::instance();
-
   // ── history (P3-S Phase 1 closeout) ───────────────────────────────────
   // PSRAM pool + index the day tail is rendered from. Allocated in onEnter()
   // alongside the session buffers, freed in onExit(); nullptr when PSRAM is
@@ -408,7 +364,7 @@ class VoiceActivity final : public Activity {
   char* historyPool_ = nullptr;
   size_t historyPoolCap_ = 0;
   char* historyLine_ = nullptr;
-  OpenClaw::ChatHistory::Entry historyEntries_[OpenClaw::ChatHistory::MAX_ENTRIES] = {};
+  ChatLog::ChatHistory::Entry historyEntries_[ChatLog::ChatHistory::MAX_ENTRIES] = {};
   size_t historyEntryCount_ = 0;
   // Turn count of the loaded day: a turn is a user entry plus the assistant
   // entry that follows it (plus a lone assistant head when loadDays() dropped
@@ -420,7 +376,7 @@ class VoiceActivity final : public Activity {
   // size; historyDayIndex_ is both the list cursor and the day whose turns
   // are open (they are never out of sync: opening a row keeps the cursor on
   // it, Back from the turns view just swaps the state).
-  char historyDays_[OpenClaw::ChatHistory::MAX_DAYS][OpenClaw::ChatHistory::DAY_NAME_SIZE] = {};
+  char historyDays_[ChatLog::ChatHistory::MAX_DAYS][ChatLog::ChatHistory::DAY_NAME_SIZE] = {};
   size_t historyDayCount_ = 0;
   size_t historyDayIndex_ = 0;
   // Highlight inside the open day's turn list; line scroll offsets for the
@@ -435,7 +391,7 @@ class VoiceActivity final : public Activity {
   size_t answerScroll_ = 0;
   // List key map (one action per front key, side Up/Down picks the day):
   // Back leaves, front-Left deletes the highlighted day, front-Right asks the
-  // gateway to summarize it, Confirm opens the day's turns. Delete is the
+  // relay to summarize it, Confirm opens the day's turns. Delete is the
   // note list's two-press pattern — arm, then confirm; Back or any move
   // disarms. Summarize needs no arm (its prompt is a chat message, not a
   // file operation).
@@ -461,14 +417,13 @@ class VoiceActivity final : public Activity {
   // activity's lifetime (~2.5 KB heap: socket + framer + event scratch);
   // relayReply_ is the accumulated llm.delta text (CHAT_BUF_CAP+1, PSRAM
   // first), both released in onExit(). relayRound_ stays true through Answer
-  // so the settled panel and the history append read the relay's reply — the
-  // legacy Session's buffers hold the PREVIOUS round's text.
+  // so the settled panel and the history append read the relay's reply —
+  // exactly the reason a stale reply buffer must never be reused across rounds.
   std::unique_ptr<VoiceRelay::Client> relay_;
   bool relayRound_ = false;
-  // One automatic legacy fallback per capture (docs §5: single-round failure
-  // clears the relay state, then decides on the fallback; the capture buffer
-  // is still intact, so the fallback never costs another recording).
-  bool relayFallbackTried_ = false;
+  // True when the live round is transcript-only (note/question dictation or
+  // manual mode): session.done settles the text, there is no LLM reply.
+  bool relayDictationRound_ = false;
   bool relayEndSent_ = false;  // audio.end on the wire; only session.done/error left
   // Flags set by the event notifier (inside relay_->poll() on this task):
   bool relayDone_ = false;
@@ -480,7 +435,7 @@ class VoiceActivity final : public Activity {
   // the capture buffer once the session goes Active.
   size_t relaySentSamples_ = 0;
   // Waiting read-out base for the relay Sending state (millis() when the
-  // capture ended), paired with lastWaitShownSec_ like the legacy branch.
+  // capture ended), paired with lastWaitShownSec_.
   uint32_t relayEndMs_ = 0;
   char* relayReply_ = nullptr;
   size_t relayReplyLen_ = 0;

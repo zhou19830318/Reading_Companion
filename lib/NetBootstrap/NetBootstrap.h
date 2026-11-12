@@ -4,7 +4,7 @@
 
 // Pre-TLS bootstrap shared by every network client that has to complete a
 // certificate-checked handshake on this board: the cloud STT path
-// (lib/voice/SttClient, https) and the OpenClaw client (wss).
+// (the relay, https) and the relay WebSocket (wss).
 //
 // It exists as its own translation unit so both callers install exactly one
 // allocator and one clock policy. Two copies would be a silent hazard: the
@@ -21,10 +21,10 @@ bool systemTimeValid();
 // report that. No-op when the clock is already valid.
 bool ensureSystemTime();
 
-// Set the system clock from a remote timestamp (e.g. the gateway challenge
-// "ts") when it is still unset. The plaintext ws:// OpenClaw path never runs
-// ensureSystemTime(), so without this the clock stays at the 1970 epoch and
-// every epoch-derived UI (workbench date, chat history days) is blank.
+// Set the system clock from a remote timestamp when it is still unset. The
+// relay TLS path runs ensureSystemTime(), but a caller that already has a
+// server timestamp can seed the clock here; without it every epoch-derived UI
+// (market dates, chat history days) is blank.
 // epochMs below MIN_VALID_EPOCH is rejected; no-op when the clock is already
 // valid. Returns true when the clock is usable afterwards.
 bool setSystemTimeFromEpochMs(int64_t epochMs);

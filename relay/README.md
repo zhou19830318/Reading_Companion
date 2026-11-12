@@ -40,7 +40,8 @@ device ──WS /api/v1/voice/stream──▶ relay ── WSS ──▶ DashSco
 未知 ID 兜底（共享 token 仅用于没有映射的部署）。`ALLOWED_DEVICE_IDS`
 可再对设备 id 做白名单。两者都为空时拒绝以开放模式运行。使用
 `/admin/devices` 后，非空注册表优先于此处的环境变量规则（见“服务端设备管理”）。
-`RELAY_ADMIN_TOKEN` 启用仅管理员可用的 `POST /api/v1/chat` 文本调试接口。
+`RELAY_ADMIN_TOKEN` 启用管理页面；`POST /api/v1/chat`（文本问答应答，见下）
+同时接受管理员 token 与设备 token。两者都未配置时该端点拒绝请求。
 
 ## 多台 onepage 设备（多设备设计）
 
@@ -64,8 +65,8 @@ device ──WS /api/v1/voice/stream──▶ relay ── WSS ──▶ DashSco
   （设备无法靠改名规避自己的限额）。
 - 无会话运行时，空闲 socket 会在 `SESSION_IDLE_TIMEOUT_SECONDS`（60 s）后被回收，
   因此被遗弃的连接不会占用限额。
-- `SERVER_OVERLOADED` 可重试：设备应显示简短的“服务繁忙”提示，
-  并回退到旧有的 MiMo STT + OpenClaw 路径。
+- `SERVER_OVERLOADED` 可重试：设备会显示“语音中继繁忙”，本轮直接失败，
+  不提供任何设备端兜底路径（relay 是唯一的云端后端）。
 - 中继刻意设计为单进程：会话、限额与指标都在内存中且保持一致。
   若将来需要水平扩展，请用 nginx 的 sticky 路由保持亲和性
   （一台设备 → 一个实例），或把计数/限额迁到 Redis；
@@ -93,6 +94,25 @@ DashScope 适配器。真实凭据只存放在
 journalctl -u reading-companion-relay --since "5 min ago" | grep contracts
 curl -s localhost:8000/readyz      # {"status":"ready","asr":"configured",...}
 ```
+
+## 文本问答（`POST /api/v1/chat`）
+
+设备上所有“不经过麦克风”的 AI 文本都走这一个阻塞式端点：
+Ask AI（阅读中提问）、字典/词汇卡片（`mode="dict"` / `mode="word"`）、
+语音助手的手动发送与历史摘要、AI 书童。请求体：
+
+```json
+{"requestId":"...","deviceId":"...","text":"...","stream":false,"maxTokens":512,"mode":"ask"}
+```
+
+`stream=false`（固件使用的方式）返回
+`{"requestId","text","usage":{"inputTokens","outputTokens"}}`；
+`stream=true` 走 SSE（`llm.start` / `llm.delta` / `session.done` / `error`）。
+`mode` 为空时按普通对话处理，`dict`/`word` 使用卡片提示词与较小的输出上限。
+
+认证：管理员 token 与设备 token 均可用（与 `/api/v1/image` 相同）；
+两者都未配置时端点拒绝。设备侧没有直连模型或其它后端的路径——
+relay 不可达即本轮失败，界面显示明确的错误文案。
 
 ## 字典卡片（离线数据）
 
@@ -264,7 +284,7 @@ curl -s -H "Authorization: Bearer $TOKEN" -H "X-Device-Id: reading-companion-001
 设备间消息的数据面：持久化存储转发 + 进程内在线状态。设备和其它数据端点
 使用同一套 token 认证（`Authorization: Bearer` + `X-Device-Id`）；
 **nginx 必须代理 `/api/v1/pigeon/`**——dev/prod 两份 conf 均已包含。
-消息不经过 DashScope，也不依赖 OpenClaw。
+消息不经过 DashScope，也不依赖任何第三方消息服务。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
@@ -320,7 +340,7 @@ curl -s -X POST "${AUTH[@]}" \
 ## 服务端设备管理（/admin/devices）
 
 relay 可以作为设备配置的单一来源：在 `/admin` 的“设备管理”中新增设备，保存
-Device ID、Relay URL、Token 和可选的微信读书 Key。设备仍用现有的
+Device ID、Relay URL 和 Token。设备仍用现有的
 `CloudConfig`（Relay URL / Token / Device ID）做首次认证，之后访问
 `/api/v1/device/config` 拉取更新；固件只在值变化时写 NVS。
 
@@ -330,8 +350,6 @@ Device ID、Relay URL、Token 和可选的微信读书 Key。设备仍用现有�
   `RELAY_DEVICE_TOKEN(S)` / `ALLOWED_DEVICE_IDS` 不再用于这些设备。迁移前先把
   所有现有设备加入 `/admin/devices`。
 - 修改 Token 后旧 Token 保留 15 分钟，设备可在过渡期内拉取新 Token。
-- 每台设备可有独立微信读书 Key；未配置时回退到默认 Key。管理页不返回 Key，
-  只显示“已配置/未配置”。
 - 设备配置接口返回的 `relay.url` / `relay.deviceId` / `relay.token` 为空表示
   “保留 NVS 原值”。
 
@@ -346,31 +364,6 @@ curl -s -X POST localhost:8080/admin/devices \
 curl -s localhost:8080/api/v1/device/config \
   -H 'Authorization: Bearer <device-token>' -H 'X-Device-Id: onepage-001' | jq .
 ```
-
-## 微信读书只读伴侣（/api/v1/weread/）
-
-设备侧不会接触官方 `wrk-` Key：relay 在服务端调用微信读书 Skill API，只返回
-压缩后的书架、进度和统计。Key 的配置顺序：
-
-1. `/admin/devices` 中该设备的专属 Key（最高优先级）；
-2. `/admin` 网页保存的默认 `<RELAY_WEREAD_DIR>/api_key`（0600，立即生效）；
-3. 项目根目录下名为 `微信读书key` 的文件；
-4. 环境变量 `WEREAD_API_KEY`。
-
-Key 必须形如 `wrk-...`，且只有只读权限；进度、笔记均不回写。接口需要设备
-鉴权（`Authorization: Bearer <device-token>` + `X-Device-Id`）：
-
-```bash
-AUTH=(-H "Authorization: Bearer <device-token>" -H "X-Device-Id: reading-companion-001")
-curl -s "${AUTH[@]}" 'localhost:8080/api/v1/weread/status' | jq .
-curl -s "${AUTH[@]}" 'localhost:8080/api/v1/weread/shelf?limit=12' | jq .
-curl -s "${AUTH[@]}" 'localhost:8080/api/v1/weread/book?bookId=33500935' | jq .
-curl -s "${AUTH[@]}" 'localhost:8080/api/v1/weread/stats?mode=overall' | jq .
-```
-
-nginx 必须代理 `/api/v1/weread/`——dev/prod 两份 conf 均已包含。设备端入口：
-Home > 微信读书（Settings 中也保留入口）。若 relay 没有配置 Key，会返回
-409 `not_configured`；官方 Key 失效会返回 502 `weread_auth`。
 
 ## 行情快照 API（/api/v1/markets/）
 
@@ -444,8 +437,8 @@ DashScope 配置：首次交互式运行时，安装器会提示输入 API key�
 （`--asr-model`、`--llm-model`、`--dashscope-region`、`--device-id`、
 `--public-url` 均为可选覆盖项）。
 运行结束会打印 Relay URL / Device ID / Token，粘贴到阅读器的 Web UI
-（Settings > Voice Relay）即可。阅读器无需其他配置：
-配好中继后，设备端的 MiMo key 与 OpenClaw 就变成可选的了。
+（Settings > Voice Relay）即可。阅读器无需其他配置：relay 是设备
+唯一的云端后端，语音、AI 助手、AI 书童、字典卡片、语音书签与飞鸽传书都走它。
 
 ## 可观测性
 

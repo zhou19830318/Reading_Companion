@@ -1,5 +1,10 @@
 # Voice STT + OpenClaw Port Plan (AIWatch_Ver2.0 → OnePage/ESP32-C61)
 
+> **历史文档。** 本稿描述的 OpenClaw 网关、「我的工作台」与微信读书已从固件移除；
+> 当前实现（语音 / AI / 字典 / 语音书签 / 行情 / 飞鸽传书全部经自建 Voice Relay）
+> 见 [README](../README.md) 与 [relay/README.md](../relay/README.md)。
+
+
 Status: **P0, P1 verified** (record → HTTPS POST → SSE transcript). **P3 text round-trip verified**
 (WS authenticated, `chat.send` → clean `reply: PONG` with gateway failure markers stripped, sessionKey
 `agent:main:crosspoint`). **P3-S Phase 1 verified** — voice conversation → on-screen LLM reply, with

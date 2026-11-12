@@ -16,7 +16,6 @@ enum class SettingAction {
   RemapFrontButtons,
   CustomiseStatusBar,
   KOReaderSync,
-  WeRead,
   OPDSBrowser,
   Network,
   ClearCache,
@@ -24,7 +23,6 @@ enum class SettingAction {
   CheckForUpdates,
   SdFirmwareUpdate,
   Language,
-  WeatherLocation,
   DownloadFonts,
   BlePageTurner,
 };

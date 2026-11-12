@@ -44,13 +44,13 @@ constexpr size_t IMAGE_ID_CAP = IMAGE_ID_CHARS + 1;
 
 // Largest control frame the device builds. Worst case is session.start with a
 // full 32-char requestId and a DEVICE_ID_CAP-1 device id: 215 bytes + NUL.
-// The client's FRAME_CAP must be at least this (at 192 every relay round failed
-// the frame build and silently fell back to the legacy pipeline).
+// The client's FRAME_CAP must be at least this (a smaller cap fails the frame
+// build and silently drops the round).
 constexpr size_t CONTROL_FRAME_CAP = 256;
 
-// ASR partial/final and LLM delta/final text. Mirrors SttCodec::TEXT_CAPACITY;
-// the relay caps replies at MAX_REPLY_CHARS (500), so a longer value means the
-// relay is misconfigured and the text is flagged truncated instead of dropped.
+// ASR partial/final and LLM delta/final text. The relay caps replies at
+// MAX_REPLY_CHARS (500), so a longer value means the relay is misconfigured
+// and the text is flagged truncated instead of dropped.
 constexpr size_t TEXT_CAP = 512;
 // Error events carry a short fixed Chinese line, never upstream detail.
 constexpr size_t ERROR_MESSAGE_CAP = 64;
@@ -167,8 +167,8 @@ void formatRequestId(char* out, uint32_t a, uint32_t b, uint32_t c, uint32_t d);
 // non-streaming reply {"requestId", "text", "usage"}. Built and parsed here
 // so the bytes stay host-testable next to the WebSocket frames.
 
-// Server cap for a chat round; matches OpenClaw's CHAT_MESSAGE_CAP so the
-// Ask-AI answer path keeps one bound whichever backend produced the reply.
+// Server cap for a chat round; one bound for every answers path (Ask AI,
+// dictionary, history summary).
 constexpr size_t CHAT_TEXT_CAP = 1536;
 
 // `mode` selects a server-side preset: "dict" switches the relay to the
@@ -303,7 +303,7 @@ size_t buildImageRequest(char* out, size_t cap, const char* requestId, const cha
                          const char* style = nullptr, const char* size = nullptr);
 
 // Edit-mode request (device 修改 flow): text + the source image as base64.
-// imageB64 is the already-encoded payload (SttCodec::base64Encode of the
+// imageB64 is the already-encoded payload (VoiceRelay::base64::encode of the
 // panel BMP); width/height are the BMP header's pixel dimensions. The frame
 // is large (~65 KB for a 48 KB BMP) — the caller supplies a PSRAM buffer.
 size_t buildImageEditRequest(char* out, size_t cap, const char* requestId, const char* deviceId, const char* text,

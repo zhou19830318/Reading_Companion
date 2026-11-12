@@ -18,39 +18,6 @@
     }
     .opds-server:last-of-type { margin-bottom: 0; }
     .opds-server .btn-row { margin-top: var(--s3); margin-bottom: 0; }
-    .test-result {
-      display: none;
-      padding: var(--s3);
-      margin-top: var(--s3);
-      border-radius: var(--r-md);
-      background: var(--bg-2);
-      border: var(--hair);
-      font-family: var(--mono);
-      white-space: pre-wrap;
-      word-break: break-all;
-    }
-    /* The gateway pairing command: the one string the user must copy verbatim,
-       so it gets a box of its own instead of a line inside the log block. */
-    .approve-box {
-      display: none;
-      flex-direction: column;
-      gap: var(--s2);
-      padding: var(--s4);
-      margin-top: var(--s3);
-      border: 1px solid rgba(90, 162, 232, .45);
-      border-radius: var(--r-md);
-      background: var(--info-bg);
-    }
-    .approve-box code {
-      display: block;
-      padding: 10px;
-      background: var(--bg);
-      border: var(--hair);
-      border-radius: var(--r-sm);
-      word-break: break-all;
-      color: var(--fg);
-    }
-    .approve-label { font-size: var(--t-sm); color: var(--fg-mut); line-height: 1.6; }
     .family-meta { color: var(--fg-mut); font-size: var(--t-sm); }
     /* Sub-section head inside a category card (Typography / Rendering / Clock) */
     .card h4 { margin: var(--s5) 0 var(--s1); }
@@ -662,35 +629,7 @@ updateLang(true);
     wifiSaved:       { en: 'Wi-Fi network saved!', cn: 'Wi-Fi 网络已保存！' },
     wifiDelConfirm:  { en: 'Delete this Wi-Fi network?', cn: '删除这个 Wi-Fi 网络？' },
     wifiDeleted:     { en: 'Wi-Fi network deleted', cn: 'Wi-Fi 网络已删除' },
-    ocTitle:         { en: 'OpenClaw Server', cn: 'OpenClaw 服务器' },
-    host:            { en: 'Host / IP', cn: '主机 / IP' },
-    port:            { en: 'Port', cn: '端口' },
-    path:            { en: 'Path', cn: '路径' },
-    proto:           { en: 'Protocol', cn: '协议' },
-    tlsToggle:       { en: 'TLS (wss)', cn: 'TLS (wss)' },
-    caFile:          { en: 'CA file', cn: 'CA 文件' },
     token:           { en: 'Token', cn: '令牌' },
-    sttTitle:        { en: 'Speech Recognition (MiMo)', cn: '语音识别（MiMo）' },
-    apiKey:          { en: 'API key', cn: 'API 密钥' },
-    endpointUrl:     { en: 'Endpoint URL', cn: '端点 URL' },
-    helpStt:         { en: 'The API key is created in the platform.xiaomimimo.com console and sent in the api-key header. A blank field keeps the stored value; a blank endpoint URL uses the built-in default. Test API key sends one minimal request: 401/403 means the key was refused, any other status means it was accepted. The key is stored in the device NVS — it never appears on the page or in a log.',
-                       cn: 'API 密钥在 platform.xiaomimimo.com 控制台创建，请求时放在 api-key 头里。留空表示保持不变；端点 URL 留空使用内置默认地址。“测试密钥”只发一次最小请求：401/403 表示密钥被拒，其它状态码表示已被接受。密钥保存在设备 NVS，不会显示在页面或日志里。' },
-    testKey:         { en: 'Test API key', cn: '测试密钥' },
-    sttTesting:      { en: 'Testing API key ...', cn: '正在测试密钥 …' },
-    sttOk:           { en: 'API key accepted', cn: '密钥可用' },
-    sttFail:         { en: 'API key test failed', cn: '密钥测试失败' },
-    testTitle:       { en: 'OpenClaw Connection Test', cn: 'OpenClaw 连接测试' },
-    endpoint:        { en: 'Endpoint', cn: '端点' },
-    testConn:        { en: 'Test connection', cn: '测试连接' },
-    testing:         { en: 'Testing', cn: '正在测试' },
-    ocFailPairing:   { en: ' — pairing pending, approve it and test again',
-                       cn: ' — 配对待批准，请批准后重试' },
-    approveLabel:    { en: 'The gateway does not trust this device yet. Copy the command below, run it once on the gateway host that runs openclaw, then press Test connection again.',
-                       cn: '这台设备还没被网关信任。复制下面的命令，在运行 openclaw 的网关主机上执行一次，然后重新点“测试连接”。' },
-    copyCmd:         { en: 'Copy command', cn: '复制命令' },
-    copied:          { en: 'Command copied to the clipboard', cn: '命令已复制到剪贴板' },
-    copyManual:      { en: 'Clipboard is blocked here — select the command above and copy it manually',
-                       cn: '浏览器不允许自动复制，请手动选中上面的命令复制' },
     opdsTitle:       { en: 'OPDS Servers', cn: 'OPDS 服务器' },
     cloudTab:        { en: 'Cloud Services', cn: '云服务' },
     serverName:      { en: 'Server Name', cn: '服务器名称' },
@@ -701,8 +640,6 @@ updateLang(true);
     opdsSaved:       { en: 'OPDS server saved!', cn: 'OPDS 服务器已保存！' },
     opdsDelConfirm:  { en: 'Delete this OPDS server?', cn: '删除这个 OPDS 服务器？' },
     opdsDeleted:     { en: 'OPDS server deleted', cn: 'OPDS 服务器已删除' },
-    ocSaved:         { en: 'OpenClaw server saved!', cn: 'OpenClaw 服务器已保存！' },
-    sttSaved:        { en: 'Speech settings saved!', cn: '语音设置已保存！' },
     relayTitle:      { en: 'Voice Relay', cn: '语音中继' },
     relayUrlLabel:   { en: 'Relay URL', cn: '中继地址' },
     relayDeviceIdLabel: { en: 'Device ID', cn: '设备 ID' },
@@ -713,14 +650,10 @@ updateLang(true);
                        cn: '设置按类别列出，点“保存设置”才生效。字体、字号、行距或页边距变化后，SD 卡上的版面缓存 .crosspoint/ 会失效，下次打开书籍会重新排版。' },
     helpWifi:        { en: 'SSID is required. A password is only submitted when you type one — leave it blank to keep the stored password. Saved passwords are never displayed again.',
                        cn: 'SSID 必填。密码只在你输入时才提交，留空表示保留原密码；保存后密码不会回显，也无法再查看。' },
-    helpOpenClaw:    { en: 'Host/IP is the gateway address. Ports 443 and 18790 switch on TLS, 18789 and 80 use plaintext (the checkbox follows the port, still yours to override). Path is the WebSocket path, normally /. Protocol is the subprotocol name, normally v2.openclaw.io. CA file is a self-signed certificate PEM path (blank uses the built-in root bundle). The token is stored in NVS and never shown back.',
-                       cn: '主机/IP 是网关地址。端口 443、18790 自动走 TLS，18789、80 走明文（勾选框跟随端口，仍可手动改）。路径是 WebSocket 路径，一般为 /。协议是子协议名，一般 v2.openclaw.io。CA 文件是自签证书 PEM 路径，留空使用内置根证书。令牌存入设备 NVS，保存后不回显。' },
-    helpApprove:     { en: 'If Test connection reports pairing pending, the gateway does not trust this device yet: copy the command in the box, run it once on the gateway host that runs openclaw, then test again.',
-                       cn: '测试连接返回 pairing pending，说明网关还没信任这台设备：复制框中的命令，在运行 openclaw 的网关主机上执行一次，然后重新测试。' },
     helpOpds:        { en: 'OPDS servers are ebook catalogues. The name is free-form, the URL must start with http:// or https://, and credentials only matter for catalogues that require login. Passwords are never shown back.',
                        cn: 'OPDS 是电子书目录服务器。名称随意；URL 必须以 http:// 或 https:// 开头；账号密码只对需要登录的目录有意义，密码保存后不回显。' },
-    helpRelay:       { en: 'The Voice Relay runs speech recognition and the reply model server-side, so a voice turn stays fast on the device. URL is the relay WebSocket, e.g. ws://host:8080/api/v1/voice/stream. Device ID identifies this reader to the relay and must be unique per device. The token is issued by the relay installer and stored in NVS — it is never shown back. Leaving the URL blank disables the relay; the reader then uses the MiMo + OpenClaw path. The server installer (deploy/install.sh) prints these three values when it finishes; once the relay is configured, the MiMo and OpenClaw settings above are not needed.',
-                       cn: '语音中继在服务器侧完成语音识别和模型回答，设备的语音交互更快。中继地址是 WebSocket 地址，例如 ws://host:8080/api/v1/voice/stream。设备 ID 用于中继识别并统计这台阅读器，每台设备应唯一。令牌由中继安装脚本签发，保存在设备 NVS，保存后不回显。中继地址留空即关闭中继功能，改用 MiMo + OpenClaw 链路。这三个值由服务端安装脚本 deploy/install.sh 在结束时打印；配置中继后，上方 MiMo 与 OpenClaw 可完全留空。' },
+    helpRelay:       { en: 'The Voice Relay runs speech recognition and the reply model server-side, so a voice turn stays fast on the device. Every cloud feature — voice capture, dictionary lookup, voice bookmarks, Ask AI and Pigeon messaging — goes through it; there is no other backend. URL is the relay WebSocket, e.g. ws://host:8080/api/v1/voice/stream. Device ID identifies this reader to the relay and must be unique per device. The token is issued by the relay installer and stored in NVS — it is never shown back. The server installer (deploy/install.sh) prints these three values when it finishes. Leaving the URL blank disables every cloud feature.',
+                       cn: '语音中继在服务器侧完成语音识别和模型回答，设备的语音交互更快。所有云端功能——语音输入、查字典、语音书签、AI 书童、飞鸽传书——都经由中继完成，没有其它后端。中继地址是 WebSocket 地址，例如 ws://host:8080/api/v1/voice/stream。设备 ID 用于中继识别并统计这台阅读器，每台设备应唯一。令牌由中继安装脚本签发，保存在设备 NVS，保存后不回显。这三个值由服务端安装脚本 deploy/install.sh 在结束时打印。中继地址留空将关闭全部云端功能。' },
     // Action bar (Save / Reset Defaults / Reboot), AIWatch index.html style.
     resetting:       { en: 'Resetting...', cn: '正在恢复…' },
     resetConfirm:    { en: 'Restore all reader settings to factory defaults? Wi-Fi networks, OPDS servers and cloud credentials are kept.',
@@ -1404,57 +1337,15 @@ updateLang(true);
   }
 
   // --- Cloud services (NVS) ---
-  // OpenClaw endpoint and MiMo STT key, edited the same way as the Wi-Fi card.
-  // Secrets are never pre-filled: the server reports hasToken / hasSttKey, and
-  // a blank secret field is omitted from the POST so the stored value survives
-  // a save that only changed the host.
+  // The voice relay is the only backend for speech recognition and model
+  // replies, so this card holds just its three values. The token is never
+  // pre-filled: the server reports hasRelayToken, and a blank token field is
+  // omitted from the POST so the stored value survives a save that only
+  // changed the URL or device ID.
   let cloudCfg = {};
 
   function renderCloudCards(cfg) {
     const container = document.getElementById('cloud-container');
-
-    const oc = '<div class="card"><h3>' + icon('chip') + '<span' + trAttr('ocTitle') + '>' + tr('ocTitle') + '</span></h3>' +
-      '<div class="form-row">' +
-        '<div class="form-group"><label for="oc-host"' + trAttr('host') + '>' + tr('host') + '</label>' +
-          '<input type="text" id="oc-host" value="' + escapeHtml(cfg.host || '') + '" placeholder="e.g. 203.0.113.10"></div>' +
-        '<div class="form-group"><label for="oc-port"' + trAttr('port') + '>' + tr('port') + '</label>' +
-          '<input type="number" id="oc-port" value="' + (cfg.port || 443) + '" min="1" max="65535" onchange="autoTlsFromPort()"></div>' +
-      '</div>' +
-      '<div class="form-row">' +
-        '<div class="form-group"><label for="oc-path"' + trAttr('path') + '>' + tr('path') + '</label>' +
-          '<input type="text" id="oc-path" value="' + escapeHtml(cfg.path || '/') + '"></div>' +
-        '<div class="form-group"><label for="oc-proto"' + trAttr('proto') + '>' + tr('proto') + '</label>' +
-          '<input type="text" id="oc-proto" value="' + escapeHtml(cfg.protocol || 'v2.openclaw.io') + '"></div>' +
-      '</div>' +
-      '<div class="form-row">' +
-        '<div class="set-row"><span class="set-label"' + trAttr('tlsToggle') + '>' + tr('tlsToggle') + '</span>' +
-          '<label class="toggle-switch"><input type="checkbox" id="oc-tls"' + (cfg.tls ? ' checked' : '') +
-          '><span class="toggle-slider"></span></label></div>' +
-        '<div class="form-group"><label for="oc-ca"' + trAttr('caFile') + '>' + tr('caFile') + '</label>' +
-          '<input type="text" id="oc-ca" value="' + escapeHtml(cfg.caPath || '') + '" placeholder="/root.pem"></div>' +
-      '</div>' +
-      '<div class="form-group"><label for="oc-token"' + trAttr('token') + '>' + tr('token') + '</label>' +
-        '<input type="password" id="oc-token"' + phAttrs('unchanged', cfg.hasToken) + '></div>' +
-      btnRow('<button class="btn btn-primary" onclick="saveOpenClaw()">' +
-        icon('save') + '<span' + trAttr('save') + '>' + tr('save') + '</span></button>') +
-      help('helpOpenClaw') +
-      '</div>';
-
-    const stt = '<div class="card"><h3>' + icon('mic') + '<span' + trAttr('sttTitle') + '>' + tr('sttTitle') + '</span></h3>' +
-      '<div class="form-group"><label for="stt-key"' + trAttr('apiKey') + '>' + tr('apiKey') + '</label>' +
-        '<input type="password" id="stt-key"' + phAttrs('unchanged', cfg.hasSttKey) + '></div>' +
-      '<div class="form-group"><label for="stt-url"' + trAttr('endpointUrl') + '>' + tr('endpointUrl') + '</label>' +
-        '<input type="text" id="stt-url" value="' + escapeHtml(cfg.sttUrl || '') + '" placeholder="(built-in default)"></div>' +
-      btnRow(
-        '<button class="btn btn-primary" onclick="saveStt()">' +
-          icon('save') + '<span' + trAttr('save') + '>' + tr('save') + '</span></button>' +
-        '<button class="btn btn-secondary" id="stt-test-btn" onclick="testSttKey()">' +
-          icon('mic') + '<span' + trAttr('testKey') + '>' + tr('testKey') + '</span></button>'
-      ) +
-      '<div id="stt-test-result" class="test-result"></div>' +
-      help('helpStt') +
-      '</div>';
-
     const relay = '<div class="card"><h3>' + icon('cloud') + '<span' + trAttr('relayTitle') + '>' + tr('relayTitle') + '</span></h3>' +
       '<div class="form-group"><label for="relay-url"' + trAttr('relayUrlLabel') + '>' + tr('relayUrlLabel') + '</label>' +
         '<input type="text" id="relay-url" value="' + escapeHtml(cfg.relayUrl || '') + '" placeholder="ws://host:8080/api/v1/voice/stream"></div>' +
@@ -1469,194 +1360,8 @@ updateLang(true);
       help('helpRelay') +
       '</div>';
 
-    const test = '<div class="card"><h3>' + icon('link') + '<span' + trAttr('testTitle') + '>' + tr('testTitle') + '</span></h3>' +
-      '<div class="set-row"><span class="set-label"' + trAttr('endpoint') + '>' + tr('endpoint') + '</span>' +
-        '<span class="mono" id="oc-endpoint"></span></div>' +
-      btnRow('<button class="btn btn-primary" id="oc-test-btn" onclick="testOpenClaw()">' +
-        icon('link') + '<span' + trAttr('testConn') + '>' + tr('testConn') + '</span></button>') +
-      '<div id="oc-test-result" class="test-result"></div>' +
-      '<div class="approve-box" id="oc-approve">' +
-        '<div class="approve-label"' + trAttr('approveLabel') + '>' + tr('approveLabel') + '</div>' +
-        '<code id="oc-approve-cmd">openclaw devices approve</code>' +
-        '<div class="btn-row"><button class="btn btn-secondary" onclick="copyApprove()"' +
-          trAttr('copyCmd') + '>' + tr('copyCmd') + '</button></div>' +
-      '</div>' +
-      help('helpApprove') +
-      '</div>';
-
-    container.innerHTML = oc + stt + relay + test;
-    showEndpoint();
+    container.innerHTML = relay;
   }
-
-  // The test button dials the form's current values, not the saved ones, so a
-  // typo can be caught before Save.
-  function showEndpoint() {
-    const el = document.getElementById('oc-endpoint');
-    if (!el) return;
-    const scheme = document.getElementById('oc-tls').checked ? 'wss' : 'ws';
-    const port = document.getElementById('oc-port').value || '443';
-    const path = document.getElementById('oc-path').value || '/';
-    el.textContent = scheme + '://' + (document.getElementById('oc-host').value || '(no host)') + ':' + port + path;
-  }
-
-  function testResultLines(r) {
-    const head = r.ok ? 'OK  ' : 'FAIL @ ' + r.stage;
-    const lines = [head + '  ' + (r.detail || '') + '  (' + r.ms + ' ms)', r.url];
-    if (r.firstFrame) lines.push('first frame: ' + r.firstFrame);
-    // The pairing instruction lives in its own box below (showApprove), not
-    // here: this block is a monospace log, that one is meant to be copied.
-    return lines.join('\n');
-  }
-
-  function showApprove(requestId) {
-    const box = document.getElementById('oc-approve');
-    const cmd = document.getElementById('oc-approve-cmd');
-    if (!box || !cmd) return;
-    cmd.textContent = 'openclaw devices approve ' + requestId;
-    box.style.display = 'flex';
-  }
-
-  // navigator.clipboard needs a secure context, and the page is served over
-  // plain http://<lan-ip>/ — so expect the fallback: select the text and let
-  // the user copy it by hand.
-  async function copyApprove() {
-    const cmd = document.getElementById('oc-approve-cmd');
-    if (!cmd) return;
-    const text = cmd.textContent;
-    try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(text);
-        showMessage(tr('copied'), false);
-        return;
-      }
-      throw new Error('clipboard unavailable');
-    } catch (e) {
-      try {
-        const range = document.createRange();
-        range.selectNodeContents(cmd);
-        const sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
-      } catch (e2) { /* selection is best-effort */ }
-      showMessage(tr('copyManual'), true);
-    }
-  }
-
-  async function testOpenClaw() {
-    const btn = document.getElementById('oc-test-btn');
-    const out = document.getElementById('oc-test-result');
-    const approve = document.getElementById('oc-approve');
-    const data = {
-      host: document.getElementById('oc-host').value.trim(),
-      port: parseInt(document.getElementById('oc-port').value, 10) || 443,
-      path: document.getElementById('oc-path').value.trim() || '/',
-      protocol: document.getElementById('oc-proto').value.trim(),
-      tls: document.getElementById('oc-tls').checked,
-      caPath: document.getElementById('oc-ca').value.trim()
-    };
-    // Same rule as Save: an empty token field means "use the stored one", so
-    // the Test button can try a corrected token without committing it first.
-    const ocToken = document.getElementById('oc-token').value;
-    if (ocToken) data.token = ocToken;
-    btn.disabled = true;
-    if (approve) approve.style.display = 'none';
-    out.style.display = 'block';
-    out.style.backgroundColor = 'rgba(88,166,255,.10)';
-    out.textContent = tr('testing') + ' ' + data.host + ':' + data.port + ' ...';
-    try {
-      const resp = await fetch('/api/openclaw/test', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(data),
-        // The probe is bounded at ~17 s server-side; give it room plus slack.
-        signal: AbortSignal.timeout(30000)
-      });
-      const r = await resp.json();
-      out.style.backgroundColor = r.ok ? 'rgba(63,185,80,.12)' : 'rgba(248,81,73,.12)';
-      out.style.color = r.ok ? 'var(--green)' : 'var(--red)';
-      out.textContent = testResultLines(r);
-      if (r.requestId) showApprove(r.requestId);
-      if (!r.ok) {
-        const hint = r.requestId ? tr('ocFailPairing') : '';
-        toast('OpenClaw: ' + r.stage + hint, false);
-      }
-    } catch (e) {
-      out.style.backgroundColor = 'rgba(248,81,73,.12)';
-      out.style.color = 'var(--red)';
-      out.textContent = tr('errPrefix') + e.message;
-      showMessage(tr('errPrefix') + e.message, true);
-    } finally {
-      btn.disabled = false;
-    }
-  }
-
-  // --- MiMo API key test ---------------------------------------------------
-  // One minimal request to /api/stt/test. The key typed into the form (not yet
-  // saved) is sent along, so a new key can be validated before committing it.
-  function sttResultLines(r) {
-    const lines = [];
-    let head;
-    if (r.ok) head = 'OK  ';
-    else if (r.accepted) head = 'HTTP ' + r.httpStatus + '  ';
-    else head = 'FAIL @ ' + r.stage + '  ';
-    lines.push(head + (r.detail || '') + '  (' + r.ms + ' ms)');
-    lines.push('status: ' + r.httpStatus + '  stage: ' + r.stage);
-    return lines.join('\n');
-  }
-
-  async function testSttKey() {
-    const btn = document.getElementById('stt-test-btn');
-    const out = document.getElementById('stt-test-result');
-    if (!btn || !out) return;
-
-    const data = {};
-    const url = document.getElementById('stt-url').value.trim();
-    if (url) data.sttUrl = url;
-    const key = document.getElementById('stt-key').value;
-    if (key) data.sttKey = key;
-
-    btn.disabled = true;
-    out.style.display = 'block';
-    out.style.backgroundColor = 'rgba(88,166,255,.10)';
-    out.style.color = 'var(--text)';
-    out.textContent = tr('sttTesting');
-    try {
-      const resp = await fetch('/api/stt/test', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(data),
-        // The probe is bounded at ~15 s server-side.
-        signal: AbortSignal.timeout(30000)
-      });
-      const r = await resp.json();
-      out.style.backgroundColor = r.accepted ? 'rgba(63,185,80,.12)' : 'rgba(248,81,73,.12)';
-      out.style.color = r.accepted ? 'var(--green)' : 'var(--red)';
-      out.textContent = sttResultLines(r);
-      showMessage(r.accepted ? tr('sttOk') : tr('sttFail'), !r.accepted);
-    } catch (e) {
-      out.style.backgroundColor = 'rgba(248,81,73,.12)';
-      out.style.color = 'var(--red)';
-      out.textContent = tr('errPrefix') + e.message;
-      showMessage(tr('errPrefix') + e.message, true);
-    } finally {
-      btn.disabled = false;
-    }
-  }
-
-  // AIWatch picks the scheme from the port (openclaw_client.c:1388): 443 and
-  // 18790 are WSS, 18789 and 80 are plaintext. Mirror it so the checkbox
-  // follows the port, while still leaving the user free to override it.
-  function autoTlsFromPort() {
-    const p = parseInt(document.getElementById('oc-port').value, 10);
-    const cb = document.getElementById('oc-tls');
-    if (p === 443 || p === 18790) cb.checked = true;
-    else if (p === 18789 || p === 80) cb.checked = false;
-    showEndpoint();
-  }
-
-  document.addEventListener('input', function(e) {
-    if (e.target && /^oc-/.test(e.target.id)) showEndpoint();
-  });
 
   async function loadCloudConfig() {
     try {
@@ -1684,30 +1389,9 @@ updateLang(true);
     }
   }
 
-  function saveOpenClaw() {
-    const data = {
-      host: document.getElementById('oc-host').value.trim(),
-      port: parseInt(document.getElementById('oc-port').value, 10) || 443,
-      path: document.getElementById('oc-path').value.trim() || '/',
-      protocol: document.getElementById('oc-proto').value.trim(),
-      tls: document.getElementById('oc-tls').checked,
-      caPath: document.getElementById('oc-ca').value.trim()
-    };
-    const token = document.getElementById('oc-token').value;
-    if (token) data.token = token;
-    postCloud(data, tr('ocSaved'));
-  }
-
-  function saveStt() {
-    const data = { sttUrl: document.getElementById('stt-url').value.trim() };
-    const key = document.getElementById('stt-key').value;
-    if (key) data.sttKey = key;
-    postCloud(data, tr('sttSaved'));
-  }
-
   function saveRelay() {
-    // The url is always sent (blank clears it and disables the relay); the
-    // token follows the secret rule — blank keeps the stored value.
+    // The url is always sent (blank clears it and disables every cloud
+    // feature); the token follows the secret rule — blank keeps the stored one.
     const data = {
       relayUrl: document.getElementById('relay-url').value.trim(),
       relayDeviceId: document.getElementById('relay-device-id').value.trim()

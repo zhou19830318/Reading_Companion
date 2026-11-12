@@ -6,23 +6,23 @@
 
 #include "ChatHistoryFormat.h"
 
-using OpenClaw::ChatHistoryFormat::buildLine;
-using OpenClaw::ChatHistoryFormat::DATE_PATH_SIZE;
-using OpenClaw::ChatHistoryFormat::dayPath;
-using OpenClaw::ChatHistoryFormat::daysFromCivil;
-using OpenClaw::ChatHistoryFormat::formatChatMessageTime;
-using OpenClaw::ChatHistoryFormat::formatStampForOffset;
-using OpenClaw::ChatHistoryFormat::groupDaysByName;
-using OpenClaw::ChatHistoryFormat::historyDayRowLabel;
-using OpenClaw::ChatHistoryFormat::HistoryGroup;
-using OpenClaw::ChatHistoryFormat::historyGroupLabel;
-using OpenClaw::ChatHistoryFormat::HistoryLevel;
-using OpenClaw::ChatHistoryFormat::isoWeekdayMon1;
-using OpenClaw::ChatHistoryFormat::parseDayDate;
-using OpenClaw::ChatHistoryFormat::parseIsoUtcSeconds;
-using OpenClaw::ChatHistoryFormat::parseLine;
-using OpenClaw::ChatHistoryFormat::STAMP_SIZE;
-using OpenClaw::ChatHistoryFormat::weekOfMonth;
+using ChatLog::ChatHistoryFormat::buildLine;
+using ChatLog::ChatHistoryFormat::DATE_PATH_SIZE;
+using ChatLog::ChatHistoryFormat::dayPath;
+using ChatLog::ChatHistoryFormat::daysFromCivil;
+using ChatLog::ChatHistoryFormat::formatChatMessageTime;
+using ChatLog::ChatHistoryFormat::formatStampForOffset;
+using ChatLog::ChatHistoryFormat::groupDaysByName;
+using ChatLog::ChatHistoryFormat::historyDayRowLabel;
+using ChatLog::ChatHistoryFormat::HistoryGroup;
+using ChatLog::ChatHistoryFormat::historyGroupLabel;
+using ChatLog::ChatHistoryFormat::HistoryLevel;
+using ChatLog::ChatHistoryFormat::isoWeekdayMon1;
+using ChatLog::ChatHistoryFormat::parseDayDate;
+using ChatLog::ChatHistoryFormat::parseIsoUtcSeconds;
+using ChatLog::ChatHistoryFormat::parseLine;
+using ChatLog::ChatHistoryFormat::STAMP_SIZE;
+using ChatLog::ChatHistoryFormat::weekOfMonth;
 
 namespace {
 
@@ -35,7 +35,7 @@ std::string roundTrip(const std::string& text, size_t cap = 512) {
   std::vector<char> buf(cap, '\0');
   const size_t n = buildLine(buf.data(), cap, 1234, true, text);
   if (n == 0) return "<0>";
-  OpenClaw::ChatHistoryFormat::Entry e{};
+  ChatLog::ChatHistoryFormat::Entry e{};
   char dst[512];
   size_t len = 0;
   if (!parseLine(std::string_view(buf.data(), n), e, dst, sizeof(dst), len)) return "<unparseable>";
@@ -52,7 +52,7 @@ TEST(ChatHistoryRelayTimestamp, ParsesUtcIsoAndAppliesOffset) {
   ASSERT_TRUE(parseIsoUtcSeconds(ts, strlen(ts), sec));
   EXPECT_EQ(sec, NOON_UTC_2026_09_27 / 1000);
   char clock[6];
-  ASSERT_TRUE(OpenClaw::ChatHistoryFormat::formatTimeForOffset(clock, sizeof(clock), sec * 1000, 48 + 32));
+  ASSERT_TRUE(ChatLog::ChatHistoryFormat::formatTimeForOffset(clock, sizeof(clock), sec * 1000, 48 + 32));
   EXPECT_STREQ(clock, "20:00");
 }
 
@@ -192,18 +192,18 @@ TEST(ChatHistoryLine, Utf8PassesThrough) {
 TEST(StrippableSymbolCodepoint, CoversEmojiRanges) {
   // Pin the ranges ChatReply::stripStrippableSymbols relies on. U+23F0 was
   // missing until 2026-09-29 — ⏰ reached the voice panel as a box.
-  EXPECT_TRUE(OpenClaw::ChatHistoryFormat::isStrippableSymbolCodepoint(0x23F0));   // ⏰
-  EXPECT_TRUE(OpenClaw::ChatHistoryFormat::isStrippableSymbolCodepoint(0x23F8));   // ⏸
-  EXPECT_TRUE(OpenClaw::ChatHistoryFormat::isStrippableSymbolCodepoint(0x1F634));  // 😴
-  EXPECT_TRUE(OpenClaw::ChatHistoryFormat::isStrippableSymbolCodepoint(0xFE0F));   // VS16
-  EXPECT_TRUE(OpenClaw::ChatHistoryFormat::isStrippableSymbolCodepoint(0x200D));   // ZWJ
+  EXPECT_TRUE(ChatLog::ChatHistoryFormat::isStrippableSymbolCodepoint(0x23F0));   // ⏰
+  EXPECT_TRUE(ChatLog::ChatHistoryFormat::isStrippableSymbolCodepoint(0x23F8));   // ⏸
+  EXPECT_TRUE(ChatLog::ChatHistoryFormat::isStrippableSymbolCodepoint(0x1F634));  // 😴
+  EXPECT_TRUE(ChatLog::ChatHistoryFormat::isStrippableSymbolCodepoint(0xFE0F));   // VS16
+  EXPECT_TRUE(ChatLog::ChatHistoryFormat::isStrippableSymbolCodepoint(0x200D));   // ZWJ
 }
 
 TEST(StrippableSymbolCodepoint, KeepsOrdinaryText) {
-  EXPECT_FALSE(OpenClaw::ChatHistoryFormat::isStrippableSymbolCodepoint(0x4E2D));  // 中
-  EXPECT_FALSE(OpenClaw::ChatHistoryFormat::isStrippableSymbolCodepoint(0x62));    // 'b'
-  EXPECT_FALSE(OpenClaw::ChatHistoryFormat::isStrippableSymbolCodepoint(0x20));    // ' '
-  EXPECT_FALSE(OpenClaw::ChatHistoryFormat::isStrippableSymbolCodepoint(0x3001));  // 、
+  EXPECT_FALSE(ChatLog::ChatHistoryFormat::isStrippableSymbolCodepoint(0x4E2D));  // 中
+  EXPECT_FALSE(ChatLog::ChatHistoryFormat::isStrippableSymbolCodepoint(0x62));    // 'b'
+  EXPECT_FALSE(ChatLog::ChatHistoryFormat::isStrippableSymbolCodepoint(0x20));    // ' '
+  EXPECT_FALSE(ChatLog::ChatHistoryFormat::isStrippableSymbolCodepoint(0x3001));  // 、
 }
 
 TEST(StripStrippableSymbols, RemovesEmojiInPlace) {
@@ -211,7 +211,7 @@ TEST(StripStrippableSymbols, RemovesEmojiInPlace) {
   const std::string src = "搞定！⏰ 明早 8:00";
   std::vector<char> buf(src.begin(), src.end());
   buf.push_back('\0');
-  EXPECT_EQ(OpenClaw::ChatHistoryFormat::stripStrippableSymbols(buf.data(), src.size()), 3u);
+  EXPECT_EQ(ChatLog::ChatHistoryFormat::stripStrippableSymbols(buf.data(), src.size()), 3u);
   EXPECT_STREQ(buf.data(), "搞定！ 明早 8:00");
 }
 
@@ -222,16 +222,16 @@ TEST(StripStrippableSymbols, KeepsBuiltLineShape) {
   const std::string src = "OCL1 a 1790467200123 \"hi⏰\"\n";
   std::vector<char> buf(src.begin(), src.end());
   buf.push_back('\0');
-  EXPECT_EQ(OpenClaw::ChatHistoryFormat::stripStrippableSymbols(buf.data(), src.size()), 3u);
+  EXPECT_EQ(ChatLog::ChatHistoryFormat::stripStrippableSymbols(buf.data(), src.size()), 3u);
   EXPECT_STREQ(buf.data(), "OCL1 a 1790467200123 \"hi\"\n");
 }
 
 TEST(StripStrippableSymbols, NothingFlaggedLeavesBufferAlone) {
   std::vector<char> buf{'a', 'b', '\0'};
-  EXPECT_EQ(OpenClaw::ChatHistoryFormat::stripStrippableSymbols(buf.data(), 2), 0u);
+  EXPECT_EQ(ChatLog::ChatHistoryFormat::stripStrippableSymbols(buf.data(), 2), 0u);
   EXPECT_STREQ(buf.data(), "ab");
-  EXPECT_EQ(OpenClaw::ChatHistoryFormat::stripStrippableSymbols(nullptr, 4), 0u);
-  EXPECT_EQ(OpenClaw::ChatHistoryFormat::stripStrippableSymbols(buf.data(), 0), 0u);
+  EXPECT_EQ(ChatLog::ChatHistoryFormat::stripStrippableSymbols(nullptr, 4), 0u);
+  EXPECT_EQ(ChatLog::ChatHistoryFormat::stripStrippableSymbols(buf.data(), 0), 0u);
 }
 
 TEST(ChatHistoryLine, QuotesAndBackslashEscaped) { EXPECT_EQ(roundTrip("say \"hi\" \\ ok"), "say \"hi\" \\ ok"); }
@@ -264,7 +264,7 @@ TEST(ChatHistoryLine, TruncationKeepsFileParseable) {
   std::vector<char> buf(48, '\0');
   const size_t n = buildLine(buf.data(), buf.size(), 7, true, text);
   ASSERT_GT(n, 0u);
-  OpenClaw::ChatHistoryFormat::Entry e{};
+  ChatLog::ChatHistoryFormat::Entry e{};
   char dst[256];
   size_t len = 0;
   ASSERT_TRUE(parseLine(std::string_view(buf.data(), n), e, dst, sizeof(dst), len));
@@ -291,7 +291,7 @@ TEST(ChatHistoryLine, TinyCapReturnsZero) {
 }
 
 TEST(ChatHistoryParse, RejectsGarbage) {
-  OpenClaw::ChatHistoryFormat::Entry e{};
+  ChatLog::ChatHistoryFormat::Entry e{};
   char dst[64];
   size_t len = 0;
   EXPECT_FALSE(parseLine("", e, dst, sizeof(dst), len));
@@ -306,7 +306,7 @@ TEST(ChatHistoryParse, RejectsGarbage) {
 }
 
 TEST(ChatHistoryParse, UnknownEscapesRejected) {
-  OpenClaw::ChatHistoryFormat::Entry e{};
+  ChatLog::ChatHistoryFormat::Entry e{};
   char dst[64];
   size_t len = 0;
   EXPECT_FALSE(parseLine("OCL1 u 123 \"bad \\q escape\"", e, dst, sizeof(dst), len));
@@ -314,7 +314,7 @@ TEST(ChatHistoryParse, UnknownEscapesRejected) {
 }
 
 TEST(ChatHistoryParse, SurrogatePairDecodes) {
-  OpenClaw::ChatHistoryFormat::Entry e{};
+  ChatLog::ChatHistoryFormat::Entry e{};
   char dst[64];
   size_t len = 0;
   // U+1F604 = surrogate pair D83D DE04 -> F0 9F 98 84.
@@ -330,11 +330,11 @@ namespace {
 // does (contiguous textOff, NUL after each text).
 struct SummaryFixture {
   std::vector<char> pool;
-  std::vector<OpenClaw::ChatHistoryFormat::Entry> entries;
+  std::vector<ChatLog::ChatHistoryFormat::Entry> entries;
 
   explicit SummaryFixture(const std::vector<std::pair<bool, std::string>>& rows) {
     for (const auto& row : rows) {
-      OpenClaw::ChatHistoryFormat::Entry e{};
+      ChatLog::ChatHistoryFormat::Entry e{};
       e.textOff = static_cast<uint32_t>(pool.size());
       e.textLen = static_cast<uint16_t>(row.second.size());
       e.isUser = row.first;
@@ -350,8 +350,8 @@ struct SummaryFixture {
 TEST(SummaryPrompt, KeepsEveryEntryWhenItFits) {
   const SummaryFixture fx({{true, "你好"}, {false, "回答"}});
   char dst[128];
-  ASSERT_TRUE(OpenClaw::ChatHistoryFormat::buildSummaryPrompt(dst, sizeof(dst), fx.entries.data(), fx.entries.size(),
-                                                              fx.pool.data(), "Sum", "U:", "A:"));
+  ASSERT_TRUE(ChatLog::ChatHistoryFormat::buildSummaryPrompt(dst, sizeof(dst), fx.entries.data(), fx.entries.size(),
+                                                             fx.pool.data(), "Sum", "U:", "A:"));
   EXPECT_EQ(std::string(dst), "Sum\nU: 你好\nA: 回答\n");
 }
 
@@ -359,8 +359,8 @@ TEST(SummaryPrompt, OverflowDropsOldestKeepsNewestInOrder) {
   // head "IN\n" = 3, cap 20 -> avail 16 = exactly two "X: 0000\n" lines (8).
   const SummaryFixture fx({{true, "0000"}, {false, "1111"}, {true, "2222"}});
   char dst[20];
-  ASSERT_TRUE(OpenClaw::ChatHistoryFormat::buildSummaryPrompt(dst, sizeof(dst), fx.entries.data(), fx.entries.size(),
-                                                              fx.pool.data(), "IN", "U:", "A:"));
+  ASSERT_TRUE(ChatLog::ChatHistoryFormat::buildSummaryPrompt(dst, sizeof(dst), fx.entries.data(), fx.entries.size(),
+                                                             fx.pool.data(), "IN", "U:", "A:"));
   EXPECT_EQ(std::string(dst), "IN\nA: 1111\nU: 2222\n");
   EXPECT_EQ(strlen(dst), sizeof(dst) - 1);  // fills the buffer minus its NUL
 }
@@ -370,8 +370,8 @@ TEST(SummaryPrompt, OldestEntryCutAtUtf8Boundary) {
   // mid-character cut to the one whole 你 (3 bytes) that fits.
   const SummaryFixture fx({{true, "你你你你你你你你你你"}});
   char dst[11];
-  ASSERT_TRUE(OpenClaw::ChatHistoryFormat::buildSummaryPrompt(dst, sizeof(dst), fx.entries.data(), fx.entries.size(),
-                                                              fx.pool.data(), "I", "U:", "A:"));
+  ASSERT_TRUE(ChatLog::ChatHistoryFormat::buildSummaryPrompt(dst, sizeof(dst), fx.entries.data(), fx.entries.size(),
+                                                             fx.pool.data(), "I", "U:", "A:"));
   EXPECT_EQ(std::string(dst), "I\nU: 你\n");
   // Whole prompt is valid UTF-8 (nothing torn).
   size_t i = 0;
@@ -387,16 +387,15 @@ TEST(SummaryPrompt, OldestEntryCutAtUtf8Boundary) {
 TEST(SummaryPrompt, RejectsEmptyAndTooSmallInputs) {
   const SummaryFixture fx({{true, "x"}});
   char dst[64];
-  EXPECT_FALSE(OpenClaw::ChatHistoryFormat::buildSummaryPrompt(dst, sizeof(dst), fx.entries.data(), 0, fx.pool.data(),
-                                                               "I", "U:", "A:"));
-  EXPECT_FALSE(OpenClaw::ChatHistoryFormat::buildSummaryPrompt(dst, sizeof(dst), fx.entries.data(), fx.entries.size(),
-                                                               fx.pool.data(), "", "U:", "A:"));
+  EXPECT_FALSE(ChatLog::ChatHistoryFormat::buildSummaryPrompt(dst, sizeof(dst), fx.entries.data(), 0, fx.pool.data(),
+                                                              "I", "U:", "A:"));
+  EXPECT_FALSE(ChatLog::ChatHistoryFormat::buildSummaryPrompt(dst, sizeof(dst), fx.entries.data(), fx.entries.size(),
+                                                              fx.pool.data(), "", "U:", "A:"));
   char tiny[8];
-  EXPECT_FALSE(OpenClaw::ChatHistoryFormat::buildSummaryPrompt(tiny, sizeof(tiny), fx.entries.data(), fx.entries.size(),
-                                                               fx.pool.data(), "a much longer instruction",
-                                                               "U:", "A:"));
-  EXPECT_FALSE(OpenClaw::ChatHistoryFormat::buildSummaryPrompt(nullptr, 64, fx.entries.data(), fx.entries.size(),
-                                                               fx.pool.data(), "I", "U:", "A:"));
+  EXPECT_FALSE(ChatLog::ChatHistoryFormat::buildSummaryPrompt(tiny, sizeof(tiny), fx.entries.data(), fx.entries.size(),
+                                                              fx.pool.data(), "a much longer instruction", "U:", "A:"));
+  EXPECT_FALSE(ChatLog::ChatHistoryFormat::buildSummaryPrompt(nullptr, 64, fx.entries.data(), fx.entries.size(),
+                                                              fx.pool.data(), "I", "U:", "A:"));
 }
 
 // ── history hierarchy (year / month / week / day) ────────────────────────────

@@ -36,8 +36,8 @@ class CrossPointWebServerActivity final : public Activity {
 
   // Set only when THIS activity switches the radio on (WiFi.mode(STA/AP)).
   // onExit() decides the teardown + heap-defrag reboot from this, not from the
-  // global WiFi state: Voice deliberately leaves the radio up for the workbench
-  // cards, so keying off WiFi.getMode() made a plain Back from the mode picker
+  // global WiFi state: Voice deliberately leaves the radio up for its relay
+  // rounds, so keying off WiFi.getMode() made a plain Back from the mode picker
   // reboot the device — e-ink holds the old frame, so it read as "stuck".
   bool wifiActivated = false;
 
